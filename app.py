@@ -59,7 +59,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # เริ่มใช้งาน Gemini AI
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
+    model_name="gemini-2.5-flash",
     system_instruction=(
         "คุณคือผู้เชี่ยวชาญด้านอุทกภัยและกู้ภัย (FLOODCARE AI) ประจำประเทศไทย "
         "คอยให้ข้อมูล คำแนะนำในการเอาชีวิตรอด และการรับมืออุทกภัยอย่างถูกต้อง "
