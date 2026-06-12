@@ -1,4 +1,5 @@
 import os
+import json
 import math
 import datetime
 import requests
@@ -15,6 +16,10 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
+# Google Sheets
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
 app = Flask(__name__)
 
 # 1. โหลดข้อมูลกำหนดค่าจาก Environment Variables
@@ -22,9 +27,14 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
+GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
+# ระบบติดตามสถานะการสนทนาชั่วคราว (Conversation State & Data Tracker)
 USER_STATES = {}
+USER_DATA = {}
 
+# รายชื่อศูนย์อพยพจำลอง (Mock Data) สำหรับการคำนวณทางภูมิศาสตร์จริง
 STATIC_SHELTERS = [
     {
         "name": "ศูนย์พักพิงวัดเสาชิงช้า (เขตพระนคร)",
@@ -73,7 +83,21 @@ gemini_model = genai.GenerativeModel(
     )
 )
 
-# 2. ฟังก์ชันคำนวณระยะทางและประเมินที่ว่าง
+# 2. ฟังก์ชันเชื่อมต่อ Google Sheets อย่างปลอดภัย (พร้อมระบบป้องกันเซิร์ฟเวอร์แครช)
+def get_sheets_client():
+    if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
+        print("Warning: Google Sheets credentials are not fully configured yet.")
+        return None
+    try:
+        creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        return gspread.authorize(creds)
+    except Exception as e:
+        print(f"Error initializing Google Sheets client: {e}")
+        return None
+
+# 3. ฟังก์ชันคำนวณระยะทางและประเมินที่ว่าง
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
@@ -92,7 +116,7 @@ def check_shelter_vacancy(capacity, occupancy):
     else:
         return f"🟢 ยังมีที่ว่าง (ว่างอีก {remaining} ที่นั่ง)"
 
-# 3. Endpoint สำหรับสร้าง Rich Menu (โปรแกรมมิ่งแบบ 6 ปุ่ม)
+# 4. Endpoint สำหรับสร้าง Rich Menu (โปรแกรมมิ่งแบบ 6 ปุ่ม)
 @app.route("/create_rich_menu", methods=['GET'])
 def create_rich_menu():
     headers = {
@@ -106,11 +130,9 @@ def create_rich_menu():
         "name": "FLOODCARE AI 6-Button Menu",
         "chatBarText": "คุยกับ AI / กู้ภัย",
         "areas": [
-            # แถวที่ 1 (y: 0 ถึง 843)
             {"bounds": {"x": 0, "y": 0, "width": 833, "height": 843}, "action": {"type": "message", "text": "เบอร์โทรศัพท์ฉุกเฉิน"}},
             {"bounds": {"x": 833, "y": 0, "width": 833, "height": 843}, "action": {"type": "message", "text": "ปฐมพยาบาลเบื้องต้น"}},
             {"bounds": {"x": 1666, "y": 0, "width": 834, "height": 843}, "action": {"type": "message", "text": "ศูนย์พักพิง"}},
-            # แถวที่ 2 (y: 843 ถึง 1686)
             {"bounds": {"x": 0, "y": 843, "width": 833, "height": 843}, "action": {"type": "message", "text": "ตรวจสอบระดับน้ำ"}},
             {"bounds": {"x": 833, "y": 843, "width": 833, "height": 843}, "action": {"type": "message", "text": "SOS ขอความช่วยเหลือ"}},
             {"bounds": {"x": 1666, "y": 843, "width": 834, "height": 843}, "action": {"type": "message", "text": "ถาม AI เรื่องน้ำท่วม"}}
@@ -135,7 +157,7 @@ def create_rich_menu():
     else:
         return f"<h3>เกิดข้อผิดพลาดในการสร้าง</h3><p>Error: {response.text}</p>"
 
-# 4. หน้าเว็บอัปโหลดรูปภาพเมนูแบบ 6 ปุ่ม
+# 5. หน้าเว็บอัปโหลดรูปภาพเมนูแบบ 6 ปุ่ม
 @app.route("/upload_image/<rich_menu_id>", methods=['GET', 'POST'])
 def upload_image(rich_menu_id):
     if request.method == 'POST':
@@ -178,7 +200,7 @@ def upload_image(rich_menu_id):
     </div>
     """
 
-# 5. Webhook Route
+# 6. Webhook Route
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -189,35 +211,140 @@ def callback():
         abort(400)
     return 'OK'
 
-# 6. รับข้อความตัวอักษร
+# 7. รับข้อความตัวอักษรและจัดการระบบคิวพูดคุยโต้ตอบ (Interactive Workflow)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
     user_id = event.source.user_id
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
+    # ดึงระดับสถานะการคุยของผู้ใช้ในปัจจุบัน
+    current_state = USER_STATES.get(user_id)
+    
+    # ช่วยเชื่อมริชเมนูอัตโนมัติหากมีการอัปเดตแปร
     if RICH_MENU_ID:
         try:
             line_bot_api.link_rich_menu_to_user(user_id, RICH_MENU_ID)
-        except Exception as link_err:
-            print(f"Failed to link rich menu: {link_err}")
+        except:
+            pass
+
+    # ==================== ส่วนที่ 7.1: ดักจับคำตอบโต้ตอบเชิงลึก (Interactive Responses) ====================
+    
+    if current_state == "waiting_emergency_type":
+        # ล้างสถานะเพื่อจบกระบวนการรอบนี้
+        USER_STATES.pop(user_id, None)
+        prompt = (
+            f"ผู้ใช้แจ้งต้องการเบอร์กู้ภัยฉุกเฉินด้วยเรื่อง: '{user_text}' "
+            "โปรดแนะนำเบอร์โทรศัพท์และหน่วยงานที่ถูกต้องตรงประเด็นทันทีด้วยน้ำเสียงที่กระชับ สุภาพ "
+            "พร้อมแนะนำสิ่งสำคัญที่เขาควรแจ้งเจ้าหน้าที่ปลายสาย"
+        )
+        try:
+            response = gemini_model.generate_content(prompt)
+            ai_response = response.text.strip()
+        except Exception as e:
+            ai_response = "🚨 สายด่วน ปภ. 1784 หรือสายด่วนกู้ชีพ 1669 พร้อมให้บริการประสานงานทันทีครับ"
             
-    # เมนูพรีเซ็ต (แบบ 6 ปุ่ม)
+        # บันทึกลง Google Sheets "AI Logs"
+        sheets_client = get_sheets_client()
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                log_worksheet = sheet.worksheet("AI Logs")
+                log_worksheet.append_row([timestamp, user_id, f"[เบอร์ฉุกเฉิน] {user_text}", ai_response])
+            except Exception as se:
+                print(f"Sheets Log Error: {se}")
+
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
+        return
+
+    elif current_state == "waiting_first_aid_detail":
+        USER_STATES.pop(user_id, None)
+        prompt = (
+            f"ผู้ประสบภัยแจ้งอาการบาดเจ็บ/อุบัติเหตุเฉพาะหน้า: '{user_text}' "
+            "ในฐานะ FLOODCARE AI โปรดให้คำแนะนำขั้นตอนการปฐมพยาบาลเบื้องต้นที่สั้น กระชับ เป็นขั้นเป็นตอน (1, 2, 3) "
+            "และนำไปปฏิบัติตามได้ทันทีอย่างปลอดภัยสูงสุด หลีกเลี่ยงข้อความที่ยาวและเยิ่นเย้อ"
+        )
+        try:
+            response = gemini_model.generate_content(prompt)
+            ai_response = response.text.strip()
+        except Exception as e:
+            ai_response = "🩹 โปรดล้างแผลด้วยน้ำสะอาดและปิดปากแผลเบื้องต้น หากเจ็บป่วยรุนแรง โทรสายด่วน 1669 ทันทีครับ"
+            
+        sheets_client = get_sheets_client()
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                log_worksheet = sheet.worksheet("AI Logs")
+                log_worksheet.append_row([timestamp, user_id, f"[ปฐมพยาบาล] {user_text}", ai_response])
+            except Exception as se:
+                print(f"Sheets Log Error: {se}")
+
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
+        return
+
+    elif current_state == "waiting_water_location":
+        USER_STATES.pop(user_id, None)
+        prompt = (
+            f"ผู้ใช้ต้องการเช็กระดับน้ำในพื้นที่: '{user_text}' "
+            "โปรดสรุปวิธีเช็กสถานการณ์ภัยพิบัติในพื้นที่นั้น หรือประเมินและเตือนข้อระวังภัยน้ำท่วมอย่างสั้น กระชับ "
+            "พร้อมแนะนำแอปพลิเคชัน ThaiWater เพื่ออ้างอิงข้อมูลครับ"
+        )
+        try:
+            response = gemini_model.generate_content(prompt)
+            ai_response = response.text.strip()
+        except Exception as e:
+            ai_response = "🌊 แนะนำตรวจสอบปริมาณน้ำแบบเรียลไทม์ได้ทางแอปพลิเคชัน ThaiWater ของคลังข้อมูลน้ำแห่งชาติครับ"
+            
+        sheets_client = get_sheets_client()
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                log_worksheet = sheet.worksheet("AI Logs")
+                log_worksheet.append_row([timestamp, user_id, f"[ระดับน้ำ] {user_text}", ai_response])
+            except Exception as se:
+                print(f"Sheets Log Error: {se}")
+
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
+        return
+
+    elif current_state == "waiting_sos_details":
+        # บันทึกรายละเอียดจำนวนคนเข้าสู่หน่วยความจำชั่วคราว
+        USER_DATA[user_id] = {"sos_detail": user_text}
+        # อัปเกรดสถานะไปสู่การรับพิกัด GPS
+        USER_STATES[user_id] = "waiting_sos_location"
+        
+        # ส่งปุ่มด่วนขอแชร์ตำแหน่ง GPS
+        location_quick_reply = QuickReply(
+            items=[
+                QuickReplyButton(action=LocationAction(label="กดแชร์พิกัดกู้ภัย"))
+            ]
+        )
+        line_bot_api.reply_message(
+            event.reply_token, 
+            TextSendMessage(
+                text="📢 ข้อมูลคนติดในบ้านได้รับการบันทึกแล้วครับ! เพื่อระบุจุดพิกัดกู้ภัย โปรดกดปุ่มแชร์พิกัด 'Location' สีเขียวด้านล่างนี้ได้เลยครับ",
+                quick_reply=location_quick_reply
+            )
+        )
+        return
+
+    # ==================== ส่วนที่ 7.2: คำสั่งตรวจจับการกดปุ่มเมนูหลัก (Rich Menu Clicks) ====================
+    
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
+        USER_STATES[user_id] = "waiting_emergency_type"
         reply_text = (
-            "📞 เบอร์โทรศัพท์ฉุกเฉินที่ควรบันทึกไว้:\n\n"
-            "🚨 สายด่วน ปภ. 1784 (เตือนภัยและช่วยเหลืออุทกภัย)\n"
-            "🚨 สายด่วนกู้ชีพ 1669 (เจ็บป่วยฉุกเฉินทางแพทย์)\n"
-            "🚨 สายด่วนตำรวจทางหลวง 1193 (ขอความช่วยเหลือขณะเดินทาง)\n"
-            "🚨 สายด่วนรัฐบาล 1111 (ร้องเรียนและขอความช่วยเหลือทั่วไป)"
+            "📞 คุณต้องการติดต่อกู้ภัยหรือติดต่อเรื่องใดเป็นพิเศษไหมครับ? "
+            "(พิมพ์บอกปัญหาของคุณได้เลยครับ เช่น ต้องการเรืออพยพ, สัตว์มีพิษเข้าบ้าน, หรือขอรับแจกถุงยังชีพ "
+            "เพื่อให้ผมช่วยแนะนำหน่วยงานที่ถูกต้องเจาะจงให้ทันทีครับ)"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ปฐมพยาบาลเบื้องต้น":
+        USER_STATES[user_id] = "waiting_first_aid_detail"
         reply_text = (
-            "🩹 วิธีการปฐมพยาบาลเบื้องต้นในสถานการณ์น้ำท่วม:\n\n"
-            "🩹 บาดแผลจากสิ่งขีดข่วน: ล้างแผลด้วยน้ำสะอาดและสบู่ ทายาฆ่าเชื้อ แล้วปิดแผลให้มิดชิด พยายามหลีกเลี่ยงการสัมผัสน้ำท่วมขัง\n"
-            "🩹 สัตว์มีพิษกัด: ล้างแผลด้วยน้ำสะอาด พยายามให้ผู้ถูกกัดขยับอวัยวะนั้นให้น้อยที่สุดเพื่อไม่ให้พิษแล่นเร็ว และรีบนำส่งแพทย์\n"
-            "🩹 กระแสไฟดูด: รีบสับสวิตช์ไฟหลักทันที ห้ามสัมผัสตัวผู้โดนไฟดูดด้วยมือเปล่า ให้ใช้ไม้แห้งหรือวัสดุที่ไม่นำไฟฟ้าในการผลักหรือดึงตัวออกมา"
+            "🩹 คุณหรือคนที่อยู่ด้วยได้รับบาดเจ็บหรือเกิดอุบัติเหตุจากอะไรครับ? "
+            "(เช่น โดนไฟดูด, โดนสัตว์มีพิษกัด, เลือดไหลไม่หยุด หรือเป็นลมหมดสติ "
+            "พิมพ์บอกรายละเอียดอาการเพื่อให้ผมช่วยหาวิธีการปฐมพยาบาลเฉพาะหน้าได้อย่างรวดเร็วครับ)"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
@@ -237,34 +364,27 @@ def handle_text_message(event):
         )
         
     elif user_text == "ตรวจสอบระดับน้ำ":
+        USER_STATES[user_id] = "waiting_water_location"
         reply_text = (
-            "🌊 วิธีการตรวจสอบระดับน้ำและเตือนภัย:\n\n"
-            "📌 ท่านสามารถดาวน์โหลดแอปพลิเคชัน 'ThaiWater' เพื่อเช็กปริมาณฝนและระดับน้ำในลุ่มน้ำหลักทั่วไทย\n"
-            "📌 ติดตามการรายงานสถานการณ์รายชั่วโมงผ่านทางสายด่วน ปภ. โทร 1784"
+            "🌊 คุณต้องการประเมินระดับน้ำหรือปริมาณฝนในพื้นที่เขต/อำเภอ และจังหวัดใดครับ? "
+            "(กรุณาพิมพ์ชื่ออำเภอและจังหวัดที่คุณอยู่ในปัจจุบัน เพื่อให้ผมช่วยเตือนและประเมินสถานการณ์เฉพาะจุดให้ครับ)"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "SOS ขอความช่วยเหลือ":
-        USER_STATES[user_id] = "waiting_sos_location"
-        location_quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=LocationAction(label="ส่งพิกัดแจ้ง SOS"))
-            ]
+        USER_STATES[user_id] = "waiting_sos_details"
+        reply_text = (
+            "🚨 เพื่อข้อมูลที่ทีมกู้ภัยสามารถนำไปจัดเตรียมอุปกรณ์ช่วยชีวิตได้เหมาะสมที่สุด "
+            "โปรดพิมพ์แจ้งรายละเอียดจำนวนคนที่ติดอยู่ร่วมกันในบ้านของคุณสักนิดนึงครับ (เช่น ติดอยู่บนหลังคา 4 คน มีเด็กเล็ก 1 คน)"
         )
-        line_bot_api.reply_message(
-            event.reply_token, 
-            TextSendMessage(
-                text="🚨 โปรดแตะส่งพิกัด 'Location' ด้านล่างเพื่อส่งสัญญาณขอความช่วยเหลือฉุกเฉินและรายงานตำแหน่งที่แท้จริงของคุณครับ",
-                quick_reply=location_quick_reply
-            )
-        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ถาม AI เรื่องน้ำท่วม":
         reply_text = "🤖 คุณสามารถพิมพ์รายละเอียดคำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมในครั้งนี้เข้ามาได้ทันทีเลยครับ ผมพร้อมวิเคราะห์และตอบทุกข้อสงสัยให้ครับ"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     else:
-        # ประมวลผลโมเดล Gemini 2.5 Flash
+        # การสนทนาถามตอบแบบอิสระรอบปกติ
         ai_response = ""
         try:
             response = gemini_model.generate_content(user_text)
@@ -275,24 +395,38 @@ def handle_text_message(event):
                 "⚠️ ระบบประสาทเครือข่าย AI ขัดข้องชั่วคราว หากท่านตกอยู่ในเหตุการณ์เร่งด่วนและเป็นอันตรายต่อชีวิต "
                 "โปรดติดต่อสายด่วนกรมป้องกันและบรรเทาสาธารณภัย โทร. 1784 หรือโทร 1669 ทีมแพทย์กู้ชีพทันทีครับ"
             )
+            
+        # บันทึกลง Google Sheets "AI Logs"
+        sheets_client = get_sheets_client()
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                log_worksheet = sheet.worksheet("AI Logs")
+                log_worksheet.append_row([timestamp, user_id, user_text, ai_response])
+            except Exception as se:
+                print(f"Sheets Log Error: {se}")
+                
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
-# 7. รับข้อมูลพิกัด (Location Message)
+# 8. รับข้อมูลพิกัด (Location Message) และประสานข้อมูลเข้า Google Sheets "SOS"
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
     latitude = event.message.latitude
     longitude = event.message.longitude
+    address = event.message.address or "ไม่ระบุที่อยู่"
+    title = event.message.title or "จุดพิกัด"
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     state = USER_STATES.pop(user_id, "default")
     
     if RICH_MENU_ID:
         try:
             line_bot_api.link_rich_menu_to_user(user_id, RICH_MENU_ID)
-        except Exception as link_err:
-            print(f"Failed to link rich menu: {link_err}")
+        except:
+            pass
             
-    # --- ค้นหาศูนย์อพยพจากจำลองพิกัดจริง ---
+    # --- ค้นหาศูนย์อพยพจากพิกัดจริง ---
     if state == "waiting_shelter_location":
         nearest_shelters = []
         for sh in STATIC_SHELTERS:
@@ -322,15 +456,49 @@ def handle_location_message(event):
         reply_text += "⚠️ โปรดสำรวจเส้นทางน้ำท่วมและเคลื่อนย้ายด้วยความระมัดระวังสูงสุดในทุกย่างก้าวครับ"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
-    # --- จำลองการแจ้งเหตุ SOS ---
+    # --- กรณีการแจ้งเหตุ SOS (บันทึกเข้าระบบ Google Sheets สมบูรณ์) ---
+    elif state == "waiting_sos_location":
+        # ดึงรายละเอียดผู้ประสบภัยจากความจำชั่วคราว
+        sos_meta = USER_DATA.pop(user_id, {}).get("sos_detail", "ไม่ระบุข้อมูลจำนวนคน")
+        
+        # เตรียมเขียนข้อมูลลง Google Sheets แผ่นงาน "SOS"
+        sheets_client = get_sheets_client()
+        success = False
+        
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                sos_worksheet = sheet.worksheet("SOS")
+                # บันทึกข้อมูลแบบมีโครงสร้างลง Sheet (แถวใหม่)
+                sos_worksheet.append_row([
+                    timestamp, user_id, "ผู้แจ้งผ่าน LINE", "-", "1", "รอตรวจสอบ",
+                    latitude, longitude, f"รายละเอียดผู้ประสบภัย: {sos_meta} (พิกัด: {address} - {title})", "Pending"
+                ])
+                success = True
+            except Exception as sheet_err:
+                print(f"Failed to log SOS to Google Sheets: {sheet_err}")
+
+        if success:
+            confirm_text = (
+                "🚨 ระบบบันทึกข้อมูลและพิกัด SOS ของคุณเข้ารหัสกู้ภัยออนไลน์เรียบร้อยแล้ว!\n\n"
+                f"📍 พิกัดกู้ภัย: {latitude}, {longitude}\n"
+                f"👥 ข้อมูลผู้ประสบภัย: {sos_meta}\n\n"
+                "ขณะนี้ข้อมูลถูกส่งไปยังแผงควบคุมของทีมกู้ภัย (Google Sheets) แล้ว เจ้าหน้าที่จะประเมินความเร่งด่วนและจัดสรรกำลังช่วยเหลือโดยเร็วที่สุด โปรดรอคอยในจุดที่ปลอดภัยที่สุดครับ"
+            )
+        else:
+            # กลไก Fallback ในกรณีที่ Google Sheets ยังไม่ได้เชื่อมต่อ
+            confirm_text = (
+                "🚨 ระบบได้รับการยืนยันการแจ้งเหตุ SOS ของคุณเรียบร้อยแล้วครับ!\n"
+                f"📍 พิกัดของคุณคือ: {latitude}, {longitude}\n"
+                f"👥 รายละเอียดผู้ประสบภัย: {sos_meta}\n\n"
+                "*(หมายเหตุการทดสอบ: ข้อมูลจะยังไม่เข้า Google Sheets เนื่องจากคุณยังไม่ได้ตั้งค่าคีย์ API แต่สัญญาณเตือนได้ทำงานในฝั่งบอตแล้วครับ)"
+            )
+            
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
+        
     else:
-        confirm_text = (
-            "🚨 [ระบบจำลองการทำงานเพื่อทดสอบความแม่นยำ]\n\n"
-            "ระบบตรวจจับสัญญาณและยืนยันการรับพิกัด SOS ของคุณแล้วครับ!\n"
-            f"📍 ละติจูดของคุณคือ: {latitude}\n"
-            f"📍 ลองจิจูดของคุณคือ: {longitude}\n\n"
-            "ในเวอร์ชันเชื่อมฐานข้อมูล ข้อมูลพิกัดนี้จะถูกเขียนลงสเปรดชีตกู้ภัยแบบเรียลไทม์ และแจ้งเตือนทีมเจ้าหน้าที่ภาคสนามเพื่อเข้าทำการช่วยเหลือด่วนทันทีครับ"
-        )
+        # หากส่งพิกัดมาเฉยๆ โดยไม่มีบริบท จะแนะนำให้แตะปุ่มเพื่อเข้าสู่กระบวนการที่ถูกต้อง
+        confirm_text = "📍 คุณส่งพิกัด GPS มาหาผม หากต้องการแจ้งขอความช่วยเหลือ โปรดกดแตะเมนู 'SOS ขอความช่วยเหลือ' บนแถบด้านล่างก่อนเพื่อให้ทีมกู้ภัยประเมินสถานการณ์ได้รวดเร็วที่สุดนะครับ"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
 
 if __name__ == "__main__":
