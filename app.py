@@ -1,5 +1,4 @@
 import os
-import json
 import math
 import datetime
 from flask import Flask, request, abort
@@ -15,22 +14,43 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
 app = Flask(__name__)
 
 # 1. โหลดข้อมูลกำหนดค่าจาก Environment Variables
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
-GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
-# เก็บสถานะผู้ใช้ชั่วคราวในหน่วยความจำ (In-memory State Tracker)
-# ใช้ระบุว่าพิกัดที่ส่งมาเป็น "แจ้ง SOS" หรือ "หาศูนย์อพยพ"
+# เก็บสถานะผู้ใช้ชั่วคราวในหน่วยความจำ
 USER_STATES = {}
+
+# รายชื่อศูนย์อพยพจำลอง (Mock Data) สำหรับคำนวณระยะทางจริงจากพิกัดผู้ใช้
+STATIC_SHELTERS = [
+    {
+        "name": "ศูนย์พักพิงวัดเสาชิงช้า (เขตพระนคร)",
+        "lat": 13.7523,
+        "lon": 100.5015,
+        "capacity": 200,
+        "occupancy": 85,
+        "contact": "02-123-4567"
+    },
+    {
+        "name": "ศูนย์พักพิงโรงเรียนวัดสุทัศน์ (เขตพระนคร)",
+        "lat": 13.7511,
+        "lon": 100.5002,
+        "capacity": 150,
+        "occupancy": 145,
+        "contact": "02-987-6543"
+    },
+    {
+        "name": "ศูนย์พักพิงโรงเรียนสามเสนวิทยาลัย (เขตพญาไท)",
+        "lat": 13.7820,
+        "lon": 100.5340,
+        "capacity": 300,
+        "occupancy": 50,
+        "contact": "02-555-5555"
+    }
+]
 
 # เริ่มใช้งาน LINE API
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
@@ -48,10 +68,9 @@ gemini_model = genai.GenerativeModel(
     )
 )
 
-# 2. ฟังก์ชันคำนวณระยะทางและตรวจสอบความจุศูนย์พักพิง
+# 2. ฟังก์ชันคำนวณระยะทางและตรวจสอบความจุ
 def calculate_distance(lat1, lon1, lat2, lon2):
-    # คำนวณระยะทางระหว่างพิกัด 2 จุดบนโลก (กิโลเมตร) ด้วย Haversine Formula
-    R = 6371.0
+    R = 6371.0  # รัศมีของโลก (กิโลเมตร)
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = (math.sin(dlat / 2) ** 2 + 
@@ -60,34 +79,15 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 def check_shelter_vacancy(capacity, occupancy):
-    try:
-        cap = int(capacity)
-        occ = int(occupancy)
-    except (ValueError, TypeError):
-        cap = 100
-        occ = 0
-        
-    remaining = cap - occ
-    
+    remaining = capacity - occupancy
     if remaining <= 0:
         return "🔴 เต็มแล้ว (No Vacancy) - โปรดเลี่ยงไปจุดอื่น"
-    elif occ >= (cap * 0.8):
+    elif occupancy >= (capacity * 0.8):
         return f"🟡 ใกล้เต็ม (ว่างอีก {remaining} ที่นั่ง)"
     else:
         return f"🟢 ยังมีที่ว่าง (ว่างอีก {remaining} ที่นั่ง)"
 
-# 3. ฟังก์ชันเชื่อมต่อ Google Sheets อย่างปลอดภัย
-def get_sheets_client():
-    try:
-        creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        return gspread.authorize(creds)
-    except Exception as e:
-        print(f"Error initializing Google Sheets client: {e}")
-        return None
-
-# 4. Webhook Route
+# 3. Webhook Route
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -98,14 +98,12 @@ def callback():
         abort(400)
     return 'OK'
 
-# 5. ฟังก์ชันรับข้อความตัวอักษร (Text Message)
+# 4. รับข้อความตัวอักษร (Text Message)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
     user_id = event.source.user_id
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # 9 ฟังก์ชันหลักจาก Rich Menu
     if user_text == "เตรียมตัวก่อนน้ำท่วม":
         reply_text = (
             "📌 การเตรียมตัวก่อนน้ำท่วม:\n"
@@ -159,15 +157,10 @@ def handle_text_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ศูนย์พักพิง":
-        # ตั้งค่าสถานะว่าผู้ใช้กำลังค้นหาศูนย์พักพิง
         USER_STATES[user_id] = "waiting_shelter_location"
-        
-        # ส่งปุ่มขอพิกัดเพื่อหาศูนย์พักพิง
         location_quick_reply = QuickReply(
             items=[
-                QuickReplyButton(
-                    action=LocationAction(label="ส่งพิกัดหาศูนย์พักพิง")
-                )
+                QuickReplyButton(action=LocationAction(label="ส่งพิกัดหาศูนย์พักพิง"))
             ]
         )
         line_bot_api.reply_message(
@@ -186,21 +179,16 @@ def handle_text_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "SOS ขอความช่วยเหลือ":
-        # ตั้งค่าสถานะว่าผู้ใช้กำลังแจ้งเหตุฉุกเฉิน
         USER_STATES[user_id] = "waiting_sos_location"
-        
-        # ส่งปุ่มขอพิกัดสำหรับ SOS
         location_quick_reply = QuickReply(
             items=[
-                QuickReplyButton(
-                    action=LocationAction(label="ส่งพิกัดเพื่อแจ้ง SOS")
-                )
+                QuickReplyButton(action=LocationAction(label="ส่งพิกัดเพื่อแจ้ง SOS"))
             ]
         )
         line_bot_api.reply_message(
             event.reply_token, 
             TextSendMessage(
-                text="📢 กรุณากดปุ่มส่งพิกัด 'Location' เพื่อแจ้งเหตุฉุกเฉิน เพื่อส่งข้อมูลพิกัดที่แน่นอนให้เจ้าหน้าที่เข้ากู้ภัยและประเมินสถานการณ์ครับ",
+                text="📢 กรุณากดปุ่มส่งพิกัด 'Location' เพื่อแจ้งเหตุฉุกเฉิน เพื่อส่งข้อมูลพิกัดที่แน่นอนให้เจ้าหน้าที่เข้าช่วยเหลือครับ",
                 quick_reply=location_quick_reply
             )
         )
@@ -210,7 +198,7 @@ def handle_text_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     else:
-        # หากส่งข้อความทั่วไปนอกเหนือจากเมนูหลัก ให้ส่งไปประมวลผลด้วย Gemini API
+        # ส่งไปประมวลผลด้วย Gemini API
         ai_response = ""
         try:
             response = gemini_model.generate_content(user_text)
@@ -221,129 +209,55 @@ def handle_text_message(event):
                 "⚠️ ขณะนี้บริการ AI ไม่สามารถใช้งานได้ชั่วคราว หากท่านต้องการความช่วยเหลือฉุกเฉิน "
                 "โปรดติดต่อสายด่วนกรมป้องกันและบรรเทาสาธารณภัย โทร. 1784 หรือสายด่วนกู้ชีพ โทร. 1669 ทันทีครับ"
             )
-            
-        # บันทึกข้อมูลประวัติการพูดคุยลง Google Sheets "AI Logs"
-        sheets_client = get_sheets_client()
-        if sheets_client:
-            try:
-                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
-                log_worksheet = sheet.worksheet("AI Logs")
-                log_worksheet.append_row([timestamp, user_id, user_text, ai_response])
-            except Exception as sheet_err:
-                print(f"Failed to log to Google Sheets: {sheet_err}")
-                
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
-# 6. ฟังก์ชันรับข้อมูลพิกัด (Location Message)
+# 5. รับข้อมูลพิกัด (Location Message)
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
     latitude = event.message.latitude
     longitude = event.message.longitude
-    address = event.message.address or "ไม่ระบุที่อยู่ชัดเจน"
-    title = event.message.title or "จุดพิกัดผู้ใช้"
     
-    # ตรวจสอบว่าผู้ใช้กดส่งพิกัดมาจากเมนูใด (ดึงสถานะจากหน่วยความจำ)
     state = USER_STATES.pop(user_id, "default")
     
-    sheets_client = get_sheets_client()
-    
-    # --- กรณีที่ 1: ค้นหาศูนย์อพยพ/ศูนย์พักพิง (Shelters Workflow) ---
+    # --- ค้นหาศูนย์อพยพจาก Mock Data ---
     if state == "waiting_shelter_location":
-        if not sheets_client:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ ระบบฐานข้อมูลไม่พร้อมทำงาน กรุณาลองใหม่อีกครั้งในภายหลังครับ"))
-            return
+        nearest_shelters = []
+        for sh in STATIC_SHELTERS:
+            distance = calculate_distance(latitude, longitude, sh['lat'], sh['lon'])
+            vacancy_status = check_shelter_vacancy(sh['capacity'], sh['occupancy'])
+            nearest_shelters.append({
+                "name": sh['name'],
+                "distance": distance,
+                "vacancy": vacancy_status,
+                "contact": sh['contact'],
+                "lat": sh['lat'],
+                "lon": sh['lon']
+            })
             
-        try:
-            sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
-            shelters_worksheet = sheet.worksheet("Shelters")
-            # ดึงข้อมูลศูนย์อพยพทั้งหมด (get_all_records จะเปลี่ยนแถวแรกเป็น Key)
-            shelter_rows = shelters_worksheet.get_all_records()
-            
-            nearest_shelters = []
-            for row in shelter_rows:
-                # ข้ามศูนย์ที่ปิดใช้งาน
-                if str(row.get('Status')).strip().lower() == 'closed':
-                    continue
-                
-                try:
-                    sh_lat = float(row['Latitude'])
-                    sh_lon = float(row['Longitude'])
-                except (ValueError, TypeError, KeyError):
-                    continue
-                    
-                distance = calculate_distance(latitude, longitude, sh_lat, sh_lon)
-                vacancy_status = check_shelter_vacancy(row.get('Capacity', 100), row.get('Occupancy', 0))
-                
-                nearest_shelters.append({
-                    "name": row.get('Name', 'ไม่ระบุชื่อ'),
-                    "distance": distance,
-                    "vacancy": vacancy_status,
-                    "contact": row.get('Contact', '-'),
-                    "lat": sh_lat,
-                    "lon": sh_lon
-                })
-                
-            # เรียงลำดับตามระยะทางที่ใกล้ที่สุด
-            nearest_shelters.sort(key=lambda x: x['distance'])
-            top_shelters = nearest_shelters[:3]
-            
-            if not top_shelters:
-                reply_text = "📍 ขออภัยครับ ขณะนี้ไม่พบศูนย์พักพิงที่เปิดทำการในฐานข้อมูลระบบเลย"
-            else:
-                reply_text = "📍 ศูนย์พักพิงที่ใกล้ที่สุด 3 อันดับแรกสำหรับคุณ:\n\n"
-                for index, sh in enumerate(top_shelters, 1):
-                    reply_text += (
-                        f"{index}. 🏠 {sh['name']}\n"
-                        f"   - ระยะห่าง: {sh['distance']:.2f} กม.\n"
-                        f"   - สถานะ: {sh['vacancy']}\n"
-                        f"   - ติดต่อ: {sh['contact']}\n"
-                        f"   - 🗺️ นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
-                    )
-                reply_text += "⚠️ โปรดตรวจสอบระดับความสูงของน้ำและประเมินความปลอดภัยก่อนเดินทางอพยพทุกครั้งครับ"
-                
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            
-        except Exception as e:
-            print(f"Error querying shelters: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ เกิดข้อผิดพลาดทางเทคนิคในการสืบค้นข้อมูลศูนย์พักพิง กรุณาลองใหม่อีกครั้งครับ"))
-
-    # --- กรณีที่ 2: แจ้งเหตุขอความช่วยเหลือฉุกเฉิน (SOS Workflow) ---
-    else:
-        name = "ผู้แจ้งเหตุผ่าน LINE"
-        phone = "-"
-        victims = 1
-        water_level = "รอตรวจสอบ"
-        status = "Pending"
+        nearest_shelters.sort(key=lambda x: x['distance'])
+        top_shelters = nearest_shelters[:3]
         
-        success = False
-        if sheets_client:
-            try:
-                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
-                sos_worksheet = sheet.worksheet("SOS")
-                sos_worksheet.append_row([
-                    timestamp, user_id, name, phone, victims, water_level, 
-                    latitude, longitude, f"ที่อยู่: {address} ({title})", status
-                ])
-                success = True
-            except Exception as sheet_err:
-                print(f"Failed to log SOS to Google Sheets: {sheet_err}")
-
-        if success:
-            confirm_text = (
-                "🚨 ระบบได้รับข้อมูลขอความช่วยเหลือเรียบร้อยแล้ว!\n"
-                f"📍 พิกัดของคุณถูกบันทึกเข้าระบบเพื่อส่งให้กู้ภัยแล้ว\n"
-                f"🗺️ พิกัด: {latitude}, {longitude}\n\n"
-                "เจ้าหน้าที่จะทำการประเมินสถานการณ์และเร่งจัดกำลังเพื่อเข้าช่วยเหลือ โปรดรักษาความปลอดภัยและรอการติดต่อกลับในจุดที่ปลอดภัยที่สุดครับ"
+        reply_text = "📍 ศูนย์พักพิงที่ใกล้ที่สุด 3 อันดับแรกสำหรับคุณ (ข้อมูลจำลองเพื่อการทดสอบ):\n\n"
+        for index, sh in enumerate(top_shelters, 1):
+            reply_text += (
+                f"{index}. 🏠 {sh['name']}\n"
+                f"   - ระยะห่าง: {sh['distance']:.2f} กม.\n"
+                f"   - สถานะ: {sh['vacancy']}\n"
+                f"   - ติดต่อ: {sh['contact']}\n"
+                f"   - 🗺️ นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
             )
-        else:
-            confirm_text = (
-                "⚠️ เกิดข้อผิดพลาดในการบันทึกข้อมูลเข้าฐานข้อมูลของกู้ภัย "
-                "กรุณาติดต่อโทรสายด่วน ปภ. 1784 หรือสายด่วนกู้ชีพ 1669 ทันทีเพื่อความปลอดภัยครับ"
-            )
-            
+        reply_text += "⚠️ โปรดตรวจสอบระดับความสูงของน้ำและประเมินความปลอดภัยก่อนเดินทางอพยพทุกครั้งครับ"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        
+    # --- จำลองการแจ้งเหตุ SOS (ไม่มีการเขียนลงชีต) ---
+    else:
+        confirm_text = (
+            "🚨 [ระบบจำลองการทำงานสำหรับการสาธิต]\n"
+            "ระบบได้รับพิกัดแจ้งเหตุฉุกเฉินของคุณเรียบร้อยแล้ว!\n"
+            f"🗺️ พิกัดของคุณคือ: {latitude}, {longitude}\n\n"
+            "ในเวอร์ชันใช้งานจริง ข้อมูลชุดนี้จะถูกส่งตรงเข้าศูนย์สั่งการและบันทึกฐานข้อมูลเพื่อนำทีมกู้ภัยเข้าช่วยเหลือทันทีครับ"
+        )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
 
 if __name__ == "__main__":
