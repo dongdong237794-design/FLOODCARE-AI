@@ -1,8 +1,7 @@
 import os
 from flask import Flask, request, abort
 from google import genai
-from google.genai import types
-from linebot.v3 import LineBotApi
+from google.genai import type
 from linebot.v3.webhook import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
