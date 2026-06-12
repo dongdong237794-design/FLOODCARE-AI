@@ -1,6 +1,7 @@
 import os
 import math
 import datetime
+import requests  # เพิ่มสำหรับส่งคำสั่งยิงสร้าง Rich Menu ตรงหา LINE API
 from flask import Flask, request, abort
 
 # LINE SDK
@@ -21,10 +22,14 @@ LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
+# เพิ่มตัวแปรสำหรับผูกมัด Rich Menu ID 
+# (หากได้รหัสมาจากการกดรันหน้าเว็บในข้อ 3 แล้ว ให้นำมาวางใน Environment Variables บน Render ได้เลยครับ)
+RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
+
 # เก็บสถานะผู้ใช้ชั่วคราวในหน่วยความจำ
 USER_STATES = {}
 
-# รายชื่อศูนย์อพยพจำลอง (Mock Data) สำหรับคำนวณระยะทางจริงจากพิกัดผู้ใช้
+# รายชื่อศูนย์อพยพจำลอง
 STATIC_SHELTERS = [
     {
         "name": "ศูนย์พักพิงวัดเสาชิงช้า (เขตพระนคร)",
@@ -73,9 +78,9 @@ gemini_model = genai.GenerativeModel(
     )
 )
 
-# 2. ฟังก์ชันคำนวณระยะทางและตรวจสอบความจุ
+# 2. ฟังก์ชันคำนวณระยะทางและประเมินที่ว่าง
 def calculate_distance(lat1, lon1, lat2, lon2):
-    R = 6371.0  # รัศมีของโลก (กิโลเมตร)
+    R = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = (math.sin(dlat / 2) ** 2 + 
@@ -92,7 +97,55 @@ def check_shelter_vacancy(capacity, occupancy):
     else:
         return f"🟢 ยังมีที่ว่าง (ว่างอีก {remaining} ที่นั่ง)"
 
-# 3. Webhook Route
+# 3. [ฟีเจอร์เสริม] Endpoint สำหรับสร้าง Rich Menu พร้อมข้อความบนแถบ Rich Bar เชิงโปรแกรม
+@app.route("/create_rich_menu", methods=['GET'])
+def create_rich_menu():
+    headers = {
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # โครงสร้าง Rich Menu ขนาดใหญ่ (Large) 3x3 ช่อง 2500x1686 พิกเซล
+    payload = {
+        "size": {"width": 2500, "height": 1686},
+        "selected": True,
+        "name": "FLOODCARE AI Main Menu",
+        "chatBarText": "คุยกับ AI / กู้ภัย",  # <--- ตั้งค่าแถบ Rich Bar ตรงจุดนี้ได้ทันทีครับ
+        "areas": [
+            # แถวที่ 1
+            {"bounds": {"x": 0, "y": 0, "width": 833, "height": 562}, "action": {"type": "message", "text": "เตรียมตัวก่อนน้ำท่วม"}},
+            {"bounds": {"x": 833, "y": 0, "width": 833, "height": 562}, "action": {"type": "message", "text": "วิธีอพยพ"}},
+            {"bounds": {"x": 1666, "y": 0, "width": 834, "height": 562}, "action": {"type": "message", "text": "ชุดยังชีพฉุกเฉิน"}},
+            # แถวที่ 2
+            {"bounds": {"x": 0, "y": 562, "width": 833, "height": 562}, "action": {"type": "message", "text": "เบอร์โทรศัพท์ฉุกเฉิน"}},
+            {"bounds": {"x": 833, "y": 562, "width": 833, "height": 562}, "action": {"type": "message", "text": "ปฐมพยาบาลเบื้องต้น"}},
+            {"bounds": {"x": 1666, "y": 562, "width": 834, "height": 562}, "action": {"type": "message", "text": "ศูนย์พักพิง"}},
+            # แถวที่ 3
+            {"bounds": {"x": 0, "y": 1124, "width": 833, "height": 562}, "action": {"type": "message", "text": "ตรวจสอบระดับน้ำ"}},
+            {"bounds": {"x": 833, "y": 1124, "width": 833, "height": 562}, "action": {"type": "message", "text": "SOS ขอความช่วยเหลือ"}},
+            {"bounds": {"x": 1666, "y": 1124, "width": 834, "height": 562}, "action": {"type": "message", "text": "ถาม AI เรื่องน้ำท่วม"}}
+        ]
+    }
+    
+    response = requests.post("https://api.line.me/v2/bot/richmenu", headers=headers, json=payload)
+    if response.status_code == 200:
+        res_data = response.json()
+        rich_menu_id = res_data.get("richMenuId")
+        return f"""
+        <div style="font-family: sans-serif; padding: 20px;">
+            <h2 style="color: #28a745;">🎉 สร้าง Rich Menu พร้อมข้อความบนแถบ Rich Bar สำเร็จ!</h2>
+            <p>รหัส Rich Menu ID ของคุณคือ: <code style="background: #f1f1f1; padding: 5px 10px; border-radius: 4px; font-weight: bold;">{rich_menu_id}</code></p>
+            <p><b>ขั้นตอนถัดไป:</b></p>
+            <ol>
+                <li>คัดลอกรหัสนี้ไปเพิ่มในหน้า Environment Variables ของ Render ในชื่อตัวแปร <b>RICH_MENU_ID</b></li>
+                <li>อัปโหลดรูปภาพขนาด 2500x1686 พิกเซลสำหรับเมนูนี้ผ่าน LINE Bot Designer หรือแผงควบคุมระบบ LINE OA ของคุณครับ</li>
+            </ol>
+        </div>
+        """
+    else:
+        return f"<h3>เกิดข้อผิดพลาดในการสร้าง</h3><p>Error: {response.text}</p>"
+
+# 4. Webhook Route
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -103,61 +156,69 @@ def callback():
         abort(400)
     return 'OK'
 
-# 4. รับข้อความตัวอักษร (Text Message)
+# 5. รับข้อความตัวอักษร
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
     user_id = event.source.user_id
     
+    # [ระบบทำงานอัตโนมัติ] สลับมาลิงก์ Rich Menu ทันทีเมื่อมีการทักข้อความเข้ามาหากกำหนด ID ไว้
+    if RICH_MENU_ID:
+        try:
+            line_bot_api.link_rich_menu_to_user(user_id, RICH_MENU_ID)
+        except Exception as link_err:
+            print(f"Failed to link rich menu: {link_err}")
+            
+    # เมนูพรีเซ็ต
     if user_text == "เตรียมตัวก่อนน้ำท่วม":
         reply_text = (
-            "📌 การเตรียมตัวก่อนน้ำท่วม:\n"
-            "1. ติดตามข่าวสารสภาพอากาศอย่างใกล้ชิด\n"
-            "2. ยกของขึ้นที่สูง ย้ายปลั๊กไฟขึ้นที่ปลอดภัย\n"
-            "3. เตรียมกระสอบทรายกั้นจุดเสี่ยง\n"
-            "4. จัดเตรียม 'ชุดยังชีพฉุกเฉิน'\n"
-            "5. หากได้รับการแจ้งเตือนให้อพยพ ควรปฏิบัติตามทันที"
+            "📌 การเตรียมตัวก่อนน้ำท่วม:\n\n"
+            "1️⃣ ติดตามข่าวสารสภาพอากาศอย่างใกล้ชิด\n"
+            "2️⃣ ยกของขึ้นที่สูง ย้ายปลั๊กไฟขึ้นที่ปลอดภัย\n"
+            "3️⃣ เตรียมกระสอบทรายกั้นจุดเสี่ยงรอบบ้าน\n"
+            "4️⃣ จัดเตรียมถุงยังชีพฉุกเฉินให้พร้อม\n"
+            "5️⃣ หากได้รับการแจ้งเตือนอพยพ ให้ปฏิบัติตามทันที"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "วิธีอพยพ":
         reply_text = (
-            "🏃 วิธีการอพยพอย่างปลอดภัย:\n"
-            "1. ตัดสะพานไฟและแก๊สหุงต้มก่อนออกจากบ้าน\n"
-            "2. สวมรองเท้าบูทหรือรองเท้าหุ้มส้นเพื่อป้องกันการโดนบาดและไฟดูด\n"
-            "3. หลีกเลี่ยงการเดินหรือขับรถผ่านกระแสน้ำไหลเชี่ยว\n"
-            "4. พยายามเดินทางรวมกันเป็นกลุ่ม\n"
-            "5. ไปยังศูนย์พักพิงที่ใกล้ที่สุดตามเส้นทางที่ปลอดภัย"
+            "🏃 วิธีการอพยพอย่างปลอดภัย:\n\n"
+            "1️⃣ สับสะพานไฟใหญ่และปิดวาล์วแก๊สหุงต้มให้สนิท\n"
+            "2️⃣ สวมรองเท้าบูทหรือรองเท้าหุ้มส้นเพื่อป้องกันการบาด\n"
+            "3️⃣ หลีกเลี่ยงการเดินหรือขับขี่พาหนะผ่านกระแสน้ำเชี่ยว\n"
+            "4️⃣ พยายามรวมกลุ่มเดินทางไปด้วยกันเพื่อคอยช่วยเหลือ\n"
+            "5️⃣ ไปยังศูนย์อพยพที่ใกล้ที่สุดตามแนวทางของผู้นำชุมชน"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ชุดยังชีพฉุกเฉิน":
         reply_text = (
-            "🎒 สิ่งที่ควรมีในถุงยังชีพฉุกเฉิน:\n"
-            "- น้ำดื่ม (อย่างน้อย 3 ลิตรต่อคนต่อวัน)\n"
-            "- อาหารแห้ง/กระป๋อง และยาสามัญประจำบ้าน\n"
-            "- ไฟฉาย ถ่านไฟฉายสำรอง และนกหวีดสำหรับขอความช่วยเหลือ\n"
-            "- พาวเวอร์แบงค์และโทรศัพท์มือถือ\n"
-            "- เอกสารสำคัญใส่ซองกันน้ำอย่างดี"
+            "🎒 สิ่งจำเป็นที่ต้องจัดเตรียมในถุงยังชีพ:\n\n"
+            "📌 น้ำดื่มสะอาด (อย่างน้อย 3 ลิตรต่อคนต่อวัน)\n"
+            "📌 อาหารแห้ง อาหารกระป๋อง และยารักษาโรคประจำตัว\n"
+            "📌 ไฟฉาย ถ่านสำรอง และนกหวีดสำหรับเป่าส่งสัญญาณ\n"
+            "📌 แบตเตอรี่สำรอง (Powerbank) และซองกันน้ำใส่โทรศัพท์\n"
+            "📌 ซองกันน้ำสำหรับเก็บเอกสารสำคัญประจำตัว"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
         reply_text = (
-            "📞 เบอร์โทรศัพท์ฉุกเฉิน (จำให้ขึ้นใจ):\n"
-            "• 1784 : ปภ. (กรมป้องกันและบรรเทาสาธารณภัย)\n"
-            "• 1669 : สถาบันการแพทย์ฉุกเฉินแห่งชาติ (กู้ชีพ)\n"
-            "• 1193 : ตำรวจทางหลวง (ขอความช่วยเหลือขณะเดินทาง)\n"
-            "• 1111 : ศูนย์รับเรื่องร้องเรียนจากอุทกภัยรัฐบาล"
+            "📞 เบอร์โทรศัพท์ฉุกเฉินที่ควรบันทึกไว้:\n\n"
+            "🚨 สายด่วน ปภ. 1784 (เตือนภัยและช่วยเหลืออุทกภัย)\n"
+            "🚨 สายด่วนกู้ชีพ 1669 (เจ็บป่วยฉุกเฉินทางแพทย์)\n"
+            "🚨 สายด่วนตำรวจทางหลวง 1193 (ขอความช่วยเหลือขณะเดินทาง)\n"
+            "🚨 สายด่วนรัฐบาล 1111 (ร้องเรียนและขอความช่วยเหลือทั่วไป)"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ปฐมพยาบาลเบื้องต้น":
         reply_text = (
-            "🩹 คำแนะนำการปฐมพยาบาลเบื้องต้น:\n"
-            "1. บาดแผลจากสิ่งขีดข่วน: ล้างแผลด้วยน้ำสะอาด ทายาฆ่าเชื้อ และปิดแผลให้มิดชิดเลี่ยงน้ำท่วมขัง\n"
-            "2. สัตว์มีพิษกัด: ล้างแผล ดามอวัยวะให้อยู่นิ่งๆ (ห้ามขันชะเนาะแน่นเกินไป) และรีบนำส่งแพทย์\n"
-            "3. ไฟฟ้าดูด: รีบสับสวิตช์ไฟใหญ่ หากต้องดึงตัวผู้ถูกไฟดูดให้ใช้สิ่งที่ไม่นำไฟฟ้า เช่น ไม้แห้ง ดึงห้ามจับตัวโดยตรง"
+            "🩹 วิธีการปฐมพยาบาลเบื้องต้นในสถานการณ์น้ำท่วม:\n\n"
+            "🩹 บาดแผลจากสิ่งขีดข่วน: ล้างแผลด้วยน้ำสะอาดและสบู่ ทายาฆ่าเชื้อ แล้วปิดแผลให้มิดชิด พยายามหลีกเลี่ยงการสัมผัสน้ำท่วมขัง\n"
+            "🩹 สัตว์มีพิษกัด: ล้างแผลด้วยน้ำสะอาด พยายามให้ผู้ถูกกัดขยับอวัยวะนั้นให้น้อยที่สุดเพื่อไม่ให้พิษแล่นเร็ว และรีบนำส่งแพทย์\n"
+            "🩹 กระแสไฟดูด: รีบสับสวิตช์ไฟหลักทันที ห้ามสัมผัสตัวผู้โดนไฟดูดด้วยมือเปล่า ให้ใช้ไม้แห้งหรือวัสดุที่ไม่นำไฟฟ้าในการผลักหรือดึงตัวออกมา"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
@@ -165,21 +226,22 @@ def handle_text_message(event):
         USER_STATES[user_id] = "waiting_shelter_location"
         location_quick_reply = QuickReply(
             items=[
-                QuickReplyButton(action=LocationAction(label="ส่งพิกัดหาศูนย์พักพิง"))
+                QuickReplyButton(action=LocationAction(label="แชร์พิกัดหาศูนย์พักพิง"))
             ]
         )
         line_bot_api.reply_message(
             event.reply_token, 
             TextSendMessage(
-                text="📍 กรุณากดส่งพิกัดที่ตั้งปัจจุบันของคุณ เพื่อให้ระบบคำนวณหาศูนย์พักพิงที่เปิดทำการและอยู่ใกล้คุณมากที่สุดครับ",
+                text="📍 โปรดกดแชร์พิกัดที่ตั้งปัจจุบันของคุณ เพื่อให้ระบบช่วยคำนวณและค้นหาศูนย์พักพิงที่เปิดทำการและอยู่ใกล้ตัวคุณที่สุดครับ",
                 quick_reply=location_quick_reply
             )
         )
         
     elif user_text == "ตรวจสอบระดับน้ำ":
         reply_text = (
-            "🌊 บริการตรวจสอบระดับน้ำ:\n"
-            "ท่านสามารถติดตามสถานการณ์น้ำและพื้นที่เฝ้าระวังน้ำท่วมฉับพลันแบบ Real-time ได้ผ่านแอปพลิเคชัน 'ThaiWater' หรือโทรสายด่วน ปภ. 1784"
+            "🌊 วิธีการตรวจสอบระดับน้ำและเตือนภัย:\n\n"
+            "📌 ท่านสามารถดาวน์โหลดแอปพลิเคชัน 'ThaiWater' เพื่อเช็กปริมาณฝนและระดับน้ำในลุ่มน้ำหลักทั่วไทย\n"
+            "📌 ติดตามการรายงานสถานการณ์รายชั่วโมงผ่านทางสายด่วน ปภ. โทร 1784"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
@@ -187,23 +249,23 @@ def handle_text_message(event):
         USER_STATES[user_id] = "waiting_sos_location"
         location_quick_reply = QuickReply(
             items=[
-                QuickReplyButton(action=LocationAction(label="ส่งพิกัดเพื่อแจ้ง SOS"))
+                QuickReplyButton(action=LocationAction(label="ส่งพิกัดแจ้ง SOS"))
             ]
         )
         line_bot_api.reply_message(
             event.reply_token, 
             TextSendMessage(
-                text="📢 กรุณากดปุ่มส่งพิกัด 'Location' เพื่อแจ้งเหตุฉุกเฉิน เพื่อส่งข้อมูลพิกัดที่แน่นอนให้เจ้าหน้าที่เข้าช่วยเหลือครับ",
+                text="🚨 โปรดแตะส่งพิกัด 'Location' ด้านล่างเพื่อส่งสัญญาณขอความช่วยเหลือฉุกเฉินและรายงานตำแหน่งที่แท้จริงของคุณครับ",
                 quick_reply=location_quick_reply
             )
         )
         
     elif user_text == "ถาม AI เรื่องน้ำท่วม":
-        reply_text = "🤖 คุณสามารถพิมพ์คำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมได้ทันทีเลยครับ AI ยินดีตอบทุกคำถามและแนะนำวิธีเอาชีวิตรอดให้ครับ"
+        reply_text = "🤖 คุณสามารถพิมพ์รายละเอียดคำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมในครั้งนี้เข้ามาได้ทันทีเลยครับ ผมพร้อมวิเคราะห์และตอบทุกข้อสงสัยให้ครับ"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     else:
-        # ส่งไปประมวลผลด้วย Gemini API
+        # ประมวลผลด้วยโมเดล Gemini 2.5 Flash
         ai_response = ""
         try:
             response = gemini_model.generate_content(user_text)
@@ -211,12 +273,12 @@ def handle_text_message(event):
         except Exception as e:
             print(f"Gemini API Error: {e}")
             ai_response = (
-                "⚠️ ขณะนี้บริการ AI ไม่สามารถใช้งานได้ชั่วคราว หากท่านต้องการความช่วยเหลือฉุกเฉิน "
-                "โปรดติดต่อสายด่วนกรมป้องกันและบรรเทาสาธารณภัย โทร. 1784 หรือสายด่วนกู้ชีพ โทร. 1669 ทันทีครับ"
+                "⚠️ ระบบประสาทเครือข่าย AI ขัดข้องชั่วคราว หากท่านตกอยู่ในเหตุการณ์เร่งด่วนและเป็นอันตรายต่อชีวิต "
+                "โปรดติดต่อสายด่วนกรมป้องกันและบรรเทาสาธารณภัย โทร. 1784 หรือโทร 1669 ทีมแพทย์กู้ชีพทันทีครับ"
             )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
-# 5. รับข้อมูลพิกัด (Location Message)
+# 6. รับข้อมูลพิกัด (Location Message)
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
@@ -225,7 +287,14 @@ def handle_location_message(event):
     
     state = USER_STATES.pop(user_id, "default")
     
-    # --- ค้นหาศูนย์อพยพจาก Mock Data ---
+    # ลิงก์ Rich Menu ให้ผู้ใช้เช่นเดียวกันเมื่อส่งพิกัดเข้ามา
+    if RICH_MENU_ID:
+        try:
+            line_bot_api.link_rich_menu_to_user(user_id, RICH_MENU_ID)
+        except Exception as link_err:
+            print(f"Failed to link rich menu: {link_err}")
+            
+    # --- ค้นหาศูนย์อพยพจากจำลองพิกัดจริง ---
     if state == "waiting_shelter_location":
         nearest_shelters = []
         for sh in STATIC_SHELTERS:
@@ -243,25 +312,26 @@ def handle_location_message(event):
         nearest_shelters.sort(key=lambda x: x['distance'])
         top_shelters = nearest_shelters[:3]
         
-        reply_text = "📍 ศูนย์พักพิงที่ใกล้ที่สุด 3 อันดับแรกสำหรับคุณ (ข้อมูลจำลองเพื่อการทดสอบ):\n\n"
+        reply_text = "📍 รายชื่อศูนย์พักพิงที่อยู่ใกล้พิกัดของคุณมากที่สุด 3 ลำดับแรกครับ:\n\n"
         for index, sh in enumerate(top_shelters, 1):
             reply_text += (
-                f"{index}. 🏠 {sh['name']}\n"
-                f"   - ระยะห่าง: {sh['distance']:.2f} กม.\n"
-                f"   - สถานะ: {sh['vacancy']}\n"
-                f"   - ติดต่อ: {sh['contact']}\n"
-                f"   - 🗺️ นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
+                f"{index}️⃣ {sh['name']}\n"
+                f"   📌 ระยะทางห่าง: {sh['distance']:.2f} กิโลเมตร\n"
+                f"   📌 สถานะความจุ: {sh['vacancy']}\n"
+                f"   📌 เบอร์ติดต่อติดต่อ: {sh['contact']}\n"
+                f"   🧭 แผนที่นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
             )
-        reply_text += "⚠️ โปรดตรวจสอบระดับความสูงของน้ำและประเมินความปลอดภัยก่อนเดินทางอพยพทุกครั้งครับ"
+        reply_text += "⚠️ โปรดสำรวจเส้นทางน้ำท่วมและเคลื่อนย้ายด้วยความระมัดระวังสูงสุดในทุกย่างก้าวครับ"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
-    # --- จำลองการแจ้งเหตุ SOS (ไม่มีการเขียนลงชีต) ---
+    # --- จำลองพฤติกรรมการรับพิกัดแจ้งเหตุ SOS ---
     else:
         confirm_text = (
-            "🚨 [ระบบจำลองการทำงานสำหรับการสาธิต]\n"
-            "ระบบได้รับพิกัดแจ้งเหตุฉุกเฉินของคุณเรียบร้อยแล้ว!\n"
-            f"🗺️ พิกัดของคุณคือ: {latitude}, {longitude}\n\n"
-            "ในเวอร์ชันใช้งานจริง ข้อมูลชุดนี้จะถูกส่งตรงเข้าศูนย์สั่งการและบันทึกฐานข้อมูลเพื่อนำทีมกู้ภัยเข้าช่วยเหลือทันทีครับ"
+            "🚨 [ระบบจำลองการทำงานเพื่อทดสอบความแม่นยำ]\n\n"
+            "ระบบตรวจจับสัญญาณและยืนยันการรับพิกัด SOS ของคุณแล้วครับ!\n"
+            f"📍 ละติจูดของคุณคือ: {latitude}\n"
+            f"📍 ลองจิจูดของคุณคือ: {longitude}\n\n"
+            "ในเวอร์ชันเชื่อมฐานข้อมูล ข้อมูลพิกัดนี้จะถูกเขียนลงสเปรดชีตกู้ภัยแบบเรียลไทม์ และแจ้งเตือนทีมเจ้าหน้าที่ภาคสนามเพื่อเข้าทำการช่วยเหลือด่วนทันทีครับ"
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
 
