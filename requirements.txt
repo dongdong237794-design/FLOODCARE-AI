@@ -1,5 +1,5 @@
-flask
-gunicorn
+Flask==3.0.3
+gunicorn==23.0.0
 line-bot-sdk==2.4.2
-google-generativeai
-python-dotenv
+google-generativeai==0.8.5
+python-dotenv==1.0.1
