@@ -16,8 +16,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# ตั้งค่า Gemini API
-genai.configure(api_key=GEMINI_API_KEY)
+
 
 # 🌟 [จุดที่ปรับปรุง] ย้ายคำสั่งควบคุมพฤติกรรมมาไว้ใน system_instruction
 system_instruction = """
