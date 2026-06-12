@@ -100,8 +100,6 @@ def create_rich_menu():
         "Content-Type": "application/json"
     }
     
-    # โครงสร้าง Rich Menu 6 ช่อง (2 แถว แถวละ 3 ช่อง) บนขนาดรูป 2500x1686 พิกเซล
-    # ขนาดปุ่มแต่ละช่องจะขยายเป็น กว้าง 833 พิกเซล และ สูง 843 พิกเซล
     payload = {
         "size": {"width": 2500, "height": 1686},
         "selected": True,
@@ -337,4 +335,4 @@ def handle_location_message(event):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)ห
+    app.run(host="0.0.0.0", port=port)
