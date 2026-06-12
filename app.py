@@ -20,8 +20,8 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
-# ใช้รุ่นที่เสถียรกว่า
-model = genai.GenerativeModel("gemini-1.5-flash")
+# ใช้รุ่นล่าสุด
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 @app.route("/")
 def home():
@@ -31,7 +31,6 @@ def home():
 def callback():
 
     signature = request.headers.get("X-Line-Signature")
-
     body = request.get_data(as_text=True)
 
     try:
@@ -75,7 +74,7 @@ def handle_message(event):
         response = model.generate_content(prompt)
 
         if hasattr(response, "text") and response.text:
-            reply = response.text
+            reply = response.text[:4500]
         else:
             reply = "ขออภัย ไม่สามารถสร้างคำตอบได้ในขณะนี้"
 
@@ -83,8 +82,7 @@ def handle_message(event):
 
         print(f"Gemini Error: {e}")
 
-        reply = """
-⚠️ ขณะนี้ AI ไม่พร้อมใช้งาน
+        reply = """⚠️ ขณะนี้ AI ไม่พร้อมใช้งาน
 
 เบอร์ฉุกเฉิน
 191 ตำรวจ
