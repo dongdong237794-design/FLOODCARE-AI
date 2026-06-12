@@ -1,7 +1,7 @@
 import os
 import math
 import datetime
-import requests  # เพิ่มสำหรับส่งคำสั่งยิงสร้าง Rich Menu ตรงหา LINE API
+import requests
 from flask import Flask, request, abort
 
 # LINE SDK
@@ -21,15 +21,10 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-# เพิ่มตัวแปรสำหรับผูกมัด Rich Menu ID 
-# (หากได้รหัสมาจากการกดรันหน้าเว็บในข้อ 3 แล้ว ให้นำมาวางใน Environment Variables บน Render ได้เลยครับ)
 RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
 
-# เก็บสถานะผู้ใช้ชั่วคราวในหน่วยความจำ
 USER_STATES = {}
 
-# รายชื่อศูนย์อพยพจำลอง
 STATIC_SHELTERS = [
     {
         "name": "ศูนย์พักพิงวัดเสาชิงช้า (เขตพระนคร)",
@@ -97,7 +92,7 @@ def check_shelter_vacancy(capacity, occupancy):
     else:
         return f"🟢 ยังมีที่ว่าง (ว่างอีก {remaining} ที่นั่ง)"
 
-# 3. [ฟีเจอร์เสริม] Endpoint สำหรับสร้าง Rich Menu พร้อมข้อความบนแถบ Rich Bar เชิงโปรแกรม
+# 3. Endpoint สำหรับสร้าง Rich Menu (โปรแกรมมิ่งแบบ 6 ปุ่ม)
 @app.route("/create_rich_menu", methods=['GET'])
 def create_rich_menu():
     headers = {
@@ -105,25 +100,22 @@ def create_rich_menu():
         "Content-Type": "application/json"
     }
     
-    # โครงสร้าง Rich Menu ขนาดใหญ่ (Large) 3x3 ช่อง 2500x1686 พิกเซล
+    # โครงสร้าง Rich Menu 6 ช่อง (2 แถว แถวละ 3 ช่อง) บนขนาดรูป 2500x1686 พิกเซล
+    # ขนาดปุ่มแต่ละช่องจะขยายเป็น กว้าง 833 พิกเซล และ สูง 843 พิกเซล
     payload = {
         "size": {"width": 2500, "height": 1686},
         "selected": True,
-        "name": "FLOODCARE AI Main Menu",
-        "chatBarText": "คุยกับ AI / กู้ภัย",  # <--- ตั้งค่าแถบ Rich Bar ตรงจุดนี้ได้ทันทีครับ
+        "name": "FLOODCARE AI 6-Button Menu",
+        "chatBarText": "คุยกับ AI / กู้ภัย",
         "areas": [
-            # แถวที่ 1
-            {"bounds": {"x": 0, "y": 0, "width": 833, "height": 562}, "action": {"type": "message", "text": "เตรียมตัวก่อนน้ำท่วม"}},
-            {"bounds": {"x": 833, "y": 0, "width": 833, "height": 562}, "action": {"type": "message", "text": "วิธีอพยพ"}},
-            {"bounds": {"x": 1666, "y": 0, "width": 834, "height": 562}, "action": {"type": "message", "text": "ชุดยังชีพฉุกเฉิน"}},
-            # แถวที่ 2
-            {"bounds": {"x": 0, "y": 562, "width": 833, "height": 562}, "action": {"type": "message", "text": "เบอร์โทรศัพท์ฉุกเฉิน"}},
-            {"bounds": {"x": 833, "y": 562, "width": 833, "height": 562}, "action": {"type": "message", "text": "ปฐมพยาบาลเบื้องต้น"}},
-            {"bounds": {"x": 1666, "y": 562, "width": 834, "height": 562}, "action": {"type": "message", "text": "ศูนย์พักพิง"}},
-            # แถวที่ 3
-            {"bounds": {"x": 0, "y": 1124, "width": 833, "height": 562}, "action": {"type": "message", "text": "ตรวจสอบระดับน้ำ"}},
-            {"bounds": {"x": 833, "y": 1124, "width": 833, "height": 562}, "action": {"type": "message", "text": "SOS ขอความช่วยเหลือ"}},
-            {"bounds": {"x": 1666, "y": 1124, "width": 834, "height": 562}, "action": {"type": "message", "text": "ถาม AI เรื่องน้ำท่วม"}}
+            # แถวที่ 1 (y: 0 ถึง 843)
+            {"bounds": {"x": 0, "y": 0, "width": 833, "height": 843}, "action": {"type": "message", "text": "เบอร์โทรศัพท์ฉุกเฉิน"}},
+            {"bounds": {"x": 833, "y": 0, "width": 833, "height": 843}, "action": {"type": "message", "text": "ปฐมพยาบาลเบื้องต้น"}},
+            {"bounds": {"x": 1666, "y": 0, "width": 834, "height": 843}, "action": {"type": "message", "text": "ศูนย์พักพิง"}},
+            # แถวที่ 2 (y: 843 ถึง 1686)
+            {"bounds": {"x": 0, "y": 843, "width": 833, "height": 843}, "action": {"type": "message", "text": "ตรวจสอบระดับน้ำ"}},
+            {"bounds": {"x": 833, "y": 843, "width": 833, "height": 843}, "action": {"type": "message", "text": "SOS ขอความช่วยเหลือ"}},
+            {"bounds": {"x": 1666, "y": 843, "width": 834, "height": 843}, "action": {"type": "message", "text": "ถาม AI เรื่องน้ำท่วม"}}
         ]
     }
     
@@ -133,19 +125,62 @@ def create_rich_menu():
         rich_menu_id = res_data.get("richMenuId")
         return f"""
         <div style="font-family: sans-serif; padding: 20px;">
-            <h2 style="color: #28a745;">🎉 สร้าง Rich Menu พร้อมข้อความบนแถบ Rich Bar สำเร็จ!</h2>
+            <h2 style="color: #28a745;">🎉 สร้าง Rich Menu สำเร็จ!</h2>
             <p>รหัส Rich Menu ID ของคุณคือ: <code style="background: #f1f1f1; padding: 5px 10px; border-radius: 4px; font-weight: bold;">{rich_menu_id}</code></p>
             <p><b>ขั้นตอนถัดไป:</b></p>
             <ol>
-                <li>คัดลอกรหัสนี้ไปเพิ่มในหน้า Environment Variables ของ Render ในชื่อตัวแปร <b>RICH_MENU_ID</b></li>
-                <li>อัปโหลดรูปภาพขนาด 2500x1686 พิกเซลสำหรับเมนูนี้ผ่าน LINE Bot Designer หรือแผงควบคุมระบบ LINE OA ของคุณครับ</li>
+                <li>คัดลอกรหัสนี้ไปเพิ่มใน Environment Variables บน Render ในชื่อ <b>RICH_MENU_ID</b></li>
+                <li>ไปที่ลิงก์นี้เพื่ออัปโหลดรูปภาพเมนูของคุณ: <a href="/upload_image/{rich_menu_id}" style="color: #007bff; font-weight: bold; text-decoration: none;">กดเพื่อไปหน้าอัปโหลดรูปภาพ</a></li>
             </ol>
         </div>
         """
     else:
         return f"<h3>เกิดข้อผิดพลาดในการสร้าง</h3><p>Error: {response.text}</p>"
 
-# 4. Webhook Route
+# 4. หน้าเว็บอัปโหลดรูปภาพเมนูแบบ 6 ปุ่ม
+@app.route("/upload_image/<rich_menu_id>", methods=['GET', 'POST'])
+def upload_image(rich_menu_id):
+    if request.method == 'POST':
+        if 'file' not in request.files:
+            return "ไม่มีไฟล์อัปโหลดเข้ามา"
+        file = request.files['file']
+        if file.filename == '':
+            return "ไม่ได้เลือกไฟล์"
+        
+        image_data = file.read()
+        
+        headers = {
+            "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+            "Content-Type": file.content_type
+        }
+        upload_url = f"https://api-data.line.me/v2/bot/richmenu/{rich_menu_id}/content"
+        response = requests.post(upload_url, headers=headers, data=image_data)
+        
+        if response.status_code == 200:
+            return f"""
+            <div style="font-family: sans-serif; padding: 40px; text-align: center; max-width: 500px; margin: auto; border: 1px solid #28a745; border-radius: 8px; margin-top: 50px;">
+                <h2 style="color: #28a745;">🎉 อัปโหลดและผูกภาพเมนูสำเร็จแล้ว!</h2>
+                <p style="color: #666;">ริชเมนู 6 ปุ่มบน LINE OA ของคุณ พร้อมให้บริการด้วยภาพประกอบที่สวยงามแล้วครับ</p>
+            </div>
+            """
+        else:
+            return f"<h3>อัปโหลดไม่สำเร็จ</h3><p>Error: {response.text}</p>"
+            
+    return f"""
+    <div style="font-family: sans-serif; padding: 40px; max-width: 500px; margin: auto; border: 1px solid #ccc; border-radius: 8px; margin-top: 50px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h2 style="color: #007bff; text-align: center;">🎨 อัปโหลดภาพริชเมนู FLOODCARE (6 ปุ่ม)</h2>
+        <p style="color: #666; font-size: 14px; line-height: 1.5; background: #f8f9fa; padding: 15px; border-left: 4px solid #007bff;">
+            กรุณาเลือกไฟล์ภาพขนาดความกว้าง <b>2500x1686 พิกเซล</b> (ประเภทไฟล์ JPG หรือ PNG และขนาดห้ามเกิน 1 MB) 
+            ที่แบ่งการออกแบบเป็น 6 ช่องปุ่มกด (2 แถว แถวละ 3 ช่อง) ให้ตรงกับหน้าเมนูของเราครับ
+        </p>
+        <form method="post" enctype="multipart/form-data" style="margin-top: 25px;">
+            <input type="file" name="file" accept="image/jpeg, image/png" style="display: block; margin-bottom: 25px; width: 100%; padding: 12px; border: 1px dashed #ccc; border-radius: 4px;" required>
+            <button type="submit" style="background: #28a745; color: white; border: none; padding: 14px; width: 100%; font-size: 16px; border-radius: 4px; cursor: pointer; font-weight: bold;">ส่งและผูกรูปเข้ากับเมนู LINE</button>
+        </form>
+    </div>
+    """
+
+# 5. Webhook Route
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -156,54 +191,20 @@ def callback():
         abort(400)
     return 'OK'
 
-# 5. รับข้อความตัวอักษร
+# 6. รับข้อความตัวอักษร
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
     user_id = event.source.user_id
     
-    # [ระบบทำงานอัตโนมัติ] สลับมาลิงก์ Rich Menu ทันทีเมื่อมีการทักข้อความเข้ามาหากกำหนด ID ไว้
     if RICH_MENU_ID:
         try:
             line_bot_api.link_rich_menu_to_user(user_id, RICH_MENU_ID)
         except Exception as link_err:
             print(f"Failed to link rich menu: {link_err}")
             
-    # เมนูพรีเซ็ต
-    if user_text == "เตรียมตัวก่อนน้ำท่วม":
-        reply_text = (
-            "📌 การเตรียมตัวก่อนน้ำท่วม:\n\n"
-            "1️⃣ ติดตามข่าวสารสภาพอากาศอย่างใกล้ชิด\n"
-            "2️⃣ ยกของขึ้นที่สูง ย้ายปลั๊กไฟขึ้นที่ปลอดภัย\n"
-            "3️⃣ เตรียมกระสอบทรายกั้นจุดเสี่ยงรอบบ้าน\n"
-            "4️⃣ จัดเตรียมถุงยังชีพฉุกเฉินให้พร้อม\n"
-            "5️⃣ หากได้รับการแจ้งเตือนอพยพ ให้ปฏิบัติตามทันที"
-        )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
-    elif user_text == "วิธีอพยพ":
-        reply_text = (
-            "🏃 วิธีการอพยพอย่างปลอดภัย:\n\n"
-            "1️⃣ สับสะพานไฟใหญ่และปิดวาล์วแก๊สหุงต้มให้สนิท\n"
-            "2️⃣ สวมรองเท้าบูทหรือรองเท้าหุ้มส้นเพื่อป้องกันการบาด\n"
-            "3️⃣ หลีกเลี่ยงการเดินหรือขับขี่พาหนะผ่านกระแสน้ำเชี่ยว\n"
-            "4️⃣ พยายามรวมกลุ่มเดินทางไปด้วยกันเพื่อคอยช่วยเหลือ\n"
-            "5️⃣ ไปยังศูนย์อพยพที่ใกล้ที่สุดตามแนวทางของผู้นำชุมชน"
-        )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
-    elif user_text == "ชุดยังชีพฉุกเฉิน":
-        reply_text = (
-            "🎒 สิ่งจำเป็นที่ต้องจัดเตรียมในถุงยังชีพ:\n\n"
-            "📌 น้ำดื่มสะอาด (อย่างน้อย 3 ลิตรต่อคนต่อวัน)\n"
-            "📌 อาหารแห้ง อาหารกระป๋อง และยารักษาโรคประจำตัว\n"
-            "📌 ไฟฉาย ถ่านสำรอง และนกหวีดสำหรับเป่าส่งสัญญาณ\n"
-            "📌 แบตเตอรี่สำรอง (Powerbank) และซองกันน้ำใส่โทรศัพท์\n"
-            "📌 ซองกันน้ำสำหรับเก็บเอกสารสำคัญประจำตัว"
-        )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
-    elif user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
+    # เมนูพรีเซ็ต (แบบ 6 ปุ่ม)
+    if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
         reply_text = (
             "📞 เบอร์โทรศัพท์ฉุกเฉินที่ควรบันทึกไว้:\n\n"
             "🚨 สายด่วน ปภ. 1784 (เตือนภัยและช่วยเหลืออุทกภัย)\n"
@@ -265,7 +266,7 @@ def handle_text_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     else:
-        # ประมวลผลด้วยโมเดล Gemini 2.5 Flash
+        # ประมวลผลโมเดล Gemini 2.5 Flash
         ai_response = ""
         try:
             response = gemini_model.generate_content(user_text)
@@ -278,7 +279,7 @@ def handle_text_message(event):
             )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
-# 6. รับข้อมูลพิกัด (Location Message)
+# 7. รับข้อมูลพิกัด (Location Message)
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
@@ -287,7 +288,6 @@ def handle_location_message(event):
     
     state = USER_STATES.pop(user_id, "default")
     
-    # ลิงก์ Rich Menu ให้ผู้ใช้เช่นเดียวกันเมื่อส่งพิกัดเข้ามา
     if RICH_MENU_ID:
         try:
             line_bot_api.link_rich_menu_to_user(user_id, RICH_MENU_ID)
@@ -324,7 +324,7 @@ def handle_location_message(event):
         reply_text += "⚠️ โปรดสำรวจเส้นทางน้ำท่วมและเคลื่อนย้ายด้วยความระมัดระวังสูงสุดในทุกย่างก้าวครับ"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
-    # --- จำลองพฤติกรรมการรับพิกัดแจ้งเหตุ SOS ---
+    # --- จำลองการแจ้งเหตุ SOS ---
     else:
         confirm_text = (
             "🚨 [ระบบจำลองการทำงานเพื่อทดสอบความแม่นยำ]\n\n"
@@ -337,4 +337,4 @@ def handle_location_message(event):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port)ห
