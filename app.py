@@ -15,7 +15,7 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets
+# Google Sheets (เชื่อมต่อแบบ Native เสถียรและเบาลง)
 import gspread
 
 app = Flask(__name__)
@@ -77,6 +77,7 @@ def extract_sheet_id(sheet_var):
 # 4. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
 def setup_sheets_automatically(sheet):
     try:
+        # ดึงรายชื่อแผ่นงานย่อยทั้งหมดในชีตมาตรวจสอบ
         existing_sheets = [w.title for w in sheet.worksheets()]
         
         # 1. จัดการชีต SOS_Intake
@@ -156,6 +157,7 @@ def get_sheets_client():
         creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
         client = gspread.service_account_from_dict(creds_dict)
         
+        # รันระบบโครงสร้างตารางออโต้เพียงรอบเดียวเมื่อเปิดใช้
         if not SHEETS_INITIALIZED:
             try:
                 sheet = client.open_by_key(clean_sheet_id)
@@ -208,10 +210,9 @@ def calculate_priority(data):
         print(f"Priority Calc Error: {e}")
         return "🟠  ปานกลาง"
 
-# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย (เพิ่มระบบ Route Inspector ยืนยันพิกัดเซิร์ฟเวอร์)
+# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์และ Route Inspector เพื่อเช็กพิกัด Webhook
 @app.route("/", methods=['GET'])
 def index():
-    # ดึงรายชื่อเส้นทางทั้งหมดที่ระบุใน Flask App เพื่อให้ผู้ใช้ตรวจสอบได้ผ่านเบราว์เซอร์
     routes = []
     for rule in app.url_map.iter_rules():
         routes.append(f"<li style='margin-bottom:8px;'>🗺️ <b>{rule.endpoint}</b>: <code style='background:#f1f1f1; padding:3px 8px;'>{rule.rule}</code> (Methods: {', '.join(rule.methods)})</li>")
@@ -225,7 +226,7 @@ def index():
         <hr style="border:0; border-top: 1px solid #eee; margin: 25px 0;">
         <p style="color: #e11d48; font-size: 13px; font-weight: bold; line-height:1.5;">
             ⚠️ คำแนะนำสำหรับการแก้ปัญหา Error 404:<br>
-            หาก LINE แจ้งเตือนว่าส่งข้อมูลไม่สัญญานผ่าน โปรดเช็กพิกัด Webhook URL ในหน้า LINE Developers ของคุณว่าสะกดตรงกับ '/callback' ในตารางด้านบนเป๊ะๆ หรือไม่ และห้ามมีเครื่องหมายสแลช / ปิดท้ายสุดนะครับ
+            หาก LINE แจ้งเตือนว่าส่งข้อมูลไม่สัญญาณผ่าน โปรดเช็กพิกัด Webhook URL ในหน้า LINE Developers ของคุณว่าสะกดตรงกับ '/callback' ในตารางด้านบนเป๊ะๆ หรือไม่ และห้ามมีเครื่องหมายสแลช / ปิดท้ายสุดนะครับ
         </p>
     </div>
     """
@@ -412,7 +413,18 @@ def dashboard():
     """
     return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, urgent_count=urgent_count, medium_count=medium_count, bedridden_count=bedridden_count)
 
-# 10. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
+# 10. Webhook Route
+@app.route("/callback", methods=['POST'])
+def callback():
+    signature = request.headers.get('X-Line-Signature')
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
+# 11. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
@@ -422,7 +434,7 @@ def handle_text_message(event):
     # ดึงระดับสถานะการคุยปัจจุบัน
     state = USER_STATES.get(user_id)
 
-    # 10.1 ฟีเจอร์พิมพ์ "ยกเลิก" เพื่อเคลียร์สิทธิ์แชตและรีสตาร์ตคุยใหม่ได้ตลอดเวลา
+    # 11.1 ฟีเจอร์พิมพ์ "ยกเลิก" เพื่อเคลียร์สิทธิ์แชตและรีสตาร์ตคุยใหม่ได้ตลอดเวลา
     if user_text == "ยกเลิก":
         USER_STATES.pop(user_id, None)
         USER_DATA.pop(user_id, None)
@@ -432,7 +444,7 @@ def handle_text_message(event):
         )
         return
 
-    # 10.2 ดักจับกรณีผู้ใช้เผลอพิมพ์ตัวอักษรเข้ามาระหว่างที่ระบบรอยิงพิกัด GPS ของ SOS
+    # 11.2 ดักจับกรณีผู้ใช้เผลอพิมพ์ตัวอักษรเข้ามาระหว่างที่ระบบรอยิงพิกัด GPS ของ SOS
     if state == "waiting_sos_location":
         location_quick_reply = QuickReply(
             items=[
@@ -448,7 +460,7 @@ def handle_text_message(event):
         )
         return
 
-    # ==================== ส่วนที่ 10.3: ระบบคัดกรองข้อมูลผู้ประสบภัยอัตโนมัติ (Triage Intake State Machine) ====================
+    # ==================== ส่วนที่ 11.3: ระบบคัดกรองข้อมูลผู้ประสบภัยอัตโนมัติ (Triage Intake State Machine) ====================
     if state:
         if user_id not in USER_DATA:
             USER_DATA[user_id] = {}
@@ -507,7 +519,7 @@ def handle_text_message(event):
             )
             return
 
-        # ==================== ส่วนที่ 10.4: ระบบคัดกรองคำถามอื่น ๆ ย้อนกลับตามเมนู ====================
+        # ==================== ส่วนที่ 11.4: ระบบคัดกรองคำถามอื่น ๆ ย้อนกลับตามเมนู ====================
         elif state == "waiting_emergency_type":
             USER_STATES.pop(user_id, None)
             prompt = f"ผู้ประสบภัยต้องการติดต่อขอกู้ภัยด้วยเรื่องเฉพาะหน้าคือ: '{user_text}' โปรดระบุเบอร์โทรฉุกเฉินและประสานงานกู้ภัยอย่างสั้น กระชับและสุภาพ"
@@ -592,7 +604,7 @@ def handle_text_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
-    # ==================== ส่วนที่ 10.5: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
+    # ==================== ส่วนที่ 10.6: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
         reply_text = (
             "📞 เบอร์โทรศัพท์ฉุกเฉินที่จำเป็นสำหรับภัยน้ำท่วมครับ:\n\n"
@@ -669,7 +681,7 @@ def handle_text_message(event):
                 
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
-# 11. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
+# 12. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
