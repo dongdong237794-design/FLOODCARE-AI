@@ -9,13 +9,14 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
     MessageEvent, TextMessage, LocationMessage,
-    TextSendMessage, QuickReply, QuickReplyButton, LocationAction
+    TextSendMessage, QuickReply, QuickReplyButton, LocationAction,
+    MessageAction  # <--- อิมพอร์ตคลาสปุ่มกดส่งข้อความที่ถูกต้องเข้าสู่ระบบเรียบร้อยครับ!
 )
 
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets (เชื่อมต่อเสถียร ไม่ใช้ไฟล์แยก)
+# Google Sheets (เชื่อมต่อแบบ Native ปราศจากความขัดแย้งของรุ่นไลบรารี)
 import gspread
 
 app = Flask(__name__)
@@ -28,9 +29,15 @@ RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
-# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง (State Machine & Context Storage)
+# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง
 USER_STATES = {}
 USER_DATA = {}
+
+# รายชื่อศูนย์อพยพจำลอง (ตัวสำรองระบบหาก Google Sheets ยังทำงานไม่สมบูรณ์)
+FALLBACK_SHELTERS = [
+    {"name": "ศูนย์อพยพวัดเสาชิงช้า", "lat": 13.7523, "lon": 100.5015, "capacity": 200, "occupancy": 85, "status": "ว่าง"},
+    {"name": "ศูนย์อพยพโรงเรียนวัดสุทัศน์", "lat": 13.7511, "lon": 100.5002, "capacity": 150, "occupancy": 150, "status": "เต็ม"}
+]
 
 # เริ่มใช้งาน LINE API แบบปลอดภัย (ป้องกันเซิร์ฟเวอร์แครชหากยังไม่ป้อนคีย์)
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
@@ -55,7 +62,7 @@ gemini_model = genai.GenerativeModel(
     )
 )
 
-# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*) ออกทั้งหมด
+# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*)
 def clean_text_for_line(text):
     if not text:
         return ""
@@ -106,6 +113,7 @@ def setup_sheets_automatically(sheet):
                 "Longitude", "Capacity", "Occupancy", "Status"
             ]
             shelters_ws.append_row(headers)
+            # ข้อมูลศูนย์พักพิงพิกัดเสี่ยงจริงในไทย
             mock_rows = [
                 ["SH001", "ศูนย์อพยพโรงเรียนโคกสมานคุณ (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
                 ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง"],
@@ -221,6 +229,21 @@ def calculate_distance(lat1, lon1, lat2, lon2):
          math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
+
+def check_shelter_vacancy(capacity, occupancy):
+    try:
+        cap = int(capacity)
+        occ = int(occupancy)
+    except (ValueError, TypeError):
+        cap = 100
+        occ = 0
+    remaining = cap - occ
+    if remaining <= 0:
+        return "🔴 เต็มแล้ว (No Vacancy) - โปรดเลี่ยงไปจุดอื่น"
+    elif occ >= (cap * 0.8):
+        return f"🟡 ใกล้เต็ม (ว่างอีก {remaining} ที่นั่ง)"
+    else:
+        return f"🟢 ยังมีที่ว่าง (ว่างอีก {remaining} ที่นั่ง)"
 
 # 7. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์ แผนภูมิวินิจฉัยฐานข้อมูลกลาง (Diagnostic Control Panel)
 @app.route("/", methods=['GET'])
@@ -587,8 +610,8 @@ def handle_text_message(event):
             USER_STATES[user_id] = "sos_q3"
             quick_reply = QuickReply(
                 items=[
-                    QuickReplyButton(action=TextMessage(text="YES", label="มี (YES)")),
-                    QuickReplyButton(action=TextMessage(text="NO", label="ไม่มี (NO)"))
+                    QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
+                    QuickReplyButton(action=MessageAction(label="ไม่มี (NO)", text="NO"))
                 ]
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 3: ในบ้านมีเด็กเล็ก (อายุต่ำกว่า 12 ปี) หรือไม่ครับ?", quick_reply=quick_reply))
@@ -600,8 +623,8 @@ def handle_text_message(event):
             USER_STATES[user_id] = "sos_q4"
             quick_reply = QuickReply(
                 items=[
-                    QuickReplyButton(action=TextMessage(text="YES", label="มี (YES)")),
-                    QuickReplyButton(action=TextMessage(text="NO", label="ไม่มี (NO)"))
+                    QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
+                    QuickReplyButton(action=MessageAction(label="ไม่มี (NO)", text="NO"))
                 ]
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 4: ในบ้านมีผู้สูงอายุหรือไม่ครับ?", quick_reply=quick_reply))
@@ -613,8 +636,8 @@ def handle_text_message(event):
             USER_STATES[user_id] = "sos_q5"
             quick_reply = QuickReply(
                 items=[
-                    QuickReplyButton(action=TextMessage(text="YES", label="มี (YES)")),
-                    QuickReplyButton(action=TextMessage(text="NO", label="ไม่มี (NO)"))
+                    QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
+                    QuickReplyButton(action=MessageAction(label="ไม่มี (NO)", text="NO"))
                 ]
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 5: ในบ้านมีผู้ป่วยติดเตียงหรือไม่ครับ?", quick_reply=quick_reply))
@@ -626,8 +649,8 @@ def handle_text_message(event):
             USER_STATES[user_id] = "sos_q6"
             quick_reply = QuickReply(
                 items=[
-                    QuickReplyButton(action=TextMessage(text="YES", label="มี (YES)")),
-                    QuickReplyButton(action=TextMessage(text="NO", label="ไม่มี (NO)"))
+                    QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
+                    QuickReplyButton(action=MessageAction(label="ไม่มี (NO)", text="NO"))
                 ]
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 6: มีสัตว์เลี้ยงที่ต้องอพยพร่วมด้วยหรือไม่ครับ?", quick_reply=quick_reply))
@@ -639,10 +662,10 @@ def handle_text_message(event):
             USER_STATES[user_id] = "sos_q7"
             quick_reply = QuickReply(
                 items=[
-                    QuickReplyButton(action=TextMessage(text="ต่ำกว่า 30 ซม.", label="ต่ำกว่า 30 ซม.")),
-                    QuickReplyButton(action=TextMessage(text="30-50 ซม.", label="30-50 ซม.")),
-                    QuickReplyButton(action=TextMessage(text="50 ซม. - 1 เมตร", label="50 ซม. - 1 เมตร")),
-                    QuickReplyButton(action=TextMessage(text="สูงกว่า 1 เมตร", label="สูงกว่า 1 เมตร"))
+                    QuickReplyButton(action=MessageAction(label="ต่ำกว่า 30 ซม.", text="ต่ำกว่า 30 ซม.")),
+                    QuickReplyButton(action=MessageAction(label="30-50 ซม.", text="30-50 ซม.")),
+                    QuickReplyButton(action=MessageAction(label="50 ซม. - 1 เมตร", text="50 ซม. - 1 เมตร")),
+                    QuickReplyButton(action=MessageAction(label="สูงกว่า 1 เมตร", text="สูงกว่า 1 เมตร"))
                 ]
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 7: ระดับน้ำท่วมบ้านในปัจจุบันโดยประมาณครับ?", quick_reply=quick_reply))
@@ -715,8 +738,8 @@ def handle_text_message(event):
             
             quick_reply = QuickReply(
                 items=[
-                    QuickReplyButton(action=TextMessage(text="ยืนยันการส่งข้อมูล", label="ยืนยันการส่งข้อมูล")),
-                    QuickReplyButton(action=TextMessage(text="ยกเลิกและแก้ไขใหม่", label="ยกเลิกและแก้ไขใหม่"))
+                    QuickReplyButton(action=MessageAction(label="ยืนยันการส่งข้อมูล", text="ยืนยันการส่งข้อมูล")),
+                    QuickReplyButton(action=MessageAction(label="ยกเลิกและแก้ไขใหม่", text="ยกเลิกและแก้ไขใหม่"))
                 ]
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
@@ -1173,7 +1196,7 @@ def handle_location_message(event):
                 f"🗺️ ระยะทางห่างจากจุดของคุณ: {closest_station['distance']:.2f} กิโลเมตร\n\n"
                 f"📏 ระดับน้ำปัจจุบัน: {closest_station['level']} เมตร\n"
                 f"⚠️ ระดับความปลอดภัย: {closest_station['status']}\n\n"
-                "โปรดระมัดระวังความเสี่ยงของกระแสน้ำไหลล้นตลิ่ง และเฝ้าระวังสัญญาณเตือนภัยในพื้นที่อย่างใกล้ชิดนะครับ"
+                "โปรดระมัดระวังความเสี่ยงของกระแสน้ำไหลล้นตลิ่ง และเฝ้าระวังสัญญานเตือนภัยในพื้นที่อย่างใกล้ชิดนะครับ"
             )
             
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
