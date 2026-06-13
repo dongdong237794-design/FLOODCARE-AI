@@ -2,6 +2,5 @@ Flask
 gunicorn
 line-bot-sdk
 google-generativeai
-requests
 gspread
 oauth2client
