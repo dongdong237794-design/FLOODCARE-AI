@@ -15,7 +15,7 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets (อัปเกรดใช้ระบบ Native ปราศจาก oauth2client)
+# Google Sheets
 import gspread
 
 app = Flask(__name__)
@@ -67,11 +67,10 @@ def clean_text_for_line(text):
     cleaned = text.replace("**", "").replace("*", "")
     return cleaned
 
-# 3. [ฟีเจอร์เพิ่มใหม่] ฟังก์ชันคัดกรองดึงรหัส Google Sheet ID ออกจาก URL ลิงก์ยาวโดยอัตโนมัติ
+# 3. ฟังก์ชันคัดกรองดึงรหัส Google Sheet ID ออกจาก URL ลิงก์ยาวโดยอัตโนมัติ
 def extract_sheet_id(sheet_var):
     if not sheet_var:
         return ""
-    # หากผู้ใช้นำ URL สเปรดชีตมาวางทั้งเส้น ให้ทำการหั่นคัดกรองดึงเฉพาะตัวรหัส ID ออกมาใช้งานโดยออโต้
     if "/d/" in sheet_var:
         parts = sheet_var.split("/d/")
         if len(parts) > 1:
@@ -119,7 +118,7 @@ def setup_sheets_automatically(sheet):
             headers = ["Timestamp", "UserID", "Question", "Answer"]
             logs_ws.append_row(headers)
             
-        # ลบแท็บเริ่มต้น "ชีต1" หรือ "Sheet1" เพื่อความสะอาดของตาราง
+        # ลบแท็บเริ่มต้นเพื่อความสะอาด
         for default_name in ["ชีต1", "Sheet1"]:
             if default_name in existing_sheets:
                 try:
@@ -134,11 +133,9 @@ def setup_sheets_automatically(sheet):
 # ตัวแปรควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์
 SHEETS_INITIALIZED = False
 
-# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (สิทธิมั่นคงและเบาลง)
+# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่
 def get_sheets_client():
     global SHEETS_INITIALIZED
-    
-    # สกัดดึงรหัส ID ออกมาจากลิงก์ออโต้เพื่อป้องกันคนกรอกผิดพลาด
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
     
     if not GOOGLE_SERVICE_ACCOUNT_JSON or not clean_sheet_id:
@@ -146,10 +143,8 @@ def get_sheets_client():
         return None
     try:
         creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
-        # ใช้ฟังก์ชันสมัยใหม่ของ gspread ในการเชื่อมต่อด้วยพารามิเตอร์ดิกชันนารีโดยตรง (ไม่ต้องผ่าน oauth2client)
         client = gspread.service_account_from_dict(creds_dict)
         
-        # รันระบบตั้งค่าสเปกคอลัมน์ออโต้
         if not SHEETS_INITIALIZED:
             try:
                 sheet = client.open_by_key(clean_sheet_id)
