@@ -63,15 +63,15 @@ def clean_text_for_line(text):
     cleaned = text.replace("**", "").replace("*", "")
     return cleaned
 
-# 3. [ฟีเจอร์เพิ่มใหม่] ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
+# 3. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (ฉบับปรับปรุงระบบสแกนแท็บเรียลไทม์)
 def setup_sheets_automatically(sheet):
     try:
+        # ดึงรายชื่อแท็บทั้งหมดที่มีอยู่ในชีตปัจจุบันมาเก็บเป็น List เพื่อนำมาเช็กเปรียบเทียบ
+        existing_sheets = [w.title for w in sheet.worksheets()]
+        
         # 1. จัดการชีต SOS_Intake
-        try:
-            sos_ws = sheet.worksheet("SOS_Intake")
-        except gspread.exceptions.WorksheetNotFound:
+        if "SOS_Intake" not in existing_sheets:
             print("Creating SOS_Intake worksheet...")
-            # สร้างแท็บและเขียนหัวข้อคอลัมน์แถวที่ 1
             sos_ws = sheet.add_worksheet(title="SOS_Intake", rows="2000", cols="15")
             headers = [
                 "Timestamp", "UserID", "Area", "TotalPeople", "Children", 
@@ -81,9 +81,7 @@ def setup_sheets_automatically(sheet):
             sos_ws.append_row(headers)
             
         # 2. จัดการชีต Shelters
-        try:
-            shelters_ws = sheet.worksheet("Shelters")
-        except gspread.exceptions.WorksheetNotFound:
+        if "Shelters" not in existing_sheets:
             print("Creating Shelters worksheet...")
             shelters_ws = sheet.add_worksheet(title="Shelters", rows="1000", cols="10")
             headers = [
@@ -100,9 +98,7 @@ def setup_sheets_automatically(sheet):
                 shelters_ws.append_row(r)
             
         # 3. จัดการชีต AI Logs
-        try:
-            logs_ws = sheet.worksheet("AI Logs")
-        except gspread.exceptions.WorksheetNotFound:
+        if "AI Logs" not in existing_sheets:
             print("Creating AI Logs worksheet...")
             logs_ws = sheet.add_worksheet(title="AI Logs", rows="5000", cols="5")
             headers = ["Timestamp", "UserID", "Question", "Answer"]
@@ -110,11 +106,12 @@ def setup_sheets_automatically(sheet):
             
         # ลบแท็บเริ่มต้น "ชีต1" หรือ "Sheet1" เพื่อความสะอาดของตาราง
         for default_name in ["ชีต1", "Sheet1"]:
-            try:
-                default_ws = sheet.worksheet(default_name)
-                sheet.del_worksheet(default_ws)
-            except gspread.exceptions.WorksheetNotFound:
-                pass
+            if default_name in existing_sheets:
+                try:
+                    default_ws = sheet.worksheet(default_name)
+                    sheet.del_worksheet(default_ws)
+                except:
+                    pass
         print("Auto-setup Google Sheets structure completed successfully!")
     except Exception as e:
         print(f"Error in automatic sheet setup: {e}")
@@ -508,7 +505,6 @@ def handle_text_message(event):
                         sh_province = str(row.get('Province', '')).strip()
                         sh_district = str(row.get('District', '')).strip()
                         
-                        # ตรวจจับหากคำที่ผู้ใช้พิมพ์เข้ามา ตรงกับชื่อศูนย์, จังหวัด หรืออำเภอในชีต
                         if user_text in sh_name or user_text in sh_province or user_text in sh_district:
                             vacancy_status = check_shelter_vacancy(row.get('Capacity', 100), row.get('Occupancy', 0))
                             shelter_list.append({
@@ -593,6 +589,7 @@ def handle_text_message(event):
             print(f"Gemini API Error: {e}")
             ai_response = "⚠️ บริการ AI ขัดข้องชั่วคราว หากตกอยู่ในภาวะอันตราย โทร ปภ. 1784 ทันทีครับ"
             
+        sheets_client = get_sheets_client()
         if sheets_client:
             try:
                 sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
