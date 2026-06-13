@@ -2,7 +2,6 @@ import os
 import json
 import math
 import datetime
-import requests
 from flask import Flask, request, abort, render_template_string
 
 # LINE SDK
@@ -16,9 +15,8 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets
+# Google Sheets (อัปเกรดใช้ระบบ Native ปราศจาก oauth2client)
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__)
 
@@ -30,9 +28,15 @@ RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
-# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง (State Machine & Context Storage)
+# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง
 USER_STATES = {}
 USER_DATA = {}
+
+# รายชื่อศูนย์อพยพจำลอง (ตัวสำรองระบบหาก Google Sheets ยังทำงานไม่สมบูรณ์)
+FALLBACK_SHELTERS = [
+    {"name": "ศูนย์อพยพวัดเสาชิงช้า", "lat": 13.7523, "lon": 100.5015, "capacity": 200, "occupancy": 85, "status": "ว่าง"},
+    {"name": "ศูนย์อพยพโรงเรียนวัดสุทัศน์", "lat": 13.7511, "lon": 100.5002, "capacity": 150, "occupancy": 150, "status": "เต็ม"}
+]
 
 # เริ่มใช้งาน LINE API
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
@@ -56,17 +60,29 @@ gemini_model = genai.GenerativeModel(
     )
 )
 
-# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*) ออกทั้งหมดก่อนส่งกลับเข้าไลน์
+# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*)
 def clean_text_for_line(text):
     if not text:
         return ""
     cleaned = text.replace("**", "").replace("*", "")
     return cleaned
 
-# 3. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (ฉบับปรับปรุงระบบสแกนแท็บเรียลไทม์)
+# 3. [ฟีเจอร์เพิ่มใหม่] ฟังก์ชันคัดกรองดึงรหัส Google Sheet ID ออกจาก URL ลิงก์ยาวโดยอัตโนมัติ
+def extract_sheet_id(sheet_var):
+    if not sheet_var:
+        return ""
+    # หากผู้ใช้นำ URL สเปรดชีตมาวางทั้งเส้น ให้ทำการหั่นคัดกรองดึงเฉพาะตัวรหัส ID ออกมาใช้งานโดยออโต้
+    if "/d/" in sheet_var:
+        parts = sheet_var.split("/d/")
+        if len(parts) > 1:
+            sub_parts = parts[1].split("/")
+            if len(sub_parts) > 0:
+                return sub_parts[0].strip()
+    return sheet_var.strip()
+
+# 4. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
 def setup_sheets_automatically(sheet):
     try:
-        # ดึงรายชื่อแท็บทั้งหมดที่มีอยู่ในชีตปัจจุบันมาเก็บเป็น List เพื่อนำมาเช็กเปรียบเทียบ
         existing_sheets = [w.title for w in sheet.worksheets()]
         
         # 1. จัดการชีต SOS_Intake
@@ -89,7 +105,6 @@ def setup_sheets_automatically(sheet):
                 "Longitude", "Capacity", "Occupancy", "Status"
             ]
             shelters_ws.append_row(headers)
-            # เขียนพิกัดศูนย์อพยพสาธิตในพื้นที่จริง (หาดใหญ่ และ กทม.) ลงไปให้ใช้จำลองได้ทันที
             mock_rows = [
                 ["SH001", "ศูนย์อพยพโรงเรียนหาดใหญ่ (วัดโคกสมานคุณ)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
                 ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง"]
@@ -116,25 +131,28 @@ def setup_sheets_automatically(sheet):
     except Exception as e:
         print(f"Error in automatic sheet setup: {e}")
 
-# ใช้สวิตช์ล็อคเพื่อเรียกใช้คำสั่งตรวจสอบครั้งแรกสุดเพียงครั้งเดียว
+# ตัวแปรควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์
 SHEETS_INITIALIZED = False
 
-# 4. ฟังก์ชันเชื่อมต่อ Google Sheets อย่างปลอดภัยพร้อมระบบป้องกันเซิร์ฟเวอร์แครช
+# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (สิทธิมั่นคงและเบาลง)
 def get_sheets_client():
     global SHEETS_INITIALIZED
-    if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
+    
+    # สกัดดึงรหัส ID ออกมาจากลิงก์ออโต้เพื่อป้องกันคนกรอกผิดพลาด
+    clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
+    
+    if not GOOGLE_SERVICE_ACCOUNT_JSON or not clean_sheet_id:
         print("Warning: Google Sheets variables are not configured yet.")
         return None
     try:
         creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
+        # ใช้ฟังก์ชันสมัยใหม่ของ gspread ในการเชื่อมต่อด้วยพารามิเตอร์ดิกชันนารีโดยตรง (ไม่ต้องผ่าน oauth2client)
+        client = gspread.service_account_from_dict(creds_dict)
         
-        # รันระบบโครงสร้างตารางออโต้เพียงรอบเดียวเมื่อเปิดใช้
+        # รันระบบตั้งค่าสเปกคอลัมน์ออโต้
         if not SHEETS_INITIALIZED:
             try:
-                sheet = client.open_by_key(GOOGLE_SHEET_ID)
+                sheet = client.open_by_key(clean_sheet_id)
                 setup_sheets_automatically(sheet)
                 SHEETS_INITIALIZED = True
             except Exception as setup_err:
@@ -145,7 +163,7 @@ def get_sheets_client():
         print(f"Error initializing Google Sheets client: {e}")
         return None
 
-# 5. ฟังก์ชันคำนวณระยะทางภูมิศาสตร์
+# 6. ฟังก์ชันคำนวณระยะทางภูมิศาสตร์
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
@@ -155,7 +173,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-# 6. ฟังก์ชันวิเคราะห์ระดับความเร่งด่วนตามหลักกู้ภัยสากล (Triage Priority Calculator)
+# 7. ฟังก์ชันวิเคราะห์ระดับความเร่งด่วนตามหลักกู้ภัยสากล (Triage Priority Calculator)
 def calculate_priority(data):
     try:
         bedridden = str(data.get("bedridden", "")).strip()
@@ -184,15 +202,16 @@ def calculate_priority(data):
         print(f"Priority Calc Error: {e}")
         return "🟠  ปานกลาง"
 
-# 7. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย
+# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย
 @app.route("/", methods=['GET'])
 def index():
     return "<h2 style='font-family: sans-serif; text-align: center; margin-top: 100px; color: #1E3A8A;'>🤖 FLOODCARE AI Service is Running Active!</h2>"
 
-# 8. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
+# 9. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
 @app.route("/dashboard", methods=['GET'])
 def dashboard():
     sheets_client = get_sheets_client()
+    clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
     sos_cases = []
     shelters = []
     error_msg = ""
@@ -201,7 +220,7 @@ def dashboard():
         error_msg = "⚠️ ยังไม่ได้ป้อนหรือตั้งค่ารหัสสิทธิ์ของ Google Sheets บนระบบ Render ครับ"
     else:
         try:
-            sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+            sheet = sheets_client.open_by_key(clean_sheet_id)
             
             # 1. ดึงข้อมูลกรณีฉุกเฉินผู้ประสบภัย (SOS_Intake)
             try:
@@ -375,17 +394,6 @@ def dashboard():
     """
     return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, urgent_count=urgent_count, medium_count=medium_count, bedridden_count=bedridden_count)
 
-# 9. Webhook Route
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers.get('X-Line-Signature')
-    body = request.get_data(as_text=True)
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return 'OK'
-
 # 10. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
@@ -495,9 +503,11 @@ def handle_text_message(event):
             shelter_list = []
             db_connected = False
             
+            clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
+            sheets_client = get_sheets_client()
             if sheets_client:
                 try:
-                    sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                    sheet = sheets_client.open_by_key(clean_sheet_id)
                     shelters_worksheet = sheet.worksheet("Shelters")
                     rows = shelters_worksheet.get_all_records()
                     for row in rows:
@@ -592,7 +602,7 @@ def handle_text_message(event):
         sheets_client = get_sheets_client()
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
                 log_worksheet = sheet.worksheet("AI Logs")
                 log_worksheet.append_row([timestamp, user_id, user_text, ai_response])
             except Exception as se:
@@ -620,7 +630,7 @@ def handle_location_message(event):
         
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
                 shelters_worksheet = sheet.worksheet("Shelters")
                 rows = shelters_worksheet.get_all_records()
                 for row in rows:
@@ -682,7 +692,7 @@ def handle_location_message(event):
         success = False
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
                 sos_worksheet = sheet.worksheet("SOS_Intake")
                 sos_worksheet.append_row([
                     timestamp,
