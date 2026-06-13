@@ -12,7 +12,6 @@ from linebot.models import (
     TextSendMessage, QuickReply, QuickReplyButton, LocationAction,
     MessageAction  # <--- อิมพอร์ตคลาสปุ่มกดส่งข้อความที่ถูกต้องเข้าสู่ระบบเรียบร้อยครับ!
 )
-
 # Gemini AI
 import google.generativeai as genai
 
