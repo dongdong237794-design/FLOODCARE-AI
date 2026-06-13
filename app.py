@@ -15,7 +15,7 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets
+# Google Sheets (เชื่อมต่อแบบ Native ปราศจากความขัดแย้งของรุ่นไลบรารี)
 import gspread
 
 app = Flask(__name__)
@@ -24,7 +24,6 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
@@ -32,17 +31,11 @@ GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 USER_STATES = {}
 USER_DATA = {}
 
-# รายชื่อศูนย์อพยพจำลอง (ตัวสำรองระบบหาก Google Sheets ยังทำงานไม่สมบูรณ์)
-FALLBACK_SHELTERS = [
-    {"name": "ศูนย์อพยพวัดเสาชิงช้า", "lat": 13.7523, "lon": 100.5015, "capacity": 200, "occupancy": 85, "status": "ว่าง"},
-    {"name": "ศูนย์อพยพโรงเรียนวัดสุทัศน์", "lat": 13.7511, "lon": 100.5002, "capacity": 150, "occupancy": 150, "status": "เต็ม"}
-]
-
 # เริ่มใช้งาน LINE API
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# เริ่มใช้งาน Gemini AI
+# เริ่มใช้งาน Gemini AI รุ่นเสถียรล่าสุด
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel(
     model_name="gemini-2.5-flash",
@@ -133,7 +126,7 @@ def setup_sheets_automatically(sheet):
 # ตัวแปรควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์
 SHEETS_INITIALIZED = False
 
-# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่
+# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client)
 def get_sheets_client():
     global SHEETS_INITIALIZED
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
