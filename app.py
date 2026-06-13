@@ -15,7 +15,7 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets (เชื่อมต่อแบบ Native เสถียรและเบาลง)
+# Google Sheets
 import gspread
 
 app = Flask(__name__)
@@ -31,6 +31,12 @@ GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 # ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง
 USER_STATES = {}
 USER_DATA = {}
+
+# รายชื่อศูนย์อพยพจำลอง (ตัวสำรองระบบหาก Google Sheets ยังทำงานไม่สมบูรณ์)
+FALLBACK_SHELTERS = [
+    {"name": "ศูนย์อพยพวัดเสาชิงช้า", "lat": 13.7523, "lon": 100.5015, "capacity": 200, "occupancy": 85, "status": "ว่าง"},
+    {"name": "ศูนย์อพยพโรงเรียนวัดสุทัศน์", "lat": 13.7511, "lon": 100.5002, "capacity": 150, "occupancy": 150, "status": "เต็ม"}
+]
 
 # เริ่มใช้งาน LINE API แบบปลอดภัย (ป้องกันเซิร์ฟเวอร์แครชหากยังไม่ป้อนคีย์)
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
@@ -77,7 +83,6 @@ def extract_sheet_id(sheet_var):
 # 4. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
 def setup_sheets_automatically(sheet):
     try:
-        # ดึงรายชื่อแผ่นงานย่อยทั้งหมดในชีตมาตรวจสอบ
         existing_sheets = [w.title for w in sheet.worksheets()]
         
         # 1. จัดการชีต SOS_Intake
@@ -142,32 +147,39 @@ def setup_sheets_automatically(sheet):
     except Exception as e:
         print(f"Error in automatic sheet setup: {e}")
 
-# ตัวแปรควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์
+# ตัวแปรควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์ และตัวแปรเก็บประวัติ Error
 SHEETS_INITIALIZED = False
+LAST_SHEETS_ERROR = "ยังไม่ได้เปิดใช้งานการเชื่อมต่อ"
 
-# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client)
+# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (สกัดระบบตรวจสอบ Error ละเอียด)
 def get_sheets_client():
-    global SHEETS_INITIALIZED
+    global SHEETS_INITIALIZED, LAST_SHEETS_ERROR
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
     
-    if not GOOGLE_SERVICE_ACCOUNT_JSON or not clean_sheet_id:
-        print("Warning: Google Sheets variables are not configured yet.")
+    if not GOOGLE_SERVICE_ACCOUNT_JSON:
+        LAST_SHEETS_ERROR = "ไม่พบตัวแปร GOOGLE_SERVICE_ACCOUNT_JSON บนระบบ Render"
         return None
+    if not clean_sheet_id:
+        LAST_SHEETS_ERROR = "ไม่พบตัวแปร GOOGLE_SHEET_ID บนระบบ Render"
+        return None
+        
     try:
         creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
         client = gspread.service_account_from_dict(creds_dict)
         
-        # รันระบบโครงสร้างตารางออโต้เพียงรอบเดียวเมื่อเปิดใช้
         if not SHEETS_INITIALIZED:
             try:
                 sheet = client.open_by_key(clean_sheet_id)
                 setup_sheets_automatically(sheet)
                 SHEETS_INITIALIZED = True
+                LAST_SHEETS_ERROR = "เชื่อมต่อสำเร็จและจัดเตรียมตารางอัตโนมัติแล้ว"
             except Exception as setup_err:
+                LAST_SHEETS_ERROR = f"สิทธิ์ไม่ผ่าน (โปรดเช็กสิทธิ์แชร์ Editor ให้เมลบอตหรือตรวจสอบ ID): {setup_err}"
                 print(f"Auto-setup sheet failed: {setup_err}")
                 
         return client
     except Exception as e:
+        LAST_SHEETS_ERROR = f"ถอดรหัสลับ JSON Key ไม่สำเร็จ (ข้อมูลไม่ครบถ้วน): {e}"
         print(f"Error initializing Google Sheets client: {e}")
         return None
 
@@ -210,9 +222,14 @@ def calculate_priority(data):
         print(f"Priority Calc Error: {e}")
         return "🟠  ปานกลาง"
 
-# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์และ Route Inspector เพื่อเช็กพิกัด Webhook
+# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์ แผนภูมิวินิจฉัยฐานข้อมูลกลาง (Diagnostic Control Panel)
 @app.route("/", methods=['GET'])
 def index():
+    # ทดสอบรันคำขอสิทธิ์เชื่อมเพื่อบันทึกประวัติความล้มเหลวล่าสุดแบบทันที
+    get_sheets_client()
+    
+    db_status = f"<span style='color: #10b981; font-weight: bold;'>🟢 {LAST_SHEETS_ERROR}</span>" if SHEETS_INITIALIZED else f"<span style='color: #ef4444; font-weight: bold;'>🔴 เชื่อมต่อล้มเหลว (สาเหตุ: {LAST_SHEETS_ERROR})</span>"
+    
     routes = []
     for rule in app.url_map.iter_rules():
         routes.append(f"<li style='margin-bottom:8px;'>🗺️ <b>{rule.endpoint}</b>: <code style='background:#f1f1f1; padding:3px 8px;'>{rule.rule}</code> (Methods: {', '.join(rule.methods)})</li>")
@@ -220,13 +237,23 @@ def index():
     
     return f"""
     <div style="font-family: sans-serif; padding: 40px; max-width: 650px; margin: auto; border: 1px solid #ccc; border-radius: 12px; margin-top: 50px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        <h2 style="color: #1E3A8A; text-align: center;">🤖 FLOODCARE AI Service is Running Active!</h2>
-        <p style="color: #444; line-height: 1.6;">เซิร์ฟเวอร์หลักรันงานได้อย่างสมบูรณ์แบบแล้วครับ! นี่คือรายชื่อเส้นทางการเชื่อมต่อ (Routes) ที่เปิดใช้งานบนเซิร์ฟเวอร์เครื่องนี้ในปัจจุบัน:</p>
-        <ul style="list-style: none; padding-left: 0; margin-top: 20px;">{routes_html}</ul>
+        <h2 style="color: #1E3A8A; text-anchor: center; margin-bottom: 25px;">🤖 FLOODCARE AI Diagnostic Panel</h2>
+        <p style="color: #444; line-height: 1.6;">ระบบช่วยวิเคราะห์ความเสถียรและการเชื่อมต่อของเซิร์ฟเวอร์แบบเรียลไทม์:</p>
+        
+        <div style="background: #f8f9fa; padding: 15px; border-left: 4px solid #1E3A8A; margin: 20px 0; border-radius: 0 8px 8px 0;">
+            <p style="margin: 0; font-weight: bold; color: #1E3A8A;">📊 สถานะการเชื่อม Google Sheets:</p>
+            <p style="margin: 5px 0 0 0; font-size: 14px; color: #333;">{db_status}</p>
+        </div>
+
+        <p style="color: #666; font-size: 14px; margin-top: 25px;">นี่คือรายชื่อเส้นทางแอป (Active Routes):</p>
+        <ul style="list-style: none; padding-left: 0; margin-top: 10px; font-size: 14px;">{routes_html}</ul>
+        
         <hr style="border:0; border-top: 1px solid #eee; margin: 25px 0;">
         <p style="color: #e11d48; font-size: 13px; font-weight: bold; line-height:1.5;">
-            ⚠️ คำแนะนำสำหรับการแก้ปัญหา Error 404:<br>
-            หาก LINE แจ้งเตือนว่าส่งข้อมูลไม่สัญญาณผ่าน โปรดเช็กพิกัด Webhook URL ในหน้า LINE Developers ของคุณว่าสะกดตรงกับ '/callback' ในตารางด้านบนเป๊ะๆ หรือไม่ และห้ามมีเครื่องหมายสแลช / ปิดท้ายสุดนะครับ
+            ⚠️ คำแนะนำสำหรับการทำตามสเต็ปเชื่อมต่อสำเร็จ:<br>
+            1. ตรวจเช็กหน้า Google Sheets ว่าได้กดปุ่มแชร์สิทธิ์เป็น <b>Editor (ผู้แก้ไข)</b> ให้กับอีเมลเมลบอตตัวนี้แล้วหรือยัง:<br>
+            <code style="background:#fff1f2; padding:3px 6px; font-size: 12px; border-radius: 4px; display: inline-block; margin-top: 5px;">floodcare-api@floodcare-database.iam.gserviceaccount.com</code><br>
+            2. ตรวจสอบว่าแปร GOOGLE_SHEET_ID และ GOOGLE_SERVICE_ACCOUNT_JSON สะกดถูกช่องไม่มีตกหล่นครับ
         </p>
     </div>
     """
@@ -241,7 +268,7 @@ def dashboard():
     error_msg = ""
     
     if not sheets_client:
-        error_msg = "⚠️ ยังไม่ได้ป้อนหรือตั้งค่ารหัสสิทธิ์ของ Google Sheets บนระบบ Render ครับ"
+        error_msg = f"⚠️ ระบบตรวจพบข้อขัดข้องในการเรียกสิทธิ์: {LAST_SHEETS_ERROR}"
     else:
         try:
             sheet = sheets_client.open_by_key(clean_sheet_id)
