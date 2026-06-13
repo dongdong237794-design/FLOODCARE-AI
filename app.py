@@ -34,12 +34,6 @@ GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 USER_STATES = {}
 USER_DATA = {}
 
-# รายชื่อศูนย์อพยพจำลอง (จะถูกใช้เป็นตัวสำรอง หากยังไม่ได้เชื่อมต่อ Google Sheets)
-FALLBACK_SHELTERS = [
-    {"name": "ศูนย์อพยพวัดเสาชิงช้า", "lat": 13.7523, "lon": 100.5015, "capacity": 200, "occupancy": 85, "status": "ว่าง"},
-    {"name": "ศูนย์อพยพโรงเรียนวัดสุทัศน์", "lat": 13.7511, "lon": 100.5002, "capacity": 150, "occupancy": 150, "status": "เต็ม"}
-]
-
 # เริ่มใช้งาน LINE API
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
@@ -69,8 +63,68 @@ def clean_text_for_line(text):
     cleaned = text.replace("**", "").replace("*", "")
     return cleaned
 
-# 3. ฟังก์ชันเชื่อมต่อ Google Sheets อย่างปลอดภัยพร้อมระบบป้องกันเซิร์ฟเวอร์แครช
+# 3. [ฟีเจอร์เพิ่มใหม่] ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
+def setup_sheets_automatically(sheet):
+    try:
+        # 1. จัดการชีต SOS_Intake
+        try:
+            sos_ws = sheet.worksheet("SOS_Intake")
+        except gspread.exceptions.WorksheetNotFound:
+            print("Creating SOS_Intake worksheet...")
+            # สร้างแท็บและเขียนหัวข้อคอลัมน์แถวที่ 1
+            sos_ws = sheet.add_worksheet(title="SOS_Intake", rows="2000", cols="15")
+            headers = [
+                "Timestamp", "UserID", "Area", "TotalPeople", "Children", 
+                "Elderly", "Bedridden", "Pets", "WaterLevel", "UrgentEvac", 
+                "Latitude", "Longitude", "Address", "Priority"
+            ]
+            sos_ws.append_row(headers)
+            
+        # 2. จัดการชีต Shelters
+        try:
+            shelters_ws = sheet.worksheet("Shelters")
+        except gspread.exceptions.WorksheetNotFound:
+            print("Creating Shelters worksheet...")
+            shelters_ws = sheet.add_worksheet(title="Shelters", rows="1000", cols="10")
+            headers = [
+                "ShelterID", "Name", "Province", "District", "Latitude", 
+                "Longitude", "Capacity", "Occupancy", "Status"
+            ]
+            shelters_ws.append_row(headers)
+            # เขียนพิกัดศูนย์อพยพสาธิตในพื้นที่จริง (หาดใหญ่ และ กทม.) ลงไปให้ใช้จำลองได้ทันที
+            mock_rows = [
+                ["SH001", "ศูนย์อพยพโรงเรียนหาดใหญ่ (วัดโคกสมานคุณ)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
+                ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง"]
+            ]
+            for r in mock_rows:
+                shelters_ws.append_row(r)
+            
+        # 3. จัดการชีต AI Logs
+        try:
+            logs_ws = sheet.worksheet("AI Logs")
+        except gspread.exceptions.WorksheetNotFound:
+            print("Creating AI Logs worksheet...")
+            logs_ws = sheet.add_worksheet(title="AI Logs", rows="5000", cols="5")
+            headers = ["Timestamp", "UserID", "Question", "Answer"]
+            logs_ws.append_row(headers)
+            
+        # ลบแท็บเริ่มต้น "ชีต1" หรือ "Sheet1" เพื่อความสะอาดของตาราง
+        for default_name in ["ชีต1", "Sheet1"]:
+            try:
+                default_ws = sheet.worksheet(default_name)
+                sheet.del_worksheet(default_ws)
+            except gspread.exceptions.WorksheetNotFound:
+                pass
+        print("Auto-setup Google Sheets structure completed successfully!")
+    except Exception as e:
+        print(f"Error in automatic sheet setup: {e}")
+
+# ใช้สวิตช์ล็อคเพื่อเรียกใช้คำสั่งตรวจสอบครั้งแรกสุดเพียงครั้งเดียว
+SHEETS_INITIALIZED = False
+
+# 4. ฟังก์ชันเชื่อมต่อ Google Sheets อย่างปลอดภัยพร้อมระบบป้องกันเซิร์ฟเวอร์แครช
 def get_sheets_client():
+    global SHEETS_INITIALIZED
     if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
         print("Warning: Google Sheets variables are not configured yet.")
         return None
@@ -78,12 +132,23 @@ def get_sheets_client():
         creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        return gspread.authorize(creds)
+        client = gspread.authorize(creds)
+        
+        # รันระบบโครงสร้างตารางออโต้เพียงรอบเดียวเมื่อเปิดใช้
+        if not SHEETS_INITIALIZED:
+            try:
+                sheet = client.open_by_key(GOOGLE_SHEET_ID)
+                setup_sheets_automatically(sheet)
+                SHEETS_INITIALIZED = True
+            except Exception as setup_err:
+                print(f"Auto-setup sheet failed: {setup_err}")
+                
+        return client
     except Exception as e:
         print(f"Error initializing Google Sheets client: {e}")
         return None
 
-# 4. ฟังก์ชันคำนวณระยะทางภูมิศาสตร์
+# 5. ฟังก์ชันคำนวณระยะทางภูมิศาสตร์
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
@@ -93,7 +158,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-# 5. ฟังก์ชันวิเคราะห์ระดับความเร่งด่วนตามหลักกู้ภัยสากล (Triage Priority Calculator)
+# 6. ฟังก์ชันวิเคราะห์ระดับความเร่งด่วนตามหลักกู้ภัยสากล (Triage Priority Calculator)
 def calculate_priority(data):
     try:
         bedridden = str(data.get("bedridden", "")).strip()
@@ -113,21 +178,21 @@ def calculate_priority(data):
                 is_critical_water = True
 
         if is_bedridden or is_critical_water or is_urgent:
-            return "🔴 เร่งด่วนมาก"
+            return "🔴  เร่งด่วนมาก"
         elif "เอว" in water_level or "เข่า" in water_level or "สูง" in water_level:
-            return "🟠 ปานกลาง"
+            return "🟠  ปานกลาง"
         else:
-            return "🟢 ติดตามสถานการณ์"
+            return "🟢  ติดตามสถานการณ์"
     except Exception as e:
         print(f"Priority Calc Error: {e}")
-        return "🟠 ปานกลาง"
+        return "🟠  ปานกลาง"
 
-# 6. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย
+# 7. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย
 @app.route("/", methods=['GET'])
 def index():
     return "<h2 style='font-family: sans-serif; text-align: center; margin-top: 100px; color: #1E3A8A;'>🤖 FLOODCARE AI Service is Running Active!</h2>"
 
-# 7. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
+# 8. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
 @app.route("/dashboard", methods=['GET'])
 def dashboard():
     sheets_client = get_sheets_client()
@@ -159,13 +224,11 @@ def dashboard():
         except Exception as e:
             error_msg = f"ไม่สามารถเข้าถึงฐานข้อมูลกลางได้: {e}"
 
-    # คำนวณสถิติประเมินสถานการณ์ภาพรวมอย่างรวดเร็ว
     total_cases = len(sos_cases)
     urgent_count = sum(1 for c in sos_cases if "🔴" in str(c.get("Priority", "")))
     medium_count = sum(1 for c in sos_cases if "🟠" in str(c.get("Priority", "")))
     bedridden_count = sum(1 for c in sos_cases if "มี" in str(c.get("Bedridden", "")) or "ใช่" in str(c.get("Bedridden", "")))
     
-    # หน้าจอเว็บดีไซน์ Command Center
     html_template = """
     <!DOCTYPE html>
     <html lang="th">
@@ -177,7 +240,6 @@ def dashboard():
     </head>
     <body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
         <div class="container mx-auto p-4 md:p-6">
-            <!-- ส่วนหัวข้อหลัก -->
             <header class="flex flex-col md:flex-row justify-between items-center pb-6 mb-6 border-b border-slate-800">
                 <div class="flex items-center space-x-3">
                     <span class="text-4xl">🚨</span>
@@ -197,7 +259,6 @@ def dashboard():
             </div>
             {% endif %}
 
-            <!-- ส่วนสรุปสถิติ (Stats Grid) -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                 <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
                     <p class="text-sm text-slate-400">เคสแจ้งเหตุทั้งหมด</p>
@@ -217,15 +278,12 @@ def dashboard():
                 </div>
             </div>
 
-            <!-- ส่วนแสดงรายชื่อกลุ่มกู้ภัยและศูนย์อพยพหลัก -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- ตารางผู้แจ้งเหตุ SOS_Intake (2 ใน 3 ส่วน) -->
                 <div class="lg:col-span-2 bg-slate-800 rounded-xl border border-slate-700 p-4 overflow-hidden">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-lg font-semibold flex items-center space-x-2">
                             <span>📋</span> <span>รายการขอความช่วยเหลือฉุกเฉิน</span>
                         </h2>
-                        <!-- กล่องค้นหาเฉพาะจุดแบบด่วน -->
                         <input id="searchInput" onkeyup="filterCases()" type="text" placeholder="🔍 ค้นหาพื้นที่..." class="bg-slate-900 border border-slate-700 text-sm px-3 py-1.5 rounded-lg text-slate-200 focus:outline-none focus:border-blue-500">
                     </div>
                     
@@ -265,7 +323,6 @@ def dashboard():
                     </div>
                 </div>
 
-                <!-- การแสดงผลข้อมูลศูนย์อพยพ Shelters (1 ใน 3 ส่วน) -->
                 <div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
                     <h2 class="text-lg font-semibold flex items-center space-x-2 mb-4">
                         <span>🏠</span> <span>สถานะศูนย์อพยพจริงในระบบ</span>
@@ -282,7 +339,6 @@ def dashboard():
                                     {{ sh.get('Status', 'ว่าง') }}
                                 </span>
                             </div>
-                            <!-- แถบแสดงอัตราส่วนผู้เข้าพัก (Capacity Bar) -->
                             <div class="w-full bg-slate-800 rounded-full h-2 mt-3">
                                 <div class="bg-blue-500 h-2 rounded-full" style="width: {{ (sh.get('Occupancy', 0)|int / sh.get('Capacity', 100)|int * 100)|round|int if sh.get('Capacity', 100)|int > 0 else 0 }}%"></div>
                             </div>
@@ -298,7 +354,6 @@ def dashboard():
         </div>
 
         <script>
-            // ฟังก์ชันฟิลเตอร์ค้นหาชื่อพื้นที่แบบ Real-time บนเบราว์เซอร์
             function filterCases() {
                 var input = document.getElementById("searchInput");
                 var filter = input.value.toLowerCase();
@@ -323,7 +378,7 @@ def dashboard():
     """
     return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, urgent_count=urgent_count, medium_count=medium_count, bedridden_count=bedridden_count)
 
-# 8. Webhook Route
+# 9. Webhook Route
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -334,7 +389,7 @@ def callback():
         abort(400)
     return 'OK'
 
-# 9. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
+# 10. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
@@ -344,7 +399,7 @@ def handle_text_message(event):
     # ดึงระดับสถานะการคุยปัจจุบัน
     state = USER_STATES.get(user_id)
 
-    # ==================== ส่วนที่ 9.1: ระบบคัดกรองข้อมูลผู้ประสบภัยอัตโนมัติ (Triage Intake State Machine) ====================
+    # ==================== ส่วนที่ 10.1: ระบบคัดกรองข้อมูลผู้ประสบภัยอัตโนมัติ (Triage Intake State Machine) ====================
     if state:
         if user_id not in USER_DATA:
             USER_DATA[user_id] = {}
@@ -403,7 +458,7 @@ def handle_text_message(event):
             )
             return
 
-        # ==================== ส่วนที่ 9.2: ระบบคัดกรองคำถามอื่น ๆ ย้อนกลับตามเมนู ====================
+        # ==================== ส่วนที่ 10.2: ระบบคัดกรองคำถามอื่น ๆ ย้อนกลับตามเมนู ====================
         elif state == "waiting_emergency_type":
             USER_STATES.pop(user_id, None)
             prompt = f"ผู้ประสบภัยต้องการติดต่อขอกู้ภัยด้วยเรื่องเฉพาะหน้าคือ: '{user_text}' โปรดระบุเบอร์โทรฉุกเฉินและประสานงานกู้ภัยอย่างสั้น กระชับและสุภาพ"
@@ -487,7 +542,7 @@ def handle_text_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
-    # ==================== ส่วนที่ 9.3: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
+    # ==================== ส่วนที่ 10.3: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
         USER_STATES[user_id] = "waiting_emergency_type"
         reply_text = "📞 คุณต้องการติดต่อประสานงานกู้ภัยด้วยสถานการณ์ฉุกเฉินเรื่องใดเป็นพิเศษไหมครับ? พิมพ์บอกผมสั้นๆ ได้เลยนะครับ"
@@ -548,7 +603,7 @@ def handle_text_message(event):
                 
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
-# 10. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
+# 11. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
