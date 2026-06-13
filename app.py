@@ -28,15 +28,9 @@ RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
-# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง
+# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลชั่วคราว (State Machine & Context Storage)
 USER_STATES = {}
 USER_DATA = {}
-
-# รายชื่อศูนย์อพยพจำลอง (ตัวสำรองระบบหาก Google Sheets ยังทำงานไม่สมบูรณ์)
-FALLBACK_SHELTERS = [
-    {"name": "ศูนย์อพยพวัดเสาชิงช้า", "lat": 13.7523, "lon": 100.5015, "capacity": 200, "occupancy": 85, "status": "ว่าง"},
-    {"name": "ศูนย์อพยพโรงเรียนวัดสุทัศน์", "lat": 13.7511, "lon": 100.5002, "capacity": 150, "occupancy": 150, "status": "เต็ม"}
-]
 
 # เริ่มใช้งาน LINE API แบบปลอดภัย (ป้องกันเซิร์ฟเวอร์แครชหากยังไม่ป้อนคีย์)
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
@@ -61,7 +55,7 @@ gemini_model = genai.GenerativeModel(
     )
 )
 
-# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*)
+# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*) ออกทั้งหมด
 def clean_text_for_line(text):
     if not text:
         return ""
@@ -80,23 +74,30 @@ def extract_sheet_id(sheet_var):
                 return sub_parts[0].strip()
     return sheet_var.strip()
 
-# 4. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
+# 4. ฟังก์ชันเนรมิตแท็บตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup สำหรับเฟส 2)
 def setup_sheets_automatically(sheet):
     try:
         existing_sheets = [w.title for w in sheet.worksheets()]
         
-        # 1. จัดการชีต SOS_Intake
-        if "SOS_Intake" not in existing_sheets:
-            print("Creating SOS_Intake worksheet...")
-            sos_ws = sheet.add_worksheet(title="SOS_Intake", rows="2000", cols="15")
+        # 1. แท็บ users (ตารางข้อมูลผู้สมัครใช้บริการ)
+        if "users" not in existing_sheets:
+            print("Creating users worksheet...")
+            users_ws = sheet.add_worksheet(title="users", rows="3000", cols="10")
+            headers = ["user_id", "first_name", "last_name", "phone", "register_date", "status"]
+            users_ws.append_row(headers)
+
+        # 2. แท็บ sos_requests (ตารางแจ้งพิกัดขอความช่วยเหลือด่วน)
+        if "sos_requests" not in existing_sheets:
+            print("Creating sos_requests worksheet...")
+            sos_ws = sheet.add_worksheet(title="sos_requests", rows="3000", cols="20")
             headers = [
-                "Timestamp", "UserID", "Area", "TotalPeople", "Children", 
-                "Elderly", "Bedridden", "Pets", "WaterLevel", "UrgentEvac", 
-                "Latitude", "Longitude", "Address", "Priority"
+                "request_id", "user_id", "timestamp", "latitude", "longitude", 
+                "people_count", "children", "elderly", "bedridden", "pets", 
+                "water_level", "note", "priority", "status"
             ]
             sos_ws.append_row(headers)
             
-        # 2. จัดการชีต Shelters
+        # 3. แท็บ Shelters (ศูนย์อพยพ/ศูนย์พักพิงจริงในระบบ)
         if "Shelters" not in existing_sheets:
             print("Creating Shelters worksheet...")
             shelters_ws = sheet.add_worksheet(title="Shelters", rows="1000", cols="10")
@@ -105,14 +106,16 @@ def setup_sheets_automatically(sheet):
                 "Longitude", "Capacity", "Occupancy", "Status"
             ]
             shelters_ws.append_row(headers)
+            # ข้อมูลศูนย์พักพิงพิกัดเสี่ยงจริงในไทย
             mock_rows = [
-                ["SH001", "ศูนย์อพยพโรงเรียนหาดใหญ่ (วัดโคกสมานคุณ)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
-                ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง"]
+                ["SH001", "ศูนย์อพยพโรงเรียนเทศบาล 1 (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0112", "100.4715", "500", "120", "ว่าง"],
+                ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง"],
+                ["SH003", "ศูนย์เยาวชนกรุงเทพมหานคร (กทม)", "กรุงเทพ", "ดินแดง", "13.7654", "100.5231", "300", "300", "เต็ม"]
             ]
             for r in mock_rows:
                 shelters_ws.append_row(r)
-            
-        # 3. จัดการชีต Water_Levels
+                
+        # 4. แท็บ Water_Levels (สถานีโทรมาตรตรวจสอบน้ำจริง)
         if "Water_Levels" not in existing_sheets:
             print("Creating Water_Levels worksheet...")
             water_ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="10")
@@ -121,14 +124,36 @@ def setup_sheets_automatically(sheet):
             ]
             water_ws.append_row(headers)
             water_rows = [
-                ["WT001", "สถานีคลองอู่ตะเภา (หาดใหญ่)", "สงขลา", "7.0125", "100.4560", "4.2", "🟢 เฝ้าระวัง"],
+                ["WT001", "สถานีลุ่มน้ำคลองอู่ตะเภา (หาดใหญ่)", "สงขลา", "7.0125", "100.4560", "4.2", "🟢 เฝ้าระวัง"],
                 ["WT002", "สถานีลุ่มน้ำเจ้าพระยา (สะพานพุทธ)", "กรุงเทพ", "13.7390", "100.4985", "1.8", "🟢 เฝ้าระวัง"],
-                ["WT003", "สถานีคลองรังสิตประยูรศักดิ์", "ปทุมธานี", "13.9850", "100.6120", "6.5", "🔴 อันตรายวิกฤต"]
+                ["WT003", "สถานีลุ่มน้ำกว๊านพะเยา", "พะเยา", "19.1620", "99.8940", "6.5", "🔴 อันตรายวิกฤต"]
             ]
             for r in water_rows:
                 water_ws.append_row(r)
+
+        # 5. แท็บ Contacts (ตารางรายชื่อเบอร์ฉุกเฉินและบทบาทในกูเกิลชีต)
+        if "Contacts" not in existing_sheets:
+            print("Creating Contacts worksheet...")
+            contacts_ws = sheet.add_worksheet(title="Contacts", rows="1000", cols="10")
+            headers = ["ContactID", "Name", "Role", "Phone"]
+            contacts_ws.append_row(headers)
+            contact_rows = [
+                ["CT001", "ปภ. (กรมป้องกันและบรรเทาสาธารณภัย)", "รับแจ้งเหตุเตือนภัยและช่วยเหลืออุทกภัยสายด่วน", "1784"],
+                ["CT002", "สพฉ. (สถาบันการแพทย์ฉุกเฉินแห่งชาติ)", "รับส่งต่อผู้ป่วยและเจ็บป่วยฉุกเฉินทางการแพทย์", "1669"],
+                ["CT003", "ตำรวจทางหลวง", "ประสานงานความช่วยเหลือเส้นทางน้ำท่วมและดินถล่ม", "1193"],
+                ["CT004", "ศูนย์รับเรื่องร้องเรียนน้ำท่วมรัฐบาล", "ร้องเรียนและขอความช่วยเหลือทั่วไปส่วนกลาง", "1111"]
+            ]
+            for r in contact_rows:
+                contacts_ws.append_row(r)
+
+        # 6. แท็บ user_needs (ตารางบันทึกแบบฟอร์มความต้องการพิเศษของผู้ประสบภัย)
+        if "user_needs" not in existing_sheets:
+            print("Creating user_needs worksheet...")
+            needs_ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="10")
+            headers = ["Timestamp", "UserID", "Need_Detail", "Status"]
+            needs_ws.append_row(headers)
             
-        # 4. จัดการชีต AI Logs
+        # 7. แท็บ AI Logs
         if "AI Logs" not in existing_sheets:
             print("Creating AI Logs worksheet...")
             logs_ws = sheet.add_worksheet(title="AI Logs", rows="5000", cols="5")
@@ -151,7 +176,7 @@ def setup_sheets_automatically(sheet):
 SHEETS_INITIALIZED = False
 LAST_SHEETS_ERROR = "ยังไม่ได้เปิดใช้งานการเชื่อมต่อ"
 
-# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (สกัดระบบตรวจสอบ Error ละเอียด)
+# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client)
 def get_sheets_client():
     global SHEETS_INITIALIZED, LAST_SHEETS_ERROR
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
@@ -164,7 +189,13 @@ def get_sheets_client():
         return None
         
     try:
-        creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+        json_str = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
+        if json_str.startswith("'") and json_str.endswith("'"):
+            json_str = json_str[1:-1].strip()
+        if json_str.startswith('"') and json_str.endswith('"'):
+            json_str = json_str[1:-1].strip()
+            
+        creds_dict = json.loads(json_str)
         client = gspread.service_account_from_dict(creds_dict)
         
         if not SHEETS_INITIALIZED:
@@ -179,7 +210,7 @@ def get_sheets_client():
                 
         return client
     except Exception as e:
-        LAST_SHEETS_ERROR = f"ถอดรหัสลับ JSON Key ไม่สำเร็จ (ข้อมูลไม่ครบถ้วน): {e}"
+        LAST_SHEETS_ERROR = f"ถอดรหัสลับ JSON Key ไม่สำเร็จ (ข้อมูลมีจุดไม่ถูกต้อง): {e}"
         print(f"Error initializing Google Sheets client: {e}")
         return None
 
@@ -193,41 +224,10 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-# 7. ฟังก์ชันวิเคราะห์ระดับความเร่งด่วนตามหลักกู้ภัยสากล (Triage Priority Calculator)
-def calculate_priority(data):
-    try:
-        bedridden = str(data.get("bedridden", "")).strip()
-        water_level = str(data.get("water_level", "")).strip()
-        urgent = str(data.get("urgent_evac", "")).strip()
-        
-        is_bedridden = "มี" in bedridden or "ใช่" in bedridden or "yes" in bedridden.lower()
-        is_urgent = "ต้องการ" in urgent or "ด่วน" in urgent or "yes" in urgent.lower()
-        
-        is_critical_water = False
-        for word in water_level.split():
-            if ("เมตร" in word or "m" in word.lower()) and any(char.isdigit() for char in word):
-                digits = ''.join(filter(lambda x: x.isdigit() or x == '.', word))
-                if digits and float(digits) >= 1.0:
-                    is_critical_water = True
-            elif "มิดหัว" in water_level or "ท่วมหัว" in water_level or "หน้าอก" in water_level:
-                is_critical_water = True
-
-        if is_bedridden or is_critical_water or is_urgent:
-            return "🔴  เร่งด่วนมาก"
-        elif "เอว" in water_level or "เข่า" in water_level or "สูง" in water_level:
-            return "🟠  ปานกลาง"
-        else:
-            return "🟢  ติดตามสถานการณ์"
-    except Exception as e:
-        print(f"Priority Calc Error: {e}")
-        return "🟠  ปานกลาง"
-
-# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์ แผนภูมิวินิจฉัยฐานข้อมูลกลาง (Diagnostic Control Panel)
+# 7. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์ แผนภูมิวินิจฉัยฐานข้อมูลกลาง (Diagnostic Control Panel)
 @app.route("/", methods=['GET'])
 def index():
-    # ทดสอบรันคำขอสิทธิ์เชื่อมเพื่อบันทึกประวัติความล้มเหลวล่าสุดแบบทันที
     get_sheets_client()
-    
     db_status = f"<span style='color: #10b981; font-weight: bold;'>🟢 {LAST_SHEETS_ERROR}</span>" if SHEETS_INITIALIZED else f"<span style='color: #ef4444; font-weight: bold;'>🔴 เชื่อมต่อล้มเหลว (สาเหตุ: {LAST_SHEETS_ERROR})</span>"
     
     routes = []
@@ -258,7 +258,7 @@ def index():
     </div>
     """
 
-# 9. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
+# 8. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
 @app.route("/dashboard", methods=['GET'])
 def dashboard():
     sheets_client = get_sheets_client()
@@ -272,24 +272,46 @@ def dashboard():
     else:
         try:
             sheet = sheets_client.open_by_key(clean_sheet_id)
+            
+            # ดึงข้อมูลผู้ใช้เพื่อนำมา JOIN หาชื่อจริงและเบอร์โทรศัพท์บน Dashboard
             try:
-                sos_worksheet = sheet.worksheet("SOS_Intake")
-                sos_cases = sos_worksheet.get_all_records()
+                users_ws = sheet.worksheet("users")
+                users_rows = users_ws.get_all_records()
+                user_map = {u['user_id']: u for u in users_rows}
+            except Exception as e:
+                print(f"Failed to load users for JOIN: {e}")
+                user_map = {}
+
+            # 1. ดึงข้อมูลกรณีฉุกเฉินผู้ประสบภัย (sos_requests)
+            try:
+                sos_worksheet = sheet.worksheet("sos_requests")
+                raw_cases = sos_worksheet.get_all_records()
+                # สลัก JOIN ชื่อและเบอร์โทรศัพท์จริงจากแผ่นงาน users อัตโนมัติ
+                for rc in raw_cases:
+                    u_id = rc.get("user_id")
+                    u_info = user_map.get(u_id, {})
+                    rc["first_name"] = u_info.get("first_name", "ผู้แจ้ง")
+                    rc["last_name"] = u_info.get("last_name", "ทั่วไป")
+                    rc["phone"] = u_info.get("phone", "-")
+                    sos_cases.append(rc)
                 sos_cases.reverse()
             except Exception as e:
                 print(f"Failed to load SOS: {e}")
+                
+            # 2. ดึงข้อมูลศูนย์อพยพจริง (Shelters)
             try:
                 shelters_worksheet = sheet.worksheet("Shelters")
                 shelters = shelters_worksheet.get_all_records()
             except Exception as e:
                 print(f"Failed to load Shelters: {e}")
+                
         except Exception as e:
             error_msg = f"ไม่สามารถเข้าถึงฐานข้อมูลกลางได้: {e}"
 
     total_cases = len(sos_cases)
-    urgent_count = sum(1 for c in sos_cases if "🔴" in str(c.get("Priority", "")))
-    medium_count = sum(1 for c in sos_cases if "🟠" in str(c.get("Priority", "")))
-    bedridden_count = sum(1 for c in sos_cases if "มี" in str(c.get("Bedridden", "")) or "ใช่" in str(c.get("Bedridden", "")))
+    critical_count = sum(1 for c in sos_cases if "🔴" in str(c.get("priority", "")))
+    high_count = sum(1 for c in sos_cases if "🟠" in str(c.get("priority", "")))
+    bedridden_count = sum(1 for c in sos_cases if "YES" in str(c.get("bedridden", "")) or "ใช่" in str(c.get("bedridden", "")))
     
     html_template = """
     <!DOCTYPE html>
@@ -328,11 +350,11 @@ def dashboard():
                 </div>
                 <div class="bg-slate-800 p-4 rounded-xl border border-red-900/50 bg-red-950/20">
                     <p class="text-sm text-red-300">🔴 เคสเร่งด่วนมาก</p>
-                    <p class="text-3xl font-extrabold text-red-500 mt-1">{{ urgent_count }} <span class="text-lg font-normal">เคส</span></p>
+                    <p class="text-3xl font-extrabold text-red-500 mt-1">{{ critical_count }} <span class="text-lg font-normal">เคส</span></p>
                 </div>
                 <div class="bg-slate-800 p-4 rounded-xl border border-orange-900/50 bg-orange-950/20">
                     <p class="text-sm text-orange-300">🟠 เคสระดับปานกลาง</p>
-                    <p class="text-3xl font-extrabold text-orange-500 mt-1">{{ medium_count }} <span class="text-lg font-normal">เคส</span></p>
+                    <p class="text-3xl font-extrabold text-orange-500 mt-1">{{ high_count }} <span class="text-lg font-normal">เคส</span></p>
                 </div>
                 <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
                     <p class="text-sm text-slate-400">ผู้ป่วยติดเตียงที่ต้องการช่วย</p>
@@ -344,7 +366,7 @@ def dashboard():
                 <div class="lg:col-span-2 bg-slate-800 rounded-xl border border-slate-700 p-4 overflow-hidden">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-lg font-semibold flex items-center space-x-2">
-                            <span>📋</span> <span>รายการขอความช่วยเหลือฉุกเฉิน</span>
+                            <span>📋</span> <span>รายการขอความช่วยเหลือฉุกเฉิน (SOS)</span>
                         </h2>
                         <input id="searchInput" onkeyup="filterCases()" type="text" placeholder="🔍 ค้นหาพื้นที่..." class="bg-slate-900 border border-slate-700 text-sm px-3 py-1.5 rounded-lg text-slate-200 focus:outline-none focus:border-blue-500">
                     </div>
@@ -353,28 +375,34 @@ def dashboard():
                         <table class="w-full text-left border-collapse text-sm">
                             <thead>
                                 <tr class="border-b border-slate-700 text-slate-400">
-                                    <th class="py-3 px-2">ระดับภัย</th>
-                                    <th class="py-3 px-2">พื้นที่/จุดพิกัด</th>
-                                    <th class="py-3 px-2">ข้อมูลผู้ประสบภัย</th>
-                                    <th class="py-3 px-2">ระดับน้ำ</th>
-                                    <th class="py-3 px-2">การกู้ภัย</th>
+                                    <th class="py-3 px-2">เลขเคส / ระดับภัย</th>
+                                    <th class="py-3 px-2">ผู้ประสบภัย</th>
+                                    <th class="py-3 px-2">ข้อมูลความเร่งด่วน</th>
+                                    <th class="py-3 px-2">ระดับน้ำ / รายละเอียด</th>
+                                    <th class="py-3 px-2">การนำทาง</th>
                                 </tr>
                             </thead>
                             <tbody id="sosTable">
                                 {% for case in sos_cases %}
                                 <tr class="border-b border-slate-700/50 hover:bg-slate-750/30 transition duration-150 py-3">
-                                    <td class="py-3 px-2 font-bold">{{ case.get('Priority', '🟢 ตรวจสอบ') }}</td>
                                     <td class="py-3 px-2">
-                                        <p class="font-semibold text-slate-200">{{ case.get('Area', 'ไม่ระบุ') }}</p>
-                                        <p class="text-xs text-slate-500 mt-0.5">{{ case.get('Timestamp', '') }}</p>
+                                        <p class="font-bold text-slate-200 text-xs">{{ case.get('request_id', 'SOS-MOCK') }}</p>
+                                        <p class="mt-1 font-semibold text-xs">{{ case.get('priority', '🟢 NORMAL') }}</p>
                                     </td>
                                     <td class="py-3 px-2">
-                                        <p class="text-slate-300">รวม <b>{{ case.get('TotalPeople', '1') }}</b> คน (เด็ก: {{ case.get('Children', '-') }}, ชรา: {{ case.get('Elderly', '-') }})</p>
-                                        <p class="text-xs text-purple-300 mt-1">ผู้ป่วยติดเตียง: {{ case.get('Bedridden', 'ไม่มี') }} | สัตว์เลี้ยง: {{ case.get('Pets', 'ไม่มี') }}</p>
+                                        <p class="font-semibold text-slate-200">{{ case.get('first_name', '') }} {{ case.get('last_name', '') }}</p>
+                                        <p class="text-xs text-blue-300 mt-1">📞 {{ case.get('phone', '-') }}</p>
                                     </td>
-                                    <td class="py-3 px-2 font-semibold text-sky-400">{{ case.get('WaterLevel', '-') }}</td>
                                     <td class="py-3 px-2">
-                                        <a href="https://www.google.com/maps/search/?api=1&query={{ case.get('Latitude', 0) }},{{ case.get('Longitude', 0) }}" target="_blank" class="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 transition font-bold text-xs text-white rounded-lg shadow-md shadow-red-950/20">
+                                        <p class="text-slate-300">จำนวน: <b>{{ case.get('people_count', '1') }}</b> คน (เด็ก: {{ case.get('children', '-') }}, ชรา: {{ case.get('elderly', '-') }})</p>
+                                        <p class="text-xs text-purple-300 mt-1">ติดเตียง: {{ case.get('bedridden', 'NO') }} | สัตว์เลี้ยง: {{ case.get('pets', 'NO') }}</p>
+                                    </td>
+                                    <td class="py-3 px-2">
+                                        <p class="font-semibold text-sky-400 text-xs">🌊 {{(case.get('water_level', '-'))}}</p>
+                                        <p class="text-xs text-slate-400 mt-1 max-w-xs truncate">{{ case.get('note', '-') }}</p>
+                                    </td>
+                                    <td class="py-3 px-2">
+                                        <a href="https://www.google.com/maps/search/?api=1&query={{ case.get('latitude', 0) }},{{ case.get('longitude', 0) }}" target="_blank" class="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 transition font-bold text-xs text-white rounded-lg shadow-md shadow-red-950/20">
                                             🗺️ แผนที่นำทาง
                                         </a>
                                     </td>
@@ -438,7 +466,7 @@ def dashboard():
     </body>
     </html>
     """
-    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, urgent_count=urgent_count, medium_count=medium_count, bedridden_count=bedridden_count)
+    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, critical_count=critical_count, high_count=high_count, bedridden_count=bedridden_count)
 
 # 10. Webhook Route
 @app.route("/callback", methods=['POST'])
@@ -460,6 +488,7 @@ def handle_text_message(event):
     
     # ดึงระดับสถานะการคุยปัจจุบัน
     state = USER_STATES.get(user_id)
+    sheets_client = get_sheets_client()
 
     # 11.1 ฟีเจอร์พิมพ์ "ยกเลิก" เพื่อเคลียร์สิทธิ์แชตและรีสตาร์ตคุยใหม่ได้ตลอดเวลา
     if user_text == "ยกเลิก":
@@ -471,82 +500,261 @@ def handle_text_message(event):
         )
         return
 
-    # 11.2 ดักจับกรณีผู้ใช้เผลอพิมพ์ตัวอักษรเข้ามาระหว่างที่ระบบรอยิงพิกัด GPS ของ SOS
-    if state == "waiting_sos_location":
-        location_quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=LocationAction(label="กดแชร์พิกัดกู้ภัย"))
-            ]
-        )
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="🚨 ระบบกำลังรอตำแหน่งพิกัดของคุณอยู่ครับ โปรดกดปุ่มสีเขียว 'กดแชร์พิกัดกู้ภัย' ด้านล่างเพื่อส่งข้อมูลความละเอียดด่วน หรือพิมพ์คำว่า 'ยกเลิก' เพื่อเริ่มต้นใหม่ครับ",
-                quick_reply=location_quick_reply
+    # ==================== ส่วนที่ 11.2: ดักจับและประมวลสถานะลงทะเบียนผู้ใช้รายใหม่ (First-Time User Registration) ====================
+    if state == "register_first_name":
+        USER_DATA[user_id]["temp_first_name"] = user_text
+        USER_STATES[user_id] = "register_last_name"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ระบุ 'นามสกุล' ของคุณเพื่อใช้ยืนยันตัวตนกับกู้ภัยครับ"))
+        return
+        
+    elif state == "register_last_name":
+        USER_DATA[user_id]["temp_last_name"] = user_text
+        USER_STATES[user_id] = "register_phone"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ระบุ 'เบอร์โทรศัพท์มือถือ' 9-10 หลักของคุณสำหรับการติดต่อกลับครับ"))
+        return
+        
+    elif state == "register_phone":
+        # ตรวจสอบความถูกต้องของเบอร์โทรศัพท์ 9-10 หลัก
+        clean_phone = "".join(filter(lambda x: x.isdigit(), user_text))
+        if len(clean_phone) < 9 or len(clean_phone) > 10:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ เบอร์โทรศัพท์ไม่ถูกต้องครับ! โปรดพิมพ์หมายเลขมือถือเฉพาะตัวเลข 9-10 หลักใหม่อีกครั้งครับ (เช่น 0812345678)"))
+            return
+            
+        first_name = USER_DATA[user_id].get("temp_first_name", "ผู้แจ้ง")
+        last_name = USER_DATA[user_id].get("temp_last_name", "ทั่วไป")
+        register_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        
+        # บันทึกข้อมูลเข้าตารางผู้ใช้ 'users'
+        success = False
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+                users_ws = sheet.worksheet("users")
+                users_ws.append_row([user_id, first_name, last_name, clean_phone, register_date, "ACTIVE"])
+                success = True
+            except Exception as e:
+                print(f"Failed to save user to Sheets: {e}")
+                
+        # ล้างสถานะการลงทะเบียนเสร็จสมบูรณ์
+        USER_STATES.pop(user_id, None)
+        USER_DATA.pop(user_id, None)
+        
+        if success:
+            reply_text = (
+                f"🎉 ยินดีต้อนรับครับ คุณ {first_name} {last_name}!\n"
+                "ระบบได้ทำการลงทะเบียนโปรไฟล์ผู้ใช้งานของคุณเข้าสู่ฐานข้อมูลประชากรผู้ประสบภัยเรียบร้อยแล้วครับ\n\n"
+                "🛡️ คุณสามารถกดปุ่มเมนูบน Rich Menu ด้านล่าง เพื่อขอความช่วยเหลือ SOS หรือสอบถาม AI ได้ทันทีโดยระบบจำพิกัดของคุณไว้เรียบร้อยแล้วครับ"
             )
-        )
+        else:
+            reply_text = (
+                f"🎉 การสมัครสัญญานสำเร็จเสมือนจริงเบื้องต้นแล้วครับ คุณ {first_name} {last_name}!\n"
+                "*(หมายเหตุ: ระบบยังไม่สามารถเขียนลงชีตจริงได้เนื่องจากสเปรดชีตขัดข้องสิทธิ์เข้าถึง แต่คุณสามารถพิมพ์ใช้งานตอบโต้ได้ปกติครับ)"
+            )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
-    # ==================== ส่วนที่ 11.3: ระบบคัดกรองข้อมูลผู้ประสบภัยอัตโนมัติ (Triage Intake State Machine) ====================
+    # ==================== ส่วนที่ 11.3: ระบบดักจับการพิมพ์โต้ตอบระหว่างทำแบบสอบถาม SOS (Steps 2-8) ====================
     if state:
-        if user_id not in USER_DATA:
-            USER_DATA[user_id] = {}
-
-        if state == "sos_q1":
-            USER_DATA[user_id]["area"] = user_text
-            USER_STATES[user_id] = "sos_q2"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 2. มีคนติดอยู่ในบ้านร่วมกันทั้งหมดกี่คนครับ? (กรุณาระบุจำนวนตัวเลข)"))
-            return
-        elif state == "sos_q2":
-            USER_DATA[user_id]["total_people"] = user_text
+        if state == "sos_q2":
+            USER_DATA[user_id]["people_count"] = user_text
+            # ขั้นที่ 3: ถามเรื่องเด็กเล็ก (ส่งแบบปุ่มด่วนลัดเพื่อให้กดง่าย)
             USER_STATES[user_id] = "sos_q3"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 3. ในจำนวนนี้ มีเด็กเล็กกี่คนครับ? (ถ้าไม่มีให้พิมพ์ว่า 'ไม่มี')"))
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=TextMessage(text="YES", label="มี (YES)")),
+                    QuickReplyButton(action=TextMessage(text="NO", label="ไม่มี (NO)"))
+                ]
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 3: ในบ้านมีเด็กเล็ก (อายุต่ำกว่า 12 ปี) หรือไม่ครับ?", quick_reply=quick_reply))
             return
+            
         elif state == "sos_q3":
-            USER_DATA[user_id]["children"] = user_text
+            # ตรวจสอบค่าปุ่มกด
+            val = user_text.strip().upper()
+            USER_DATA[user_id]["children"] = "YES" if "YES" in val or "มี" in val else "NO"
             USER_STATES[user_id] = "sos_q4"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 4. มีผู้สูงอายุกี่คนครับ? (ถ้าไม่มีให้พิมพ์ว่า 'ไม่มี')"))
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=TextMessage(text="YES", label="มี (YES)")),
+                    QuickReplyButton(action=TextMessage(text="NO", label="ไม่มี (NO)"))
+                ]
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 4: ในบ้านมีผู้สูงอายุหรือไม่ครับ?", quick_reply=quick_reply))
             return
+            
         elif state == "sos_q4":
-            USER_DATA[user_id]["elderly"] = user_text
+            val = user_text.strip().upper()
+            USER_DATA[user_id]["elderly"] = "YES" if "YES" in val or "มี" in val else "NO"
             USER_STATES[user_id] = "sos_q5"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 5. มีผู้ป่วยติดเตียงหรือไม่ครับ? (โปรดพิมพ์ว่า 'มี' หรือ 'ไม่มี')"))
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=TextMessage(text="YES", label="มี (YES)")),
+                    QuickReplyButton(action=TextMessage(text="NO", label="ไม่มี (NO)"))
+                ]
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 5: ในบ้านมีผู้ป่วยติดเตียงหรือไม่ครับ?", quick_reply=quick_reply))
             return
+            
         elif state == "sos_q5":
-            USER_DATA[user_id]["bedridden"] = user_text
+            val = user_text.strip().upper()
+            USER_DATA[user_id]["bedridden"] = "YES" if "YES" in val or "มี" in val else "NO"
             USER_STATES[user_id] = "sos_q6"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 6. มีสัตว์เลี้ยงติดอยู่ด้วยไหมครับ? (โปรดพิมพ์ว่า 'มี' หรือ 'ไม่มี')"))
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=TextMessage(text="YES", label="มี (YES)")),
+                    QuickReplyButton(action=TextMessage(text="NO", label="ไม่มี (NO)"))
+                ]
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 6: มีสัตว์เลี้ยงที่ต้องอพยพร่วมด้วยหรือไม่ครับ?", quick_reply=quick_reply))
             return
+            
         elif state == "sos_q6":
-            USER_DATA[user_id]["pets"] = user_text
+            val = user_text.strip().upper()
+            USER_DATA[user_id]["pets"] = "YES" if "YES" in val or "มี" in val else "NO"
             USER_STATES[user_id] = "sos_q7"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 7. ระดับน้ำปัจจุบันสูงเท่าไรแล้วครับ? (เช่น ท่วมเข่า, มิดหัว, หรือระบุหน่วยเมตร)"))
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=TextMessage(text="ต่ำกว่า 30 ซม.", label="ต่ำกว่า 30 ซม.")),
+                    QuickReplyButton(action=TextMessage(text="30-50 ซม.", label="30-50 ซม.")),
+                    QuickReplyButton(action=TextMessage(text="50 ซม. - 1 เมตร", label="50 ซม. - 1 เมตร")),
+                    QuickReplyButton(action=TextMessage(text="สูงกว่า 1 เมตร", label="สูงกว่า 1 เมตร"))
+                ]
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 7: ระดับน้ำท่วมบ้านในปัจจุบันโดยประมาณครับ?", quick_reply=quick_reply))
             return
+            
         elif state == "sos_q7":
             USER_DATA[user_id]["water_level"] = user_text
             USER_STATES[user_id] = "sos_q8"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 8. ต้องการอพยพด่วนที่สุดเลยหรือไม่ครับ? (โปรดพิมพ์ว่า 'ต้องการ' หรือ 'ยังไม่ต้องการ')"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 8: โปรดระบุข้อมูลเพิ่มเติมเฉพาะหน้าเพื่อแจ้งกู้ภัยครับ (เช่น น้ำท่วมมิดชั้นหนึ่ง, ไฟฟ้าดับ, ขาดแคลนอาหารหนัก หรือไม่ระบุ)"))
             return
-        elif state == "sos_q8":
-            USER_DATA[user_id]["urgent_evac"] = user_text
-            USER_STATES[user_id] = "waiting_sos_location"
             
-            # ส่ง Quick Reply เพื่อให้ผู้ใช้แชร์พิกัด GPS เป็นขั้นตอนสุดท้าย
-            location_quick_reply = QuickReply(
+        elif state == "sos_q8":
+            USER_DATA[user_id]["note"] = user_text
+            
+            # คำนวณความเร่งด่วนตามเกณฑ์ Priority ใหม่ที่สถาปัตยกรรมกำหนด
+            data = USER_DATA[user_id]
+            bedridden = data.get("bedridden", "NO")
+            water_level = data.get("water_level", "")
+            elderly = data.get("elderly", "NO")
+            children = data.get("children", "NO")
+            
+            # คำนวณความเร่งด่วนแบบเฉียบพลัน
+            is_critical_water = "สูงกว่า 1 เมตร" in water_level or "1 เมตร" in water_level
+            
+            if bedridden == "YES" or is_critical_water or (bedridden == "YES" and elderly == "YES") or (bedridden == "YES" and children == "YES"):
+                priority = "🔴  CRITICAL (เร่งด่วนวิกฤตสูงสุด)"
+            elif elderly == "YES" or children == "YES" or "50 ซม." in water_level:
+                priority = "🟠  HIGH (ความเสี่ยงสูง)"
+            else:
+                priority = "🟢  NORMAL (สถานการณ์ปกติ)"
+                
+            USER_DATA[user_id]["priority"] = priority
+            USER_STATES[user_id] = "sos_confirm"
+            
+            # ดึงประวัติผู้ใช้มาสรุปใบแจ้งเคส (Case Summary)
+            first_name = "ผู้ประสบภัย"
+            last_name = "ในพื้นที่"
+            phone = "-"
+            
+            if sheets_client:
+                try:
+                    sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+                    users_ws = sheet.worksheet("users")
+                    rows = users_ws.get_all_records()
+                    for r in rows:
+                        if str(r.get("user_id")) == user_id:
+                            first_name = r.get("first_name", "ผู้แจ้ง")
+                            last_name = r.get("last_name", "")
+                            phone = r.get("phone", "-")
+                            break
+                except:
+                    pass
+            
+            # เก็บข้อมูลชื่อและเบอร์ลงตารางส่งงาน
+            USER_DATA[user_id]["first_name"] = first_name
+            USER_DATA[user_id]["last_name"] = last_name
+            USER_DATA[user_id]["phone"] = phone
+            
+            summary_text = (
+                "🚨 สรุปคำขอรับการช่วยเหลือ SOS 🚨\n\n"
+                f"👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
+                f"📞 เบอร์โทรศัพท์: {phone}\n"
+                f"📍 พิกัดแจ้งเหตุ: {data.get('latitude', '0')}, {data.get('longitude', '0')}\n"
+                f"👥 สมาชิกติดในบ้าน: {data.get('people_count', '1')} คน\n"
+                f"👶 เด็กเล็ก: {data.get('children', 'NO')} | 🧓 ผู้สูงอายุ: {data.get('elderly', 'NO')}\n"
+                f"🏥 ผู้ป่วยติดเตียง: {data.get('bedridden', 'NO')} | 🐶 สัตว์เลี้ยง: {data.get('pets', 'NO')}\n"
+                f"🌊 ระดับน้ำโดยประมาณ: {data.get('water_level', '-')}\n"
+                f"📝 รายละเอียดอื่น ๆ: {data.get('note', '-')}\n\n"
+                f"📊 ประเมินความเร็วช่วยเหลือ: {priority}\n\n"
+                "ต้องการส่งข้อมูลเพื่อยืนยันแจ้งกู้ภัยหรือไม่ครับ? (กรุณากดเลือกปุ่มด้านล่าง)"
+            )
+            
+            quick_reply = QuickReply(
                 items=[
-                    QuickReplyButton(action=LocationAction(label="กดแชร์พิกัดกู้ภัย"))
+                    QuickReplyButton(action=TextMessage(text="ยืนยันการส่งข้อมูล", label="ยืนยันการส่งข้อมูล")),
+                    QuickReplyButton(action=TextMessage(text="ยกเลิกและแก้ไขใหม่", label="ยกเลิกและแก้ไขใหม่"))
                 ]
             )
-            line_bot_api.reply_message(
-                event.reply_token, 
-                TextSendMessage(
-                    text="📢 ขอบคุณสำหรับข้อมูลครับ! ขั้นตอนสุดท้าย โปรดกดปุ่มแชร์พิกัด 'Location' สีเขียวด้านล่างนี้ เพื่อส่งพิกัดแจ้งกู้ภัยทันทีนะครับ",
-                    quick_reply=location_quick_reply
-                )
-            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
             return
 
-        # ==================== ส่วนที่ 11.4: ระบบคัดกรองคำถามอื่น ๆ ย้อนกลับตามเมนู ====================
+        elif state == "sos_confirm":
+            if "ยืนยัน" in user_text:
+                data = USER_DATA.pop(user_id, {})
+                USER_STATES.pop(user_id, None)
+                
+                # ออกรหัสคดี Case ID อัตโนมัติ: SOS-YYYYMMDD-XXXX
+                today_str = datetime.datetime.now().strftime("%Y%m%d")
+                random_suffix = datetime.datetime.now().strftime("%f")[:4] # สุ่มรหัสหลังด้วยไมโครเซกคินส์สั้นๆ เพื่อป้องกันรหัสซ้ำซ้อน
+                case_id = f"SOS-{today_str}-{random_suffix}"
+                
+                success = False
+                if sheets_client:
+                    try:
+                        sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+                        sos_ws = sheet.worksheet("sos_requests")
+                        sos_ws.append_row([
+                            case_id,
+                            user_id,
+                            timestamp,
+                            data.get("latitude", "0"),
+                            data.get("longitude", "0"),
+                            data.get("people_count", "1"),
+                            data.get("children", "NO"),
+                            data.get("elderly", "NO"),
+                            data.get("bedridden", "NO"),
+                            data.get("pets", "NO"),
+                            data.get("water_level", "-"),
+                            data.get("note", "-"),
+                            data.get("priority", "🟢  NORMAL (สถานการณ์ปกติ)"),
+                            "OPEN" # สถานะเริ่มต้นเปิดเคสรอเจ้าหน้าที่
+                        ])
+                        success = True
+                    except Exception as e:
+                        print(f"Failed to save SOS request: {e}")
+                        
+                if success:
+                    reply_text = (
+                        "🎉 ยืนยันบันทึกข้อมูลเข้ารหัสกู้ภัยออนไลน์เรียบร้อยแล้วครับ!\n\n"
+                        f"🎫 เลขที่อ้างอิงเคส (Case ID): {case_id}\n"
+                        f"📊 ความเร็วช่วยเหลือ: {data.get('priority', '-')}\n\n"
+                        "ข้อมูลนี้ถูกส่งเข้าระบบจัดคิวเร่งด่วนของทีมกู้ภัยสำเร็จแล้ว แอดมินสามารถเปิดสแกนนำทางกูเกิลแมปเพื่อเข้าจัดเตรียมเรือกู้ชีพไปช่วยเหลือคุณทันที โปรดรอคอยในพิกัดที่ปลอดภัยที่สุดนะครับ"
+                    )
+                else:
+                    reply_text = (
+                        f"🎉 บันทึกสัญญาณ SOS จำลองสำเร็จแล้วครับ!\n🎫 เลขเคสอ้างอิง: {case_id}\n\n"
+                        "*(หมายเหตุ: ระบบยังไม่สามารถเขียนลงแผ่นงาน Google Sheets ได้เนื่องจากรหัสสิทธิ์สเปรดชีตขัดข้อง แต่พิกัดของคุณยืนยันบนระบบบอตแล้วครับ)"
+                    )
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+                return
+            else:
+                USER_STATES.pop(user_id, None)
+                USER_DATA.pop(user_id, None)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกเคสเดิมและล้างข้อมูลเรียบร้อยแล้วครับ คุณสามารถกดปุ่มเริ่ม SOS ใหม่อีกครั้งได้ทันทีครับ"))
+                return
+
+        # ==================== ส่วนที่ 11.4: ดักจับสัญญานเมื่อพิมพ์ข้อความตอบกลับตามหมวดอื่นย้อนกลับ ====================
         elif state == "waiting_emergency_type":
             USER_STATES.pop(user_id, None)
             prompt = f"ผู้ประสบภัยต้องการติดต่อขอกู้ภัยด้วยเรื่องเฉพาะหน้าคือ: '{user_text}' โปรดระบุเบอร์โทรฉุกเฉินและประสานงานกู้ภัยอย่างสั้น กระชับและสุภาพ"
@@ -580,14 +788,13 @@ def handle_text_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
             return
 
-        # ==================== ฟีเจอร์ตรวจจับการพิมพ์ค้นหาศูนย์อพยพด้วยชื่อจังหวัดหรือชื่ออำเภอ ====================
+        # ==================== ฟีเจอร์สแกนสืบค้นหาศูนย์อพยพด้วยชื่อจังหวัดหรือชื่ออำเภอจาก Google Sheets ====================
         elif state == "waiting_shelter_location":
             USER_STATES.pop(user_id, None)
             shelter_list = []
             db_connected = False
             
             clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
-            sheets_client = get_sheets_client()
             if sheets_client:
                 try:
                     sheet = sheets_client.open_by_key(clean_sheet_id)
@@ -631,15 +838,60 @@ def handle_text_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
-    # ==================== ส่วนที่ 10.6: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
+        # ==================== ฟีเจอร์แจ้งความต้องการเพิ่มเติม (แผ่นงานย่อย user_needs) ====================
+        elif state == "waiting_needs_form":
+            USER_STATES.pop(user_id, None)
+            
+            success = False
+            if sheets_client:
+                try:
+                    sheet = sheets_client.open_by_key(clean_sheet_id)
+                    needs_ws = sheet.worksheet("user_needs")
+                    needs_ws.append_row([timestamp, user_id, user_text, "PENDING"])
+                    success = True
+                except Exception as e:
+                    print(f"Failed to save needs: {e}")
+                    
+            if success:
+                reply_text = (
+                    "🟢 ระบบทำการบันทึกความต้องการเพิ่มเติมของคุณเรียบร้อยแล้วครับ!\n\n"
+                    f"📝 สิ่งที่แจ้งความประสงค์: {user_text}\n\n"
+                    "ข้อมูลนี้จะถูกส่งเข้ารายงานกลางเพื่อให้ทีมอาสาสมัครจัดเตรียมสิ่งของ ยา อาหาร หรือเวชภัณฑ์นำไปกระจายความช่วยเหลือแก่ท่านในพื้นที่ต่อไปครับ"
+                )
+            else:
+                reply_text = (
+                    f"🟢 บันทึกความต้องการจำลองของคุณสำเร็จแล้วครับ!\n📝 ความประสงค์: {user_text}\n\n"
+                    "*(หมายเหตุ: ระบบยังไม่สามารถเขียนลงแผ่นงาน Google Sheets ได้เนื่องจากสเปรดชีตขัดข้องสิทธิ์เข้าถึง)"
+                )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            return
+
+    # ==================== ส่วนที่ 11.5: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
-        reply_text = (
-            "📞 เบอร์โทรศัพท์ฉุกเฉินที่จำเป็นสำหรับภัยน้ำท่วมครับ:\n\n"
-            "🚨 สายด่วน ปภ. 1784 (รับแจ้งเตือนและช่วยเหลือภัยพิบัติ)\n"
-            "🚨 สายด่วนกู้ชีพ 1669 (เจ็บป่วยฉุกเฉินทางการแพทย์)\n"
-            "🚨 สายด่วนกู้ภัยทางน้ำ 1196 (ขอความช่วยเหลือทางเรือ)\n"
-            "🚨 ตำรวจทางหลวง 1193 (ประสานงานเดินทางเส้นทางน้ำท่วม)"
-        )
+        # ดึงเบอร์โทรศัพท์จริงจากแผ่นงาน Contacts
+        db_connected = False
+        contact_list = []
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+                contacts_worksheet = sheet.worksheet("Contacts")
+                rows = contacts_worksheet.get_all_records()
+                for r in rows:
+                    contact_list.append(f"🚨 {r.get('Name')} ({r.get('Role')})\n📞 โทร: {r.get('Phone')}")
+                db_connected = True
+            except Exception as e:
+                print(f"Failed to load contacts from sheet: {e}")
+                
+        if db_connected and contact_list:
+            reply_text = "📞 เบอร์โทรศัพท์ฉุกเฉินและหน่วยงานประสานงานกู้ภัยจริงในระบบ:\n\n" + "\n\n".join(contact_list)
+        else:
+            reply_text = (
+                "📞 เบอร์โทรศัพท์ฉุกเฉินที่จำเป็นสำหรับภัยน้ำท่วมครับ:\n\n"
+                "🚨 สายด่วน ปภ. 1784 (รับแจ้งเตือนและช่วยเหลือภัยพิบัติ)\n"
+                "🚨 สายด่วนกู้ชีพ 1669 (เจ็บป่วยฉุกเฉินทางการแพทย์)\n"
+                "🚨 สายด่วนกู้ภัยทางน้ำ 1196 (ขอความช่วยเหลือทางเรือ)\n"
+                "🚨 ตำรวจทางหลวง 1193 (ประสานงานเดินทางเส้นทางน้ำท่วม)"
+            )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "วิธีการอพยพ":
@@ -678,9 +930,58 @@ def handle_text_message(event):
         )
         
     elif user_text == "SOS ขอความช่วยเหลือ":
-        USER_STATES[user_id] = "sos_q1"
-        USER_DATA[user_id] = {} # ล้างข้อมูลเก่า
-        reply_text = "🚨 เพื่อจัดเตรียมอุปกรณ์ช่วยเหลือได้ถูกต้อง โปรดตอบข้อมูลสั้นๆ นะครับ\n\n📌 1. บ้านของคุณอยู่พื้นที่บริเวณไหนครับ? (ระบุชื่อหมู่บ้าน ซอย หรือจุดสังเกต)"
+        # ตรวจสอบประวัติการลงทะเบียนในแผ่นงาน 'users' (สถาปัตยกรรมลงทะเบียนครั้งแรกสุดก่อนกด SOS)
+        is_registered = False
+        first_name = ""
+        
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+                users_ws = sheet.worksheet("users")
+                rows = users_ws.get_all_records()
+                for r in rows:
+                    if str(r.get("user_id")) == user_id:
+                        is_registered = True
+                        first_name = r.get("first_name", "ผู้แจ้ง")
+                        break
+            except Exception as e:
+                print(f"Failed to check user registration: {e}")
+                
+        if not is_registered:
+            # เข้าสู่กระบวนการลงทะเบียนผู้ใช้รายใหม่ครั้งแรกสุด (First-Time User Registration)
+            USER_STATES[user_id] = "register_first_name"
+            USER_DATA[user_id] = {} # เตรียมล้างข้อมูลใหม่เพื่อเก็บพารามิเตอร์การลงทะเบียน
+            reply_text = (
+                "📝 ขออภัยด้วยครับ เนื่องจากคุณเข้าใช้งานระบบเป็นครั้งแรก เพื่อประโยชน์สูงสุดในการประสานงานส่งต่อข้อมูลให้ทีมกู้ภัย "
+                "โปรดพิมพ์แจ้ง 'ชื่อจริง' ของคุณเพื่อใช้ลงทะเบียนประวัติในระบบสักนิดนึงนะครับ (เช่น 'สมชาย')"
+            )
+        else:
+            # เริ่มต้นกระบวนการแจ้งเหตุ SOS ทันที (Returning Users) โดยข้ามขั้นตอนขอชื่อและเบอร์โทรไปขั้นปักพิกัดโดยตรง
+            USER_STATES[user_id] = "sos_location"
+            USER_DATA[user_id] = {} # เตรียมล้างข้อมูลเพื่อเริ่มเขียน SOS
+            
+            # ส่ง Quick Reply เพื่อให้สแกนรับพิกัดทันทีในสเต็ปที่ 1
+            location_quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=LocationAction(label="กดส่งพิกัดตำแหน่งแจ้งเหตุ"))
+                ]
+            )
+            reply_text = (
+                f"🚨 สวัสดีครับคุณ {first_name}! ระบบพบข้อมูลการลงทะเบียนของคุณแล้วครับ "
+                "โปรดกดปุ่มแชร์พิกัด 'Location' สีเขียวด้านล่างนี้ เพื่อระบุตำแหน่งที่คุณต้องการให้ทีมกู้ภัยเข้าช่วยเหลือด่วนที่สุดทันทีเลยครับ"
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text, quick_reply=location_quick_reply))
+            return
+            
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        
+    elif user_text == "แจ้งความต้องการเพิ่มเติม":
+        USER_STATES[user_id] = "waiting_needs_form"
+        reply_text = (
+            "📌 แจ้งแบบฟอร์มความต้องการพิเศษ:\n\n"
+            "โปรดพิมพ์อธิบายสิ่งของ อาหาร ยารักษาโรค นมผงเด็ก หรือเวชภัณฑ์อื่นๆ "
+            "ที่คุณต้องการได้รับความช่วยเหลือเพิ่มเติมเข้ามาได้ทันทีเลยครับ ระบบจะนำความประสงค์ส่งต่อให้อาสาสมัครกู้ชีพเข้าจัดการด่วนครับ"
+        )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ถาม AI เรื่องน้ำท่วม":
@@ -718,11 +1019,12 @@ def handle_location_message(event):
     title = event.message.title or "จุดพิกัด"
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    state = USER_STATES.pop(user_id, "default")
+    state = USER_STATES.get(user_id, "default")
     sheets_client = get_sheets_client()
 
     # --- ค้นหาศูนย์อพยพใกล้ที่สุดในรัศมี 5-20 กม. (อิงพิกัดและดึงฐานข้อมูลจริงจาก Google Sheets) ---
     if state == "waiting_shelter_location":
+        USER_STATES.pop(user_id, None)
         shelter_list = []
         db_connected = False
         
@@ -782,8 +1084,9 @@ def handle_location_message(event):
             
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
-    # --- ฟีเจอร์เมนูที่ 4: ตรวจวัดระดับน้ำภูมิสารสนเทศ (GIS Water Level Station Search) ---
+    # --- ฟีเจอร์เมนูที่ 3: ตรวจวัดระดับน้ำภูมิสารสนเทศ (GIS Water Level Station Search) ---
     elif state == "waiting_water_location":
+        USER_STATES.pop(user_id, None)
         water_stations = []
         db_connected = False
         
@@ -838,55 +1141,21 @@ def handle_location_message(event):
             
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
-    # --- กรณีการแจ้งเหตุ SOS คัดกรองและประมวลผล Priority แยกเข้า Google Sheets 'SOS_Intake' ---
-    elif state == "waiting_sos_location":
-        sos_data = USER_DATA.pop(user_id, {})
-        priority = calculate_priority(sos_data)
+    # --- ระบบ SOS ขั้นตอนที่ 1 (SOS Step 1): สกัดพิกัด GPS จากผู้ใช้เป็นจุดอ้างอิง แล้วป้อนเข้าสู่คำถามข้อถัดไป ---
+    elif state == "sos_location":
+        if user_id not in USER_DATA:
+            USER_DATA[user_id] = {}
+        # บันทึกพิกัดไว้ในความจำก่อนนำทาง
+        USER_DATA[user_id]["latitude"] = latitude
+        USER_DATA[user_id]["longitude"] = longitude
         
-        success = False
-        if sheets_client:
-            try:
-                sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
-                sos_worksheet = sheet.worksheet("SOS_Intake")
-                sos_worksheet.append_row([
-                    timestamp,
-                    user_id,
-                    sos_data.get("area", "ไม่ระบุพื้นที่"),
-                    sos_data.get("total_people", "1"),
-                    sos_data.get("children", "ไม่มี"),
-                    sos_data.get("elderly", "ไม่มี"),
-                    sos_data.get("bedridden", "ไม่มี"),
-                    sos_data.get("pets", "ไม่มี"),
-                    sos_data.get("water_level", "รอตรวจสอบ"),
-                    sos_data.get("urgent_evac", "ไม่ระบุ"),
-                    latitude,
-                    longitude,
-                    f"พิกัดไลน์: {address} ({title})",
-                    priority
-                ])
-                success = True
-            except Exception as e:
-                print(f"Failed to write SOS to Sheets: {e}")
-                
-        if success:
-            confirm_text = (
-                f"🚨 ระดับความเร่งด่วน: {priority}\n\n"
-                "ส่งเรื่องและบันทึกข้อมูลขอรับการช่วยเหลือด่วนเข้าศูนย์สเปรดชีตกู้ภัยสำเร็จแล้วนะครับ!\n"
-                f"📍 พิกัดส่งทีมกู้ภัย: {latitude}, {longitude}\n"
-                f"👥 สรุปข้อมูลผู้ประสบภัย: ยื่นขอช่วยเหลือด่วน {sos_data.get('total_people', '1')} คน (ผู้ป่วยติดเตียง: {sos_data.get('bedridden', 'ไม่มี')})\n"
-                f"🌊 ระดับน้ำปัจจุบัน: {sos_data.get('water_level', 'รอตรวจสอบ')}\n\n"
-                "ทีมกู้ภัยสามารถเปิดตรวจสอบข้อมูลเชิงลึกทั้งหมดของคุณได้ทันทีแบบเรียลไทม์ โปรดเฝ้ารอด้วยความปลอดภัยสูงสุดนะครับ"
-            )
-        else:
-            confirm_text = (
-                f"🚨 ระบบประเมินความเร่งด่วน: {priority}\n\n"
-                "ระบบได้รับการยืนยันพิกัด SOS ของคุณแล้วนะครับ!\n"
-                f"📍 พิกัดของคุณคือ: {latitude}, {longitude}\n"
-                f"👥 ข้อมูลคัดกรอง: บ้านอยู่แถว {sos_data.get('area', 'ไม่ระบุ')}, สมาชิก {sos_data.get('total_people', '1')} คน (ติดเตียง: {sos_data.get('bedridden', 'ไม่มี')})\n\n"
-                "*(หมายเหตุ: ข้อมูลประมวลผลสำเร็จทางหลังบ้านแล้ว แต่ไม่พบบัญชีสิทธิ์การเขียนข้อมูลลง Google Sheets ปลายทาง โปรดตรวจเช็กสิทธิ์ Editor ใน Google Sheets ของคุณครับ)"
-            )
-            
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
+        # ปรับระดับขั้นตอนไปสู่อัตราส่วนสมาชิกติดในบ้าน (SOS Step 2)
+        USER_STATES[user_id] = "sos_q2"
+        
+        line_bot_api.reply_message(
+            event.reply_token, 
+            TextSendMessage(text="📌 Step 2: โปรดพิมพ์แจ้งจำนวนคนที่ประสบภัยที่ติดอยู่ร่วมกันในบ้านของคุณในตอนนี้ครับ? (กรุณาระบุจำนวนตัวเลข เช่น '3')")
+        )
         
     else:
         confirm_text = "📍 คุณส่งพิกัด GPS มาหาผม หากต้องการแจ้งขอความช่วยเหลือ โปรดกดแตะเมนู 'SOS ขอความช่วยเหลือ' บนแถบด้านล่างก่อนเพื่อให้ทีมกู้ภัยวิเคราะห์ความเร่งด่วนได้อย่างแม่นยำนะครับ"
