@@ -2,7 +2,8 @@ import os
 import json
 import math
 import datetime
-from flask import Flask, request, abort
+import requests
+from flask import Flask, request, abort, render_template_string
 
 # LINE SDK
 from linebot import LineBotApi, WebhookHandler
@@ -25,12 +26,19 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
 # ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง (State Machine & Context Storage)
 USER_STATES = {}
 USER_DATA = {}
+
+# รายชื่อศูนย์อพยพจำลอง (จะถูกใช้เป็นตัวสำรอง หากยังไม่ได้เชื่อมต่อ Google Sheets)
+FALLBACK_SHELTERS = [
+    {"name": "ศูนย์อพยพวัดเสาชิงช้า", "lat": 13.7523, "lon": 100.5015, "capacity": 200, "occupancy": 85, "status": "ว่าง"},
+    {"name": "ศูนย์อพยพโรงเรียนวัดสุทัศน์", "lat": 13.7511, "lon": 100.5002, "capacity": 150, "occupancy": 150, "status": "เต็ม"}
+]
 
 # เริ่มใช้งาน LINE API
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
@@ -114,12 +122,208 @@ def calculate_priority(data):
         print(f"Priority Calc Error: {e}")
         return "🟠 ปานกลาง"
 
-# 6. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย (Home Route)
+# 6. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย
 @app.route("/", methods=['GET'])
 def index():
     return "<h2 style='font-family: sans-serif; text-align: center; margin-top: 100px; color: #1E3A8A;'>🤖 FLOODCARE AI Service is Running Active!</h2>"
 
-# 7. Webhook Route
+# 7. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
+@app.route("/dashboard", methods=['GET'])
+def dashboard():
+    sheets_client = get_sheets_client()
+    sos_cases = []
+    shelters = []
+    error_msg = ""
+    
+    if not sheets_client:
+        error_msg = "⚠️ ยังไม่ได้ป้อนหรือตั้งค่ารหัสสิทธิ์ของ Google Sheets บนระบบ Render ครับ"
+    else:
+        try:
+            sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+            
+            # 1. ดึงข้อมูลกรณีฉุกเฉินผู้ประสบภัย (SOS_Intake)
+            try:
+                sos_worksheet = sheet.worksheet("SOS_Intake")
+                sos_cases = sos_worksheet.get_all_records()
+                sos_cases.reverse()
+            except Exception as e:
+                print(f"Failed to load SOS: {e}")
+                
+            # 2. ดึงข้อมูลศูนย์อพยพจริง (Shelters)
+            try:
+                shelters_worksheet = sheet.worksheet("Shelters")
+                shelters = shelters_worksheet.get_all_records()
+            except Exception as e:
+                print(f"Failed to load Shelters: {e}")
+                
+        except Exception as e:
+            error_msg = f"ไม่สามารถเข้าถึงฐานข้อมูลกลางได้: {e}"
+
+    # คำนวณสถิติประเมินสถานการณ์ภาพรวมอย่างรวดเร็ว
+    total_cases = len(sos_cases)
+    urgent_count = sum(1 for c in sos_cases if "🔴" in str(c.get("Priority", "")))
+    medium_count = sum(1 for c in sos_cases if "🟠" in str(c.get("Priority", "")))
+    bedridden_count = sum(1 for c in sos_cases if "มี" in str(c.get("Bedridden", "")) or "ใช่" in str(c.get("Bedridden", "")))
+    
+    # หน้าจอเว็บดีไซน์ Command Center
+    html_template = """
+    <!DOCTYPE html>
+    <html lang="th">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>COMMAND CENTER — FLOODCARE AI</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+        <div class="container mx-auto p-4 md:p-6">
+            <!-- ส่วนหัวข้อหลัก -->
+            <header class="flex flex-col md:flex-row justify-between items-center pb-6 mb-6 border-b border-slate-800">
+                <div class="flex items-center space-x-3">
+                    <span class="text-4xl">🚨</span>
+                    <div>
+                        <h1 class="text-2xl font-bold tracking-wide">FLOODCARE AI</h1>
+                        <p class="text-sm text-slate-400">ศูนย์ประสานงานและรายงานเหตุภัยอุทกภัยอัจฉริยะ ( COMMAND CENTER )</p>
+                    </div>
+                </div>
+                <div class="mt-4 md:mt-0 bg-slate-800 px-4 py-2 rounded-lg border border-slate-700 text-sm">
+                    🟢 ดึงข้อมูลแบบเรียลไทม์สำเร็จ
+                </div>
+            </header>
+
+            {% if error_msg %}
+            <div class="bg-red-900/50 border border-red-500 text-red-200 p-4 rounded-lg mb-6">
+                {{ error_msg }}
+            </div>
+            {% endif %}
+
+            <!-- ส่วนสรุปสถิติ (Stats Grid) -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <p class="text-sm text-slate-400">เคสแจ้งเหตุทั้งหมด</p>
+                    <p class="text-3xl font-extrabold text-blue-400 mt-1">{{ total_cases }} <span class="text-lg font-normal">เคส</span></p>
+                </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-red-900/50 bg-red-950/20">
+                    <p class="text-sm text-red-300">🔴 เคสเร่งด่วนมาก</p>
+                    <p class="text-3xl font-extrabold text-red-500 mt-1">{{ urgent_count }} <span class="text-lg font-normal">เคส</span></p>
+                </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-orange-900/50 bg-orange-950/20">
+                    <p class="text-sm text-orange-300">🟠 เคสระดับปานกลาง</p>
+                    <p class="text-3xl font-extrabold text-orange-500 mt-1">{{ medium_count }} <span class="text-lg font-normal">เคส</span></p>
+                </div>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <p class="text-sm text-slate-400">ผู้ป่วยติดเตียงที่ต้องการช่วย</p>
+                    <p class="text-3xl font-extrabold text-purple-400 mt-1">{{ bedridden_count }} <span class="text-lg font-normal">ราย</span></p>
+                </div>
+            </div>
+
+            <!-- ส่วนแสดงรายชื่อกลุ่มกู้ภัยและศูนย์อพยพหลัก -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- ตารางผู้แจ้งเหตุ SOS_Intake (2 ใน 3 ส่วน) -->
+                <div class="lg:col-span-2 bg-slate-800 rounded-xl border border-slate-700 p-4 overflow-hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold flex items-center space-x-2">
+                            <span>📋</span> <span>รายการขอความช่วยเหลือฉุกเฉิน</span>
+                        </h2>
+                        <!-- กล่องค้นหาเฉพาะจุดแบบด่วน -->
+                        <input id="searchInput" onkeyup="filterCases()" type="text" placeholder="🔍 ค้นหาพื้นที่..." class="bg-slate-900 border border-slate-700 text-sm px-3 py-1.5 rounded-lg text-slate-200 focus:outline-none focus:border-blue-500">
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-700 text-slate-400">
+                                    <th class="py-3 px-2">ระดับภัย</th>
+                                    <th class="py-3 px-2">พื้นที่/จุดพิกัด</th>
+                                    <th class="py-3 px-2">ข้อมูลผู้ประสบภัย</th>
+                                    <th class="py-3 px-2">ระดับน้ำ</th>
+                                    <th class="py-3 px-2">การกู้ภัย</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sosTable">
+                                {% for case in sos_cases %}
+                                <tr class="border-b border-slate-700/50 hover:bg-slate-750/30 transition duration-150 py-3">
+                                    <td class="py-3 px-2 font-bold">{{ case.get('Priority', '🟢 ตรวจสอบ') }}</td>
+                                    <td class="py-3 px-2">
+                                        <p class="font-semibold text-slate-200">{{ case.get('Area', 'ไม่ระบุ') }}</p>
+                                        <p class="text-xs text-slate-500 mt-0.5">{{ case.get('Timestamp', '') }}</p>
+                                    </td>
+                                    <td class="py-3 px-2">
+                                        <p class="text-slate-300">รวม <b>{{ case.get('TotalPeople', '1') }}</b> คน (เด็ก: {{ case.get('Children', '-') }}, ชรา: {{ case.get('Elderly', '-') }})</p>
+                                        <p class="text-xs text-purple-300 mt-1">ผู้ป่วยติดเตียง: {{ case.get('Bedridden', 'ไม่มี') }} | สัตว์เลี้ยง: {{ case.get('Pets', 'ไม่มี') }}</p>
+                                    </td>
+                                    <td class="py-3 px-2 font-semibold text-sky-400">{{ case.get('WaterLevel', '-') }}</td>
+                                    <td class="py-3 px-2">
+                                        <a href="https://www.google.com/maps/search/?api=1&query={{ case.get('Latitude', 0) }},{{ case.get('Longitude', 0) }}" target="_blank" class="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 transition font-bold text-xs text-white rounded-lg shadow-md shadow-red-950/20">
+                                            🗺️ แผนที่นำทาง
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- การแสดงผลข้อมูลศูนย์อพยพ Shelters (1 ใน 3 ส่วน) -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 p-4">
+                    <h2 class="text-lg font-semibold flex items-center space-x-2 mb-4">
+                        <span>🏠</span> <span>สถานะศูนย์อพยพจริงในระบบ</span>
+                    </h2>
+                    <div class="space-y-4">
+                        {% for sh in shelters %}
+                        <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-750">
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <p class="font-bold text-slate-200">{{ sh.get('Name', 'ไม่ระบุ') }}</p>
+                                    <p class="text-xs text-slate-500 mt-0.5">{{ sh.get('District', '') }} จ.{{ sh.get('Province', '') }}</p>
+                                </div>
+                                <span class="px-2 py-0.5 text-xs font-semibold rounded {{ 'bg-red-950 text-red-400' if sh.get('Status') == 'เต็ม' else 'bg-green-950 text-green-400' }}">
+                                    {{ sh.get('Status', 'ว่าง') }}
+                                </span>
+                            </div>
+                            <!-- แถบแสดงอัตราส่วนผู้เข้าพัก (Capacity Bar) -->
+                            <div class="w-full bg-slate-800 rounded-full h-2 mt-3">
+                                <div class="bg-blue-500 h-2 rounded-full" style="width: {{ (sh.get('Occupancy', 0)|int / sh.get('Capacity', 100)|int * 100)|round|int if sh.get('Capacity', 100)|int > 0 else 0 }}%"></div>
+                            </div>
+                            <div class="flex justify-between items-center text-xs text-slate-400 mt-2">
+                                <span>เข้าพัก: {{ sh.get('Occupancy', 0) }} / {{ sh.get('Capacity', 100) }} คน</span>
+                                <span>ติดต่อ: {{ sh.get('Contact', '-') }}</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // ฟังก์ชันฟิลเตอร์ค้นหาชื่อพื้นที่แบบ Real-time บนเบราว์เซอร์
+            function filterCases() {
+                var input = document.getElementById("searchInput");
+                var filter = input.value.toLowerCase();
+                var table = document.getElementById("sosTable");
+                var tr = table.getElementsByTagName("tr");
+
+                for (var i = 0; i < tr.length; i++) {
+                    var areaCell = tr[i].getElementsByTagName("td")[1];
+                    if (areaCell) {
+                        var textValue = areaCell.textContent || areaCell.innerText;
+                        if (textValue.toLowerCase().indexOf(filter) > -1) {
+                            tr[i].style.display = "";
+                        } else {
+                            tr[i].style.display = "none";
+                        }
+                    }
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, urgent_count=urgent_count, medium_count=medium_count, bedridden_count=bedridden_count)
+
+# 8. Webhook Route
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -130,7 +334,7 @@ def callback():
         abort(400)
     return 'OK'
 
-# 8. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
+# 9. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
@@ -140,7 +344,7 @@ def handle_text_message(event):
     # ดึงระดับสถานะการคุยปัจจุบัน
     state = USER_STATES.get(user_id)
 
-    # ==================== ส่วนที่ 8.1: ระบบคัดกรองข้อมูลผู้ประสบภัยอัตโนมัติ (Triage Intake State Machine) ====================
+    # ==================== ส่วนที่ 9.1: ระบบคัดกรองข้อมูลผู้ประสบภัยอัตโนมัติ (Triage Intake State Machine) ====================
     if state:
         if user_id not in USER_DATA:
             USER_DATA[user_id] = {}
@@ -199,7 +403,7 @@ def handle_text_message(event):
             )
             return
 
-        # ==================== ส่วนที่ 8.2: ระบบคัดกรองคำถามอื่น ๆ ย้อนกลับตามเมนู ====================
+        # ==================== ส่วนที่ 9.2: ระบบคัดกรองคำถามอื่น ๆ ย้อนกลับตามเมนู ====================
         elif state == "waiting_emergency_type":
             USER_STATES.pop(user_id, None)
             prompt = f"ผู้ประสบภัยต้องการติดต่อขอกู้ภัยด้วยเรื่องเฉพาะหน้าคือ: '{user_text}' โปรดระบุเบอร์โทรฉุกเฉินและประสานงานกู้ภัยอย่างสั้น กระชับและสุภาพ"
@@ -233,7 +437,57 @@ def handle_text_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
             return
 
-    # ==================== ส่วนที่ 8.3: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
+        # ==================== ฟีเจอร์ตรวจจับการพิมพ์ค้นหาศูนย์อพยพด้วยชื่อจังหวัดหรือชื่ออำเภอ ====================
+        elif state == "waiting_shelter_location":
+            USER_STATES.pop(user_id, None)
+            shelter_list = []
+            db_connected = False
+            
+            if sheets_client:
+                try:
+                    sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                    shelters_worksheet = sheet.worksheet("Shelters")
+                    rows = shelters_worksheet.get_all_records()
+                    for row in rows:
+                        sh_name = str(row.get('Name', '')).strip()
+                        sh_province = str(row.get('Province', '')).strip()
+                        sh_district = str(row.get('District', '')).strip()
+                        
+                        # ตรวจจับหากคำที่ผู้ใช้พิมพ์เข้ามา ตรงกับชื่อศูนย์, จังหวัด หรืออำเภอในชีต
+                        if user_text in sh_name or user_text in sh_province or user_text in sh_district:
+                            vacancy_status = check_shelter_vacancy(row.get('Capacity', 100), row.get('Occupancy', 0))
+                            shelter_list.append({
+                                "name": sh_name,
+                                "province": sh_province,
+                                "district": sh_district,
+                                "vacancy": vacancy_status,
+                                "contact": row.get('Contact', '-'),
+                                "lat": row.get('Latitude', 0),
+                                "lon": row.get('Longitude', 0)
+                            })
+                    db_connected = True
+                except Exception as e:
+                    print(f"Failed to query database: {e}")
+
+            if not db_connected:
+                reply_text = "⚠️ ขออภัยครับ ระบบตรวจสอบสิทธิ์ฐานข้อมูล Google Sheets ขัดข้องชั่วคราว โปรดตรวจเช็กคีย์สิทธิ์บน Render หรือลองใหม่อีกครั้งครับ"
+            elif not shelter_list:
+                reply_text = f"📍 ไม่พบข้อมูลศูนย์พักพิงจริงในพื้นที่ชื่อ '{user_text}' เลยครับ โปรดตรวจสอบการสะกดชื่ออำเภอ/จังหวัด แล้วลองพิมพ์ใหม่อีกครั้งนะครับ"
+            else:
+                reply_text = f"🏠 รายชื่อศูนย์พักพิงจริงในพื้นที่ '{user_text}' ที่เราพบล่าสุดในระบบฐานข้อมูลครับ:\n\n"
+                for index, sh in enumerate(shelter_list, 1):
+                    reply_text += (
+                        f"{index}️⃣ {sh['name']}\n"
+                        f"   📌 ที่ตั้ง: อ.{sh['district']} จ.{sh['province']}\n"
+                        f"   📌 สถานะความจุ: {sh['vacancy']}\n"
+                        f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
+                    )
+                reply_text += "⚠️ โปรดโทรตรวจสอบความจุกับทางศูนย์อพยพก่อนออกเดินทาง หรือเดินทางด้วยความระมัดระวังสูงสุดนะครับ"
+                
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            return
+
+    # ==================== ส่วนที่ 9.3: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
         USER_STATES[user_id] = "waiting_emergency_type"
         reply_text = "📞 คุณต้องการติดต่อประสานงานกู้ภัยด้วยสถานการณ์ฉุกเฉินเรื่องใดเป็นพิเศษไหมครับ? พิมพ์บอกผมสั้นๆ ได้เลยนะครับ"
@@ -254,20 +508,20 @@ def handle_text_message(event):
         line_bot_api.reply_message(
             event.reply_token, 
             TextSendMessage(
-                text="📍 โปรดกดแชร์พิกัดที่ตั้งปัจจุบันของคุณ เพื่อให้ระบบช่วยค้นหาศูนย์พักพิงจริงรอบตัวคุณในระยะ 5-20 กม. ครับ",
+                text="📍 โปรดกดแชร์พิกัด 'Location' ด้านล่างนี้ หรือพิมพ์บอกชื่ออำเภอ/จังหวัดที่คุณอยู่ในปัจจุบัน เพื่อให้ผมช่วยค้นหาศูนย์พักพิงจริงรอบตัวคุณครับ",
                 quick_reply=location_quick_reply
             )
         )
         
     elif user_text == "ตรวจสอบระดับน้ำ":
         USER_STATES[user_id] = "waiting_water_location"
-        reply_text = "🌊 คุณต้องการประเมินระดับน้ำในพื้นที่เขต/อำเภอ และจังหวัดใดครับ? โปรดพิมพ์ระบุชื่อพื้นที่ของคุณมาได้เลยนะครับ"
+        reply_text = "🌊 คุณต้องการเช็กหรือประเมินระดับน้ำในพื้นที่เขต/อำเภอ และจังหวัดใดครับ? โปรดพิมพ์ระบุชื่อพื้นที่ของคุณมาได้เลยนะครับ"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "SOS ขอความช่วยเหลือ":
         USER_STATES[user_id] = "sos_q1"
         USER_DATA[user_id] = {} # ล้างข้อมูลเก่า
-        reply_text = "🚨 เพื่อจัดเตรียมอุปกรณ์ช่วยเหลือได้ถูกต้อง โปรดตอบข้อมูลคัดกรองสั้นๆ นะครับ\n\n📌 1. บ้านของคุณอยู่พื้นที่บริเวณไหนครับ? (ระบุชื่อหมู่บ้าน ซอย หรือจุดสังเกต)"
+        reply_text = "🚨 เพื่อจัดเตรียมอุปกรณ์ช่วยเหลือได้ถูกต้อง โปรดตอบข้อมูลสั้นๆ นะครับ\n\n📌 1. บ้านของคุณอยู่พื้นที่บริเวณไหนครับ? (ระบุชื่อหมู่บ้าน ซอย หรือจุดสังเกต)"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ถาม AI เรื่องน้ำท่วม":
@@ -284,7 +538,6 @@ def handle_text_message(event):
             print(f"Gemini API Error: {e}")
             ai_response = "⚠️ บริการ AI ขัดข้องชั่วคราว หากตกอยู่ในภาวะอันตราย โทร ปภ. 1784 ทันทีครับ"
             
-        sheets_client = get_sheets_client()
         if sheets_client:
             try:
                 sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
@@ -334,7 +587,6 @@ def handle_location_message(event):
                 print(f"Failed to fetch shelters from Sheets: {e}")
                 
         if not db_connected:
-            # หากเชื่อมต่อสเปรดชีตสิทธิไม่สมบูรณ์ จะแจ้งรายงานความล้มเหลวทันทีเพื่อความปลอดภัยในการประสานข้อมูลจริง
             reply_text = "⚠️ ขออภัยครับ ขณะนี้ระบบขัดข้องไม่สามารถตรวจสอบสิทธิ์การอ่านข้อมูลศูนย์พักพิงจริงได้ โปรดโทรติดต่อเบอร์สายด่วนภัยพิบัติ ปภ. 1784 ทันทีครับ"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
@@ -342,7 +594,6 @@ def handle_location_message(event):
         nearest_shelters = []
         for sh in shelter_list:
             distance = calculate_distance(latitude, longitude, sh['lat'], sh['lon'])
-            # คัดกรองรัศมี 5 - 20 กิโลเมตร
             if 5.0 <= distance <= 20.0 or distance < 5.0:
                 vacancy_status = check_shelter_vacancy(sh['capacity'], sh['occupancy'])
                 nearest_shelters.append({
@@ -381,7 +632,6 @@ def handle_location_message(event):
             try:
                 sheet = sheets_client.open_by_key(GOOGLE_SHEET_ID)
                 sos_worksheet = sheet.worksheet("SOS_Intake")
-                # บันทึกข้อมูลคัดกรองลงสเปรดชีตตรงตามสเปกเป๊ะๆ
                 sos_worksheet.append_row([
                     timestamp,
                     user_id,
@@ -409,7 +659,7 @@ def handle_location_message(event):
                 f"📍 พิกัดส่งทีมกู้ภัย: {latitude}, {longitude}\n"
                 f"👥 สรุปข้อมูลผู้ประสบภัย: ยื่นขอช่วยเหลือด่วน {sos_data.get('total_people', '1')} คน (ผู้ป่วยติดเตียง: {sos_data.get('bedridden', 'ไม่มี')})\n"
                 f"🌊 ระดับน้ำปัจจุบัน: {sos_data.get('water_level', 'รอตรวจสอบ')}\n\n"
-                "ข้อมูลนี้กู้ภัยสามารถเปิดตรวจสอบเพื่อเข้าช่วยเหลือได้ทันทีแบบเรียลไทม์ โปรดรอคอยในจุดที่ปลอดภัยที่สุดนะครับ"
+                "ทีมกู้ภัยสามารถเปิดตรวจสอบข้อมูลเชิงลึกทั้งหมดของคุณได้ทันทีแบบเรียลไทม์ โปรดเฝ้ารอด้วยความปลอดภัยสูงสุดนะครับ"
             )
         else:
             confirm_text = (
