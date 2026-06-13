@@ -15,7 +15,7 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets
+# Google Sheets (เชื่อมต่อเสถียร ไม่ใช้ไฟล์แยก)
 import gspread
 
 app = Flask(__name__)
@@ -28,7 +28,7 @@ RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
-# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลชั่วคราว (State Machine & Context Storage)
+# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง (State Machine & Context Storage)
 USER_STATES = {}
 USER_DATA = {}
 
@@ -106,9 +106,8 @@ def setup_sheets_automatically(sheet):
                 "Longitude", "Capacity", "Occupancy", "Status"
             ]
             shelters_ws.append_row(headers)
-            # ข้อมูลศูนย์พักพิงพิกัดเสี่ยงจริงในไทย
             mock_rows = [
-                ["SH001", "ศูนย์อพยพโรงเรียนเทศบาล 1 (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0112", "100.4715", "500", "120", "ว่าง"],
+                ["SH001", "ศูนย์อพยพโรงเรียนโคกสมานคุณ (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
                 ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง"],
                 ["SH003", "ศูนย์เยาวชนกรุงเทพมหานคร (กทม)", "กรุงเทพ", "ดินแดง", "13.7654", "100.5231", "300", "300", "เต็ม"]
             ]
@@ -131,7 +130,7 @@ def setup_sheets_automatically(sheet):
             for r in water_rows:
                 water_ws.append_row(r)
 
-        # 5. แท็บ Contacts (ตารางรายชื่อเบอร์ฉุกเฉินและบทบาทในกูเกิลชีต)
+        # 5. แท็บ Contacts (ตารางรายชื่อเบอร์ฉุกเฉินในระบบ)
         if "Contacts" not in existing_sheets:
             print("Creating Contacts worksheet...")
             contacts_ws = sheet.add_worksheet(title="Contacts", rows="1000", cols="10")
@@ -140,13 +139,12 @@ def setup_sheets_automatically(sheet):
             contact_rows = [
                 ["CT001", "ปภ. (กรมป้องกันและบรรเทาสาธารณภัย)", "รับแจ้งเหตุเตือนภัยและช่วยเหลืออุทกภัยสายด่วน", "1784"],
                 ["CT002", "สพฉ. (สถาบันการแพทย์ฉุกเฉินแห่งชาติ)", "รับส่งต่อผู้ป่วยและเจ็บป่วยฉุกเฉินทางการแพทย์", "1669"],
-                ["CT003", "ตำรวจทางหลวง", "ประสานงานความช่วยเหลือเส้นทางน้ำท่วมและดินถล่ม", "1193"],
-                ["CT004", "ศูนย์รับเรื่องร้องเรียนน้ำท่วมรัฐบาล", "ร้องเรียนและขอความช่วยเหลือทั่วไปส่วนกลาง", "1111"]
+                ["CT003", "ตำรวจทางหลวง", "ประสานงานความช่วยเหลือเส้นทางน้ำท่วมและดินถล่ม", "1193"]
             ]
             for r in contact_rows:
                 contacts_ws.append_row(r)
 
-        # 6. แท็บ user_needs (ตารางบันทึกแบบฟอร์มความต้องการพิเศษของผู้ประสบภัย)
+        # 6. แท็บ user_needs (ตารางบันทึกความต้องการพิเศษของผู้ประสบภัย)
         if "user_needs" not in existing_sheets:
             print("Creating user_needs worksheet...")
             needs_ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="10")
@@ -176,7 +174,7 @@ def setup_sheets_automatically(sheet):
 SHEETS_INITIALIZED = False
 LAST_SHEETS_ERROR = "ยังไม่ได้เปิดใช้งานการเชื่อมต่อ"
 
-# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client)
+# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (สกัดระบบตรวจสอบและล้างเครื่องหมายคำพูดแฝง)
 def get_sheets_client():
     global SHEETS_INITIALIZED, LAST_SHEETS_ERROR
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
@@ -241,7 +239,7 @@ def index():
         <p style="color: #444; line-height: 1.6;">ระบบช่วยวิเคราะห์ความเสถียรและการเชื่อมต่อของเซิร์ฟเวอร์แบบเรียลไทม์:</p>
         
         <div style="background: #f8f9fa; padding: 15px; border-left: 4px solid #1E3A8A; margin: 20px 0; border-radius: 0 8px 8px 0;">
-            <p style="margin: 0; font-weight: bold; color: #1E3A8A;">📊 สถานะการเชื่อม Google Sheets:</p>
+            <p style="margin: 0; font-weight: bold; color: #1E3A8A;">📊 Status การเชื่อม Google Sheets:</p>
             <p style="margin: 5px 0 0 0; font-size: 14px; color: #333;">{db_status}</p>
         </div>
 
@@ -398,7 +396,7 @@ def dashboard():
                                         <p class="text-xs text-purple-300 mt-1">ติดเตียง: {{ case.get('bedridden', 'NO') }} | สัตว์เลี้ยง: {{ case.get('pets', 'NO') }}</p>
                                     </td>
                                     <td class="py-3 px-2">
-                                        <p class="font-semibold text-sky-400 text-xs">🌊 {{(case.get('water_level', '-'))}}</p>
+                                        <p class="font-semibold text-sky-400 text-xs">🌊 {{case.get('water_level', '-')}}</p>
                                         <p class="text-xs text-slate-400 mt-1 max-w-xs truncate">{{ case.get('note', '-') }}</p>
                                     </td>
                                     <td class="py-3 px-2">
@@ -466,7 +464,7 @@ def dashboard():
     </body>
     </html>
     """
-    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, critical_count=critical_count, high_count=high_count, bedridden_count=bedridden_count)
+    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, urgent_count=critical_count, high_count=high_count, bedridden_count=bedridden_count)
 
 # 10. Webhook Route
 @app.route("/callback", methods=['POST'])
@@ -500,20 +498,42 @@ def handle_text_message(event):
         )
         return
 
-    # ==================== ส่วนที่ 11.2: ดักจับและประมวลสถานะลงทะเบียนผู้ใช้รายใหม่ (First-Time User Registration) ====================
+    # 11.2 ดักจับกรณีผู้ใช้เผลอพิมพ์ตัวอักษรเข้ามาระหว่างที่ระบบรอยิงพิกัด GPS ของ SOS
+    if state == "sos_location":
+        location_quick_reply = QuickReply(
+            items=[
+                QuickReplyButton(action=LocationAction(label="กดส่งพิกัดตำแหน่งแจ้งเหตุ"))
+            ]
+        )
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="🚨 ระบบกำลังรอตำแหน่งพิกัดของคุณอยู่ครับ โปรดกดปุ่มสีเขียว 'กดส่งพิกัดตำแหน่งแจ้งเหตุ' ด้านล่างเพื่อส่งข้อมูลความละเอียดด่วน หรือพิมพ์คำว่า 'ยกเลิก' เพื่อเริ่มต้นใหม่ครับ",
+                quick_reply=location_quick_reply
+            )
+        )
+        return
+
+    # ==================== ส่วนที่ 11.3: ดักจับและประมวลสถานะลงทะเบียนผู้ใช้รายใหม่ (First-Time User Registration) ====================
     if state == "register_first_name":
+        if user_id not in USER_DATA:
+            USER_DATA[user_id] = {}
         USER_DATA[user_id]["temp_first_name"] = user_text
         USER_STATES[user_id] = "register_last_name"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ระบุ 'นามสกุล' ของคุณเพื่อใช้ยืนยันตัวตนกับกู้ภัยครับ"))
         return
         
     elif state == "register_last_name":
+        if user_id not in USER_DATA:
+            USER_DATA[user_id] = {}
         USER_DATA[user_id]["temp_last_name"] = user_text
         USER_STATES[user_id] = "register_phone"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ระบุ 'เบอร์โทรศัพท์มือถือ' 9-10 หลักของคุณสำหรับการติดต่อกลับครับ"))
         return
         
     elif state == "register_phone":
+        if user_id not in USER_DATA:
+            USER_DATA[user_id] = {}
         # ตรวจสอบความถูกต้องของเบอร์โทรศัพท์ 9-10 หลัก
         clean_phone = "".join(filter(lambda x: x.isdigit(), user_text))
         if len(clean_phone) < 9 or len(clean_phone) > 10:
@@ -535,29 +555,35 @@ def handle_text_message(event):
             except Exception as e:
                 print(f"Failed to save user to Sheets: {e}")
                 
-        # ล้างสถานะการลงทะเบียนเสร็จสมบูรณ์
+        # ปรับโปรไฟล์ชั่วคราวในหน่วยความจำ (In-memory Backup) เพื่อให้ระบบใช้งานต่อได้แม้ชีตพัง
+        USER_DATA[user_id]["first_name"] = first_name
+        USER_DATA[user_id]["last_name"] = last_name
+        USER_DATA[user_id]["phone"] = clean_phone
+        
+        # ล้างสถานะลงทะเบียนเข้าสู่ระบบปกติ
         USER_STATES.pop(user_id, None)
-        USER_DATA.pop(user_id, None)
         
         if success:
             reply_text = (
                 f"🎉 ยินดีต้อนรับครับ คุณ {first_name} {last_name}!\n"
                 "ระบบได้ทำการลงทะเบียนโปรไฟล์ผู้ใช้งานของคุณเข้าสู่ฐานข้อมูลประชากรผู้ประสบภัยเรียบร้อยแล้วครับ\n\n"
-                "🛡️ คุณสามารถกดปุ่มเมนูบน Rich Menu ด้านล่าง เพื่อขอความช่วยเหลือ SOS หรือสอบถาม AI ได้ทันทีโดยระบบจำพิกัดของคุณไว้เรียบร้อยแล้วครับ"
+                "🛡️ คุณสามารถกดปุ่มเมนูบน Rich Menu ด้านล่าง เพื่อขอความช่วยเหลือ SOS หรือสอบถาม AI ได้ทันทีครับ"
             )
         else:
             reply_text = (
-                f"🎉 การสมัครสัญญานสำเร็จเสมือนจริงเบื้องต้นแล้วครับ คุณ {first_name} {last_name}!\n"
-                "*(หมายเหตุ: ระบบยังไม่สามารถเขียนลงชีตจริงได้เนื่องจากสเปรดชีตขัดข้องสิทธิ์เข้าถึง แต่คุณสามารถพิมพ์ใช้งานตอบโต้ได้ปกติครับ)"
+                f"🎉 สมัครสมาชิกจำลองสำเร็จแล้วครับ คุณ {first_name} {last_name}!\n"
+                "ระบบได้บันทึกโปรไฟล์สำรองของคุณไว้บนเซิร์ฟเวอร์ชั่วคราวแล้ว คุณสามารถกดปุ่ม SOS เพื่อขอรับการช่วยเหลือได้ทันทีครับ"
             )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
-    # ==================== ส่วนที่ 11.3: ระบบดักจับการพิมพ์โต้ตอบระหว่างทำแบบสอบถาม SOS (Steps 2-8) ====================
+    # ==================== ส่วนที่ 11.4: ระบบดักจับการพิมพ์โต้ตอบระหว่างทำแบบสอบถาม SOS (Steps 2-8) ====================
     if state:
+        if user_id not in USER_DATA:
+            USER_DATA[user_id] = {}
+
         if state == "sos_q2":
             USER_DATA[user_id]["people_count"] = user_text
-            # ขั้นที่ 3: ถามเรื่องเด็กเล็ก (ส่งแบบปุ่มด่วนลัดเพื่อให้กดง่าย)
             USER_STATES[user_id] = "sos_q3"
             quick_reply = QuickReply(
                 items=[
@@ -569,7 +595,6 @@ def handle_text_message(event):
             return
             
         elif state == "sos_q3":
-            # ตรวจสอบค่าปุ่มกด
             val = user_text.strip().upper()
             USER_DATA[user_id]["children"] = "YES" if "YES" in val or "มี" in val else "NO"
             USER_STATES[user_id] = "sos_q4"
@@ -632,14 +657,12 @@ def handle_text_message(event):
         elif state == "sos_q8":
             USER_DATA[user_id]["note"] = user_text
             
-            # คำนวณความเร่งด่วนตามเกณฑ์ Priority ใหม่ที่สถาปัตยกรรมกำหนด
             data = USER_DATA[user_id]
             bedridden = data.get("bedridden", "NO")
             water_level = data.get("water_level", "")
             elderly = data.get("elderly", "NO")
             children = data.get("children", "NO")
             
-            # คำนวณความเร่งด่วนแบบเฉียบพลัน
             is_critical_water = "สูงกว่า 1 เมตร" in water_level or "1 เมตร" in water_level
             
             if bedridden == "YES" or is_critical_water or (bedridden == "YES" and elderly == "YES") or (bedridden == "YES" and children == "YES"):
@@ -652,10 +675,9 @@ def handle_text_message(event):
             USER_DATA[user_id]["priority"] = priority
             USER_STATES[user_id] = "sos_confirm"
             
-            # ดึงประวัติผู้ใช้มาสรุปใบแจ้งเคส (Case Summary)
-            first_name = "ผู้ประสบภัย"
-            last_name = "ในพื้นที่"
-            phone = "-"
+            first_name = USER_DATA[user_id].get("first_name", "ผู้แจ้ง")
+            last_name = USER_DATA[user_id].get("last_name", "ทั่วไป")
+            phone = USER_DATA[user_id].get("phone", "-")
             
             if sheets_client:
                 try:
@@ -667,14 +689,15 @@ def handle_text_message(event):
                             first_name = r.get("first_name", "ผู้แจ้ง")
                             last_name = r.get("last_name", "")
                             phone = r.get("phone", "-")
+                            
+                            if user_id not in USER_DATA:
+                                USER_DATA[user_id] = {}
+                            USER_DATA[user_id]["first_name"] = first_name
+                            USER_DATA[user_id]["last_name"] = last_name
+                            USER_DATA[user_id]["phone"] = phone
                             break
-                except:
-                    pass
-            
-            # เก็บข้อมูลชื่อและเบอร์ลงตารางส่งงาน
-            USER_DATA[user_id]["first_name"] = first_name
-            USER_DATA[user_id]["last_name"] = last_name
-            USER_DATA[user_id]["phone"] = phone
+                except Exception as e:
+                    print(f"Failed to check user registration: {e}")
             
             summary_text = (
                 "🚨 สรุปคำขอรับการช่วยเหลือ SOS 🚨\n\n"
@@ -704,9 +727,8 @@ def handle_text_message(event):
                 data = USER_DATA.pop(user_id, {})
                 USER_STATES.pop(user_id, None)
                 
-                # ออกรหัสคดี Case ID อัตโนมัติ: SOS-YYYYMMDD-XXXX
                 today_str = datetime.datetime.now().strftime("%Y%m%d")
-                random_suffix = datetime.datetime.now().strftime("%f")[:4] # สุ่มรหัสหลังด้วยไมโครเซกคินส์สั้นๆ เพื่อป้องกันรหัสซ้ำซ้อน
+                random_suffix = datetime.datetime.now().strftime("%f")[:4]
                 case_id = f"SOS-{today_str}-{random_suffix}"
                 
                 success = False
@@ -728,7 +750,7 @@ def handle_text_message(event):
                             data.get("water_level", "-"),
                             data.get("note", "-"),
                             data.get("priority", "🟢  NORMAL (สถานการณ์ปกติ)"),
-                            "OPEN" # สถานะเริ่มต้นเปิดเคสรอเจ้าหน้าที่
+                            "OPEN"
                         ])
                         success = True
                     except Exception as e:
@@ -739,7 +761,7 @@ def handle_text_message(event):
                         "🎉 ยืนยันบันทึกข้อมูลเข้ารหัสกู้ภัยออนไลน์เรียบร้อยแล้วครับ!\n\n"
                         f"🎫 เลขที่อ้างอิงเคส (Case ID): {case_id}\n"
                         f"📊 ความเร็วช่วยเหลือ: {data.get('priority', '-')}\n\n"
-                        "ข้อมูลนี้ถูกส่งเข้าระบบจัดคิวเร่งด่วนของทีมกู้ภัยสำเร็จแล้ว แอดมินสามารถเปิดสแกนนำทางกูเกิลแมปเพื่อเข้าจัดเตรียมเรือกู้ชีพไปช่วยเหลือคุณทันที โปรดรอคอยในพิกัดที่ปลอดภัยที่สุดนะครับ"
+                        "ข้อมูลนี้ถูกส่งเข้าระบบของทีมกู้ภัยสำเร็จแล้ว แอดมินสามารถเปิดตรวจพิกัดเพื่อเข้าจัดส่งเรือกู้ชีพไปช่วยเหลือคุณทันที โปรดรอคอยในพิกัดที่ปลอดภัยที่สุดนะครับ"
                     )
                 else:
                     reply_text = (
@@ -754,7 +776,7 @@ def handle_text_message(event):
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกเคสเดิมและล้างข้อมูลเรียบร้อยแล้วครับ คุณสามารถกดปุ่มเริ่ม SOS ใหม่อีกครั้งได้ทันทีครับ"))
                 return
 
-        # ==================== ส่วนที่ 11.4: ดักจับสัญญานเมื่อพิมพ์ข้อความตอบกลับตามหมวดอื่นย้อนกลับ ====================
+        # ==================== ส่วนที่ 11.5: ดักจับสัญญานเมื่อพิมพ์ข้อความตอบกลับตามหมวดอื่นย้อนกลับ ====================
         elif state == "waiting_emergency_type":
             USER_STATES.pop(user_id, None)
             prompt = f"ผู้ประสบภัยต้องการติดต่อขอกู้ภัยด้วยเรื่องเฉพาะหน้าคือ: '{user_text}' โปรดระบุเบอร์โทรฉุกเฉินและประสานงานกู้ภัยอย่างสั้น กระชับและสุภาพ"
@@ -866,9 +888,8 @@ def handle_text_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
-    # ==================== ส่วนที่ 11.5: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
+    # ==================== ส่วนที่ 11.6: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
-        # ดึงเบอร์โทรศัพท์จริงจากแผ่นงาน Contacts
         db_connected = False
         contact_list = []
         if sheets_client:
@@ -892,11 +913,6 @@ def handle_text_message(event):
                 "🚨 สายด่วนกู้ภัยทางน้ำ 1196 (ขอความช่วยเหลือทางเรือ)\n"
                 "🚨 ตำรวจทางหลวง 1193 (ประสานงานเดินทางเส้นทางน้ำท่วม)"
             )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
-    elif user_text == "วิธีการอพยพ":
-        USER_STATES[user_id] = "waiting_first_aid_detail" # นำทางผู้ใช้เข้าสู่คำถามอพยพจำเพาะ
-        reply_text = "🏃 คุณกำลังติดอยู่ในสถานการณ์อพยพรูปแบบใดอยู่ครับ? (โปรดพิมพ์เล่าสถานการณ์รอบตัวสั้นๆ เพื่อให้ผมแนะนำแนวทางและจัดเตรียมขั้นตอนหนีภัยที่ถูกต้องเร่งด่วนให้ครับ)"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ศูนย์พักพิง":
@@ -930,10 +946,19 @@ def handle_text_message(event):
         )
         
     elif user_text == "SOS ขอความช่วยเหลือ":
-        # ตรวจสอบประวัติการลงทะเบียนในแผ่นงาน 'users' (สถาปัตยกรรมลงทะเบียนครั้งแรกสุดก่อนกด SOS)
         is_registered = False
         first_name = ""
+        last_name = ""
+        phone = "-"
         
+        # 1. ค้นหาความจำสำรองระบบในกรณีชีตสิทธิ์ไม่ผ่าน
+        if user_id in USER_DATA and "first_name" in USER_DATA[user_id]:
+            is_registered = True
+            first_name = USER_DATA[user_id]["first_name"]
+            last_name = USER_DATA[user_id]["last_name"]
+            phone = USER_DATA[user_id]["phone"]
+
+        # 2. ค้นหาประวัติตารางข้อมูลผู้ใช้ใน Google Sheets 'users'
         if sheets_client:
             try:
                 sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
@@ -943,6 +968,15 @@ def handle_text_message(event):
                     if str(r.get("user_id")) == user_id:
                         is_registered = True
                         first_name = r.get("first_name", "ผู้แจ้ง")
+                        last_name = r.get("last_name", "")
+                        phone = r.get("phone", "-")
+                        
+                        # สำรองข้อมูลไว้ในหน่วยความจำเพื่อความรวดเร็ว
+                        if user_id not in USER_DATA:
+                            USER_DATA[user_id] = {}
+                        USER_DATA[user_id]["first_name"] = first_name
+                        USER_DATA[user_id]["last_name"] = last_name
+                        USER_DATA[user_id]["phone"] = phone
                         break
             except Exception as e:
                 print(f"Failed to check user registration: {e}")
@@ -950,17 +984,20 @@ def handle_text_message(event):
         if not is_registered:
             # เข้าสู่กระบวนการลงทะเบียนผู้ใช้รายใหม่ครั้งแรกสุด (First-Time User Registration)
             USER_STATES[user_id] = "register_first_name"
-            USER_DATA[user_id] = {} # เตรียมล้างข้อมูลใหม่เพื่อเก็บพารามิเตอร์การลงทะเบียน
+            USER_DATA[user_id] = {}
             reply_text = (
                 "📝 ขออภัยด้วยครับ เนื่องจากคุณเข้าใช้งานระบบเป็นครั้งแรก เพื่อประโยชน์สูงสุดในการประสานงานส่งต่อข้อมูลให้ทีมกู้ภัย "
                 "โปรดพิมพ์แจ้ง 'ชื่อจริง' ของคุณเพื่อใช้ลงทะเบียนประวัติในระบบสักนิดนึงนะครับ (เช่น 'สมชาย')"
             )
         else:
-            # เริ่มต้นกระบวนการแจ้งเหตุ SOS ทันที (Returning Users) โดยข้ามขั้นตอนขอชื่อและเบอร์โทรไปขั้นปักพิกัดโดยตรง
+            # เริ่มต้นกระบวนการ SOS สำหรับผู้ใช้เก่าที่เคยลงทะเบียนแล้ว
             USER_STATES[user_id] = "sos_location"
-            USER_DATA[user_id] = {} # เตรียมล้างข้อมูลเพื่อเริ่มเขียน SOS
+            USER_DATA[user_id] = {
+                "first_name": first_name,
+                "last_name": last_name,
+                "phone": phone
+            }
             
-            # ส่ง Quick Reply เพื่อให้สแกนรับพิกัดทันทีในสเต็ปที่ 1
             location_quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=LocationAction(label="กดส่งพิกัดตำแหน่งแจ้งเหตุ"))
@@ -975,7 +1012,7 @@ def handle_text_message(event):
             
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
-    elif user_text == "แจ้งความต้องการเพิ่มเติม":
+    elif user_text == "แจ้งความต้องการเพิ่มเติม" or user_text == "ความต้องการ":
         USER_STATES[user_id] = "waiting_needs_form"
         reply_text = (
             "📌 แจ้งแบบฟอร์มความต้องการพิเศษ:\n\n"
@@ -984,7 +1021,7 @@ def handle_text_message(event):
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
-    elif user_text == "ถาม AI เรื่องน้ำท่วม":
+    elif user_text == "ถาม AI เรื่องน้ำท่วม" or "ถาม-ตอบด้วย AI" in user_text or "ถาม–ตอบด้วย AI" in user_text:
         reply_text = "🤖 คุณสามารถพิมพ์รายละเอียดคำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมในครั้งนี้เข้ามาได้ทันทีเลยครับ ผมพร้อมตอบคำถามแบบเป็นกันเองให้ครับ"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
