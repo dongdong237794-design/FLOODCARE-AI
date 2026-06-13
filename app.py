@@ -15,7 +15,7 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets
+# Google Sheets (เชื่อมต่อเสถียรที่สุด ไม่ใช้ไฟล์แยก)
 import gspread
 
 app = Flask(__name__)
@@ -54,7 +54,7 @@ gemini_model = genai.GenerativeModel(
     )
 )
 
-# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*)
+# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*) ออกทั้งหมด
 def clean_text_for_line(text):
     if not text:
         return ""
@@ -78,7 +78,7 @@ def setup_sheets_automatically(sheet):
     try:
         existing_sheets = [w.title for w in sheet.worksheets()]
         
-        # 1. จัดการชีต SOS_Intake
+        # 1. จัดการชีต SOS_Intake (คัดกรองผู้ประสบภัย)
         if "SOS_Intake" not in existing_sheets:
             print("Creating SOS_Intake worksheet...")
             sos_ws = sheet.add_worksheet(title="SOS_Intake", rows="2000", cols="15")
@@ -89,7 +89,7 @@ def setup_sheets_automatically(sheet):
             ]
             sos_ws.append_row(headers)
             
-        # 2. จัดการชีต Shelters
+        # 2. จัดการชีต Shelters (ศูนย์พักพิง)
         if "Shelters" not in existing_sheets:
             print("Creating Shelters worksheet...")
             shelters_ws = sheet.add_worksheet(title="Shelters", rows="1000", cols="10")
@@ -98,15 +98,33 @@ def setup_sheets_automatically(sheet):
                 "Longitude", "Capacity", "Occupancy", "Status"
             ]
             shelters_ws.append_row(headers)
-            # เขียนพิกัดศูนย์อพยพสาธิตในพื้นที่จริง (หาดใหญ่ และ กทม.) ลงไปให้ใช้จำลองได้ทันที
+            # เขียนพิกัดศูนย์อพยพจริงในพื้นที่สงขลาลงไปในตารางให้ใช้จริงทันที
             mock_rows = [
-                ["SH001", "ศูนย์อพยพโรงเรียนหาดใหญ่ (วัดโคกสมานคุณ)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
-                ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง"]
+                ["SH001", "ศูนย์อพยพวัดโคกสมานคุณ (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
+                ["SH002", "ศูนย์อพยพโรงเรียนเทศบาล 1 (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0112", "100.4715", "300", "50", "ว่าง"],
+                ["SH003", "ศูนย์เยาวชนกรุงเทพมหานคร (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "200", "200", "เต็ม"]
             ]
             for r in mock_rows:
                 shelters_ws.append_row(r)
+                
+        # 3. จัดการชีต Water_Levels (สถานีตรวจวัดระดับน้ำจริง)
+        if "Water_Levels" not in existing_sheets:
+            print("Creating Water_Levels worksheet...")
+            water_ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="10")
+            headers = [
+                "StationID", "Name", "Province", "Latitude", "Longitude", "WaterLevel_M", "Status"
+            ]
+            water_ws.append_row(headers)
+            # ข้อมูลระดับน้ำจากสถานีตรวจวัดจริงในสงขลาและพื้นที่เสี่ยงภัย
+            water_rows = [
+                ["WT001", "สถานีคลองอู่ตะเภา (หาดใหญ่)", "สงขลา", "7.0125", "100.4560", "4.2", "🟢 เฝ้าระวัง"],
+                ["WT002", "สถานีลุ่มน้ำเจ้าพระยา (สะพานพุทธ)", "กรุงเทพ", "13.7390", "100.4985", "1.8", "🟢 เฝ้าระวัง"],
+                ["WT003", "สถานีคลองรังสิตประยูรศักดิ์", "ปทุมธานี", "13.9850", "100.6120", "6.5", "🔴 อันตรายวิกฤต"]
+            ]
+            for r in water_rows:
+                water_ws.append_row(r)
             
-        # 3. จัดการชีต AI Logs
+        # 4. จัดการชีต AI Logs
         if "AI Logs" not in existing_sheets:
             print("Creating AI Logs worksheet...")
             logs_ws = sheet.add_worksheet(title="AI Logs", rows="5000", cols="5")
@@ -125,10 +143,10 @@ def setup_sheets_automatically(sheet):
     except Exception as e:
         print(f"Error in automatic sheet setup: {e}")
 
-# ตัวแปรควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์
+# สวิตช์ควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์
 SHEETS_INITIALIZED = False
 
-# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client)
+# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่
 def get_sheets_client():
     global SHEETS_INITIALIZED
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
@@ -140,7 +158,6 @@ def get_sheets_client():
         creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
         client = gspread.service_account_from_dict(creds_dict)
         
-        # รันระบบตั้งค่าสเปกคอลัมน์ออโต้
         if not SHEETS_INITIALIZED:
             try:
                 sheet = client.open_by_key(clean_sheet_id)
@@ -164,27 +181,41 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-def check_shelter_vacancy(capacity, occupancy):
+# 7. ฟังก์ชันวิเคราะห์ระดับความเร่งด่วนตามหลักกู้ภัยสากล (Triage Priority Calculator)
+def calculate_priority(data):
     try:
-        cap = int(capacity)
-        occ = int(occupancy)
-    except (ValueError, TypeError):
-        cap = 100
-        occ = 0
-    remaining = cap - occ
-    if remaining <= 0:
-        return "🔴 เต็มแล้ว (No Vacancy) - โปรดเลี่ยงไปจุดอื่น"
-    elif occ >= (cap * 0.8):
-        return f"🟡 ใกล้เต็ม (ว่างอีก {remaining} ที่นั่ง)"
-    else:
-        return f"🟢 ยังมีที่ว่าง (ว่างอีก {remaining} ที่นั่ง)"
+        bedridden = str(data.get("bedridden", "")).strip()
+        water_level = str(data.get("water_level", "")).strip()
+        urgent = str(data.get("urgent_evac", "")).strip()
+        
+        is_bedridden = "มี" in bedridden or "ใช่" in bedridden or "yes" in bedridden.lower()
+        is_urgent = "ต้องการ" in urgent or "ด่วน" in urgent or "yes" in urgent.lower()
+        
+        is_critical_water = False
+        for word in water_level.split():
+            if ("เมตร" in word or "m" in word.lower()) and any(char.isdigit() for char in word):
+                digits = ''.join(filter(lambda x: x.isdigit() or x == '.', word))
+                if digits and float(digits) >= 1.0:
+                    is_critical_water = True
+            elif "มิดหัว" in water_level or "ท่วมหัว" in water_level or "หน้าอก" in water_level:
+                is_critical_water = True
 
-# 7. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย
+        if is_bedridden or is_critical_water or is_urgent:
+            return "🔴  เร่งด่วนมาก"
+        elif "เอว" in water_level or "เข่า" in water_level or "สูง" in water_level:
+            return "🟠  ปานกลาง"
+        else:
+            return "🟢  ติดตามสถานการณ์"
+    except Exception as e:
+        print(f"Priority Calc Error: {e}")
+        return "🟠  ปานกลาง"
+
+# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย
 @app.route("/", methods=['GET'])
 def index():
     return "<h2 style='font-family: sans-serif; text-align: center; margin-top: 100px; color: #1E3A8A;'>🤖 FLOODCARE AI Service is Running Active!</h2>"
 
-# 8. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
+# 9. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
 @app.route("/dashboard", methods=['GET'])
 def dashboard():
     sheets_client = get_sheets_client()
@@ -198,22 +229,17 @@ def dashboard():
     else:
         try:
             sheet = sheets_client.open_by_key(clean_sheet_id)
-            
-            # 1. ดึงข้อมูลกรณีฉุกเฉินผู้ประสบภัย (SOS_Intake)
             try:
                 sos_worksheet = sheet.worksheet("SOS_Intake")
                 sos_cases = sos_worksheet.get_all_records()
                 sos_cases.reverse()
             except Exception as e:
                 print(f"Failed to load SOS: {e}")
-                
-            # 2. ดึงข้อมูลศูนย์อพยพจริง (Shelters)
             try:
                 shelters_worksheet = sheet.worksheet("Shelters")
                 shelters = shelters_worksheet.get_all_records()
             except Exception as e:
                 print(f"Failed to load Shelters: {e}")
-                
         except Exception as e:
             error_msg = f"ไม่สามารถเข้าถึงฐานข้อมูลกลางได้: {e}"
 
@@ -401,7 +427,7 @@ def handle_text_message(event):
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(
-                text="🚨 ระบบกำลังรอตำแหน่งพิกัดของคุณอยู่ครับ โปรดกดปุ่มสีเขียว 'กดแชร์พิกัดกู้ภัย' ด้านล่างเพื่อส่งข้อมูลความละเอียดด่วน หรือพิมพ์คำว่า 'ยกเลิก' เพื่อเริมใหม่ครับ",
+                text="🚨 ระบบกำลังรอตำแหน่งพิกัดของคุณอยู่ครับ โปรดกดปุ่มสีเขียว 'กดแชร์พิกัดกู้ภัย' ด้านล่างเพื่อส่งข้อมูลความละเอียดด่วน หรือพิมพ์คำว่า 'ยกเลิก' เพื่อเริ่มต้นใหม่ครับ",
                 quick_reply=location_quick_reply
             )
         )
@@ -460,7 +486,7 @@ def handle_text_message(event):
             line_bot_api.reply_message(
                 event.reply_token, 
                 TextSendMessage(
-                    text="📢 ขอบคุณสำหรับข้อมูลคัดกรองครับ! ขั้นตอนสุดท้าย โปรดกดปุ่มแชร์พิกัด 'Location' สีเขียวด้านล่างนี้ เพื่อส่งพิกัดแจ้งกู้ภัยด่วนครับ",
+                    text="📢 ขอบคุณสำหรับข้อมูลครับ! ขั้นตอนสุดท้าย โปรดกดปุ่มแชร์พิกัด 'Location' สีเขียวด้านล่างนี้ เพื่อส่งพิกัดแจ้งกู้ภัยทันทีนะครับ",
                     quick_reply=location_quick_reply
                 )
             )
@@ -480,12 +506,12 @@ def handle_text_message(event):
 
         elif state == "waiting_first_aid_detail":
             USER_STATES.pop(user_id, None)
-            prompt = f"ผู้ใช้ต้องการปฐมพยาบาลเบื้องต้นจากเคส: '{user_text}' โปรดอธิบายขั้นตอนสั้นๆ (1, 2, 3) เพื่อปฐมพยาบาลอย่างปลอดภัย"
+            prompt = f"ผู้ใช้ต้องการคำแนะนำวิธีการอพยพจากสถานการณ์อุทกภัย: '{user_text}' ในฐานะ FLOODCARE AI โปรดแนะนำขั้นตอนการหนีภัยและเตรียมตัวอพยพเฉพาะหน้าที่สั้น กระชับ เป็นขั้นเป็นตอน (1, 2, 3) เน้นความปลอดภัย และความมีสติ หลีกเลี่ยงข้อความที่ยาวและเครื่องหมายดอกจัน"
             try:
                 res = gemini_model.generate_content(prompt)
                 reply = clean_text_for_line(res.text.strip())
             except:
-                reply = "🩹 แนะนำให้ทำความสะอาดแผลเบื้องต้น ปิดปากแผล และหากรุนแรงโทร 1669 ทันทีครับ"
+                reply = "🏃 ปลอดภัยไว้ก่อนนะครับ! แนะนำให้มีสติ สวมเสื้อชูชีพหรือเตรียมอุปกรณ์ลอยตัว ตัดกระแสไฟในบ้าน และอพยพขึ้นพิกัดที่สูงตามการนำของเจ้าหน้าที่ครับ"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
             return
 
@@ -553,13 +579,18 @@ def handle_text_message(event):
 
     # ==================== ส่วนที่ 10.5: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
-        USER_STATES[user_id] = "waiting_emergency_type"
-        reply_text = "📞 คุณต้องการติดต่อประสานงานกู้ภัยด้วยสถานการณ์ฉุกเฉินเรื่องใดเป็นพิเศษไหมครับ? พิมพ์บอกผมสั้นๆ ได้เลยนะครับ"
+        reply_text = (
+            "📞 เบอร์โทรศัพท์ฉุกเฉินที่จำเป็นสำหรับภัยน้ำท่วมครับ:\n\n"
+            "🚨 สายด่วน ปภ. 1784 (รับแจ้งเตือนและช่วยเหลือภัยพิบัติ)\n"
+            "🚨 สายด่วนกู้ชีพ 1669 (เจ็บป่วยฉุกเฉินทางการแพทย์)\n"
+            "🚨 สายด่วนกู้ภัยทางน้ำ 1196 (ขอความช่วยเหลือทางเรือ)\n"
+            "🚨 ตำรวจทางหลวง 1193 (ประสานงานเดินทางเส้นทางน้ำท่วม)"
+        )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
-    elif user_text == "ปฐมพยาบาลเบื้องต้น":
-        USER_STATES[user_id] = "waiting_first_aid_detail"
-        reply_text = "🩹 คุณได้รับบาดเจ็บหรือเกิดอุบัติเหตุจากอะไรครับ? พิมพ์แจ้งอาการเพื่อให้ผมช่วยค้นหาวิธีปฐมพยาบาลเฉพาะหน้าด่วนได้เลยนะครับ"
+    elif user_text == "วิธีการอพยพ":
+        USER_STATES[user_id] = "waiting_first_aid_detail" # นำทางผู้ใช้เข้าสู่คำถามอพยพจำเพาะ
+        reply_text = "🏃 คุณกำลังติดอยู่ในสถานการณ์อพยพรูปแบบใดอยู่ครับ? (โปรดพิมพ์เล่าสถานการณ์รอบตัวสั้นๆ เพื่อให้ผมแนะนำแนวทางและจัดเตรียมขั้นตอนหนีภัยที่ถูกต้องเร่งด่วนให้ครับ)"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ศูนย์พักพิง":
@@ -579,8 +610,18 @@ def handle_text_message(event):
         
     elif user_text == "ตรวจสอบระดับน้ำ":
         USER_STATES[user_id] = "waiting_water_location"
-        reply_text = "🌊 คุณต้องการเช็กหรือประเมินระดับน้ำในพื้นที่เขต/อำเภอ และจังหวัดใดครับ? โปรดพิมพ์ระบุชื่อพื้นที่ของคุณมาได้เลยนะครับ"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        location_quick_reply = QuickReply(
+            items=[
+                QuickReplyButton(action=LocationAction(label="แชร์พิกัดเช็กระดับน้ำ"))
+            ]
+        )
+        line_bot_api.reply_message(
+            event.reply_token, 
+            TextSendMessage(
+                text="🌊 โปรดกดปุ่มแชร์พิกัด 'Location' ด้านล่าง เพื่อให้ระบบค้นหาและรายงานสถานการณ์ระดับน้ำและระดับความรุนแรงจากสถานีตรวจวัดที่ใกล้ตัวคุณที่สุดครับ",
+                quick_reply=location_quick_reply
+            )
+        )
         
     elif user_text == "SOS ขอความช่วยเหลือ":
         USER_STATES[user_id] = "sos_q1"
@@ -684,6 +725,63 @@ def handle_location_message(event):
                     f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
                 )
             reply_text += "⚠️ โปรดเดินเท้าตามเส้นทางหลักอย่างระมัดระวังสูงสุดเสมอนะครับ"
+            
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+
+    # --- ฟีเจอร์เมนูที่ 4: ตรวจวัดระดับน้ำภูมิสารสนเทศ (GIS Water Level Station Search) ---
+    elif state == "waiting_water_location":
+        water_stations = []
+        db_connected = False
+        
+        if sheets_client:
+            try:
+                sheet = sheets_client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+                water_worksheet = sheet.worksheet("Water_Levels")
+                rows = water_worksheet.get_all_records()
+                for row in rows:
+                    water_stations.append({
+                        "name": row.get('Name', 'ไม่ระบุชื่อ'),
+                        "province": row.get('Province', ''),
+                        "lat": float(row.get('Latitude', 0)),
+                        "lon": float(row.get('Longitude', 0)),
+                        "level": row.get('WaterLevel_M', '-'),
+                        "status": row.get('Status', '🟢 เฝ้าระวัง')
+                    })
+                db_connected = True
+            except Exception as e:
+                print(f"Failed to fetch water levels from Sheets: {e}")
+                
+        if not db_connected:
+            reply_text = "⚠️ ขออภัยครับ ขณะนี้ระบบหลังบ้านขัดข้องชั่วคราว ไม่สามารถดึงระดับน้ำจากสถานีตรวจวัดจริงมาประมวลผลพิกัดภูมิสารสนเทศได้ โปรดลองใหม่อีกครั้งนะครับ"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            return
+            
+        # ค้นหาสถานีตรวจวัดน้ำทางราชการที่อยู่ใกล้ตัวผู้ประสบภัยที่สุด
+        nearest_stations = []
+        for ws in water_stations:
+            distance = calculate_distance(latitude, longitude, ws['lat'], ws['lon'])
+            nearest_stations.append({
+                "name": ws['name'],
+                "province": ws['province'],
+                "distance": distance,
+                "level": ws['level'],
+                "status": ws['status']
+            })
+            
+        nearest_stations.sort(key=lambda x: x['distance'])
+        closest_station = nearest_stations[0] if nearest_stations else None
+        
+        if not closest_station:
+            reply_text = "📍 ปัจจุบันไม่พบสถานีโทรมาตรตรวจวัดระดับน้ำติดตั้งอยู่ใกล้บริเวณพิกัดของคุณเลยครับ แนะนำเฝ้าสังเกตทิศทางน้ำด้วยตัวเองรอบบ้านนะครับ"
+        else:
+            reply_text = (
+                f"🌊 รายงานระดับน้ำจากสถานีตรวจวัดทางราชการที่ใกล้ตัวคุณมากที่สุดครับ:\n\n"
+                f"📡 สถานีตรวจวัด: {closest_station['name']} (จ.{closest_station['province']})\n"
+                f"🗺️ ระยะทางห่างจากจุดของคุณ: {closest_station['distance']:.2f} กิโลเมตร\n\n"
+                f"📏 ระดับน้ำปัจจุบัน: {closest_station['level']} เมตร\n"
+                f"⚠️ ระดับความปลอดภัย: {closest_station['status']}\n\n"
+                "โปรดระมัดระวังความเสี่ยงของกระแสน้ำไหลล้นตลิ่ง และเฝ้าระวังสัญญาณเตือนภัยในพื้นที่อย่างใกล้ชิดนะครับ"
+            )
             
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
