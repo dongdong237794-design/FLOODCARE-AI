@@ -15,7 +15,7 @@ from linebot.models import (
 # Gemini AI
 import google.generativeai as genai
 
-# Google Sheets (เชื่อมต่อเสถียรที่สุด ไม่ใช้ไฟล์แยก)
+# Google Sheets
 import gspread
 
 app = Flask(__name__)
@@ -32,12 +32,13 @@ GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 USER_STATES = {}
 USER_DATA = {}
 
-# เริ่มใช้งาน LINE API
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
+# เริ่มใช้งาน LINE API แบบปลอดภัย (ป้องกันเซิร์ฟเวอร์แครชหากยังไม่ป้อนคีย์)
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
+handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
 
 # เริ่มใช้งาน Gemini AI รุ่นเสถียรล่าสุด
-genai.configure(api_key=GEMINI_API_KEY)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel(
     model_name="gemini-2.5-flash",
     system_instruction=(
@@ -54,7 +55,7 @@ gemini_model = genai.GenerativeModel(
     )
 )
 
-# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*) ออกทั้งหมด
+# 2. ฟังก์ชันตัวกรองลบเครื่องหมายดอกจัน (*)
 def clean_text_for_line(text):
     if not text:
         return ""
@@ -78,7 +79,7 @@ def setup_sheets_automatically(sheet):
     try:
         existing_sheets = [w.title for w in sheet.worksheets()]
         
-        # 1. จัดการชีต SOS_Intake (คัดกรองผู้ประสบภัย)
+        # 1. จัดการชีต SOS_Intake
         if "SOS_Intake" not in existing_sheets:
             print("Creating SOS_Intake worksheet...")
             sos_ws = sheet.add_worksheet(title="SOS_Intake", rows="2000", cols="15")
@@ -89,7 +90,7 @@ def setup_sheets_automatically(sheet):
             ]
             sos_ws.append_row(headers)
             
-        # 2. จัดการชีต Shelters (ศูนย์พักพิง)
+        # 2. จัดการชีต Shelters
         if "Shelters" not in existing_sheets:
             print("Creating Shelters worksheet...")
             shelters_ws = sheet.add_worksheet(title="Shelters", rows="1000", cols="10")
@@ -98,16 +99,14 @@ def setup_sheets_automatically(sheet):
                 "Longitude", "Capacity", "Occupancy", "Status"
             ]
             shelters_ws.append_row(headers)
-            # เขียนพิกัดศูนย์อพยพจริงในพื้นที่สงขลาลงไปในตารางให้ใช้จริงทันที
             mock_rows = [
-                ["SH001", "ศูนย์อพยพวัดโคกสมานคุณ (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
-                ["SH002", "ศูนย์อพยพโรงเรียนเทศบาล 1 (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0112", "100.4715", "300", "50", "ว่าง"],
-                ["SH003", "ศูนย์เยาวชนกรุงเทพมหานคร (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "200", "200", "เต็ม"]
+                ["SH001", "ศูนย์อพยพโรงเรียนหาดใหญ่ (วัดโคกสมานคุณ)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง"],
+                ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง"]
             ]
             for r in mock_rows:
                 shelters_ws.append_row(r)
-                
-        # 3. จัดการชีต Water_Levels (สถานีตรวจวัดระดับน้ำจริง)
+            
+        # 3. จัดการชีต Water_Levels
         if "Water_Levels" not in existing_sheets:
             print("Creating Water_Levels worksheet...")
             water_ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="10")
@@ -115,7 +114,6 @@ def setup_sheets_automatically(sheet):
                 "StationID", "Name", "Province", "Latitude", "Longitude", "WaterLevel_M", "Status"
             ]
             water_ws.append_row(headers)
-            # ข้อมูลระดับน้ำจากสถานีตรวจวัดจริงในสงขลาและพื้นที่เสี่ยงภัย
             water_rows = [
                 ["WT001", "สถานีคลองอู่ตะเภา (หาดใหญ่)", "สงขลา", "7.0125", "100.4560", "4.2", "🟢 เฝ้าระวัง"],
                 ["WT002", "สถานีลุ่มน้ำเจ้าพระยา (สะพานพุทธ)", "กรุงเทพ", "13.7390", "100.4985", "1.8", "🟢 เฝ้าระวัง"],
@@ -143,10 +141,10 @@ def setup_sheets_automatically(sheet):
     except Exception as e:
         print(f"Error in automatic sheet setup: {e}")
 
-# สวิตช์ควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์
+# ตัวแปรควบคุมการตั้งค่าระบบเพียงครั้งเดียวต่อการรันเซิร์ฟเวอร์
 SHEETS_INITIALIZED = False
 
-# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่
+# 5. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client)
 def get_sheets_client():
     global SHEETS_INITIALIZED
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
@@ -210,10 +208,27 @@ def calculate_priority(data):
         print(f"Priority Calc Error: {e}")
         return "🟠  ปานกลาง"
 
-# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย
+# 8. หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์อย่างง่าย (เพิ่มระบบ Route Inspector ยืนยันพิกัดเซิร์ฟเวอร์)
 @app.route("/", methods=['GET'])
 def index():
-    return "<h2 style='font-family: sans-serif; text-align: center; margin-top: 100px; color: #1E3A8A;'>🤖 FLOODCARE AI Service is Running Active!</h2>"
+    # ดึงรายชื่อเส้นทางทั้งหมดที่ระบุใน Flask App เพื่อให้ผู้ใช้ตรวจสอบได้ผ่านเบราว์เซอร์
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append(f"<li style='margin-bottom:8px;'>🗺️ <b>{rule.endpoint}</b>: <code style='background:#f1f1f1; padding:3px 8px;'>{rule.rule}</code> (Methods: {', '.join(rule.methods)})</li>")
+    routes_html = "".join(routes)
+    
+    return f"""
+    <div style="font-family: sans-serif; padding: 40px; max-width: 650px; margin: auto; border: 1px solid #ccc; border-radius: 12px; margin-top: 50px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h2 style="color: #1E3A8A; text-align: center;">🤖 FLOODCARE AI Service is Running Active!</h2>
+        <p style="color: #444; line-height: 1.6;">เซิร์ฟเวอร์หลักรันงานได้อย่างสมบูรณ์แบบแล้วครับ! นี่คือรายชื่อเส้นทางการเชื่อมต่อ (Routes) ที่เปิดใช้งานบนเซิร์ฟเวอร์เครื่องนี้ในปัจจุบัน:</p>
+        <ul style="list-style: none; padding-left: 0; margin-top: 20px;">{routes_html}</ul>
+        <hr style="border:0; border-top: 1px solid #eee; margin: 25px 0;">
+        <p style="color: #e11d48; font-size: 13px; font-weight: bold; line-height:1.5;">
+            ⚠️ คำแนะนำสำหรับการแก้ปัญหา Error 404:<br>
+            หาก LINE แจ้งเตือนว่าส่งข้อมูลไม่สัญญานผ่าน โปรดเช็กพิกัด Webhook URL ในหน้า LINE Developers ของคุณว่าสะกดตรงกับ '/callback' ในตารางด้านบนเป๊ะๆ หรือไม่ และห้ามมีเครื่องหมายสแลช / ปิดท้ายสุดนะครับ
+        </p>
+    </div>
+    """
 
 # 9. Command Center Web Dashboard สำหรับหน่วยงานกู้ภัย
 @app.route("/dashboard", methods=['GET'])
@@ -756,7 +771,6 @@ def handle_location_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
             
-        # ค้นหาสถานีตรวจวัดน้ำทางราชการที่อยู่ใกล้ตัวผู้ประสบภัยที่สุด
         nearest_stations = []
         for ws in water_stations:
             distance = calculate_distance(latitude, longitude, ws['lat'], ws['lon'])
