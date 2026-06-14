@@ -14,7 +14,7 @@ from linebot.models import (
 
 app = Flask(__name__)
 
-# ลงทะเบียน Blueprint ดึงหน้าต่างเว็บมาทำงาน
+# ลงทะเบียน Blueprint ดึงหน้าต่างเว็บแดชบอร์ดมาทำงาน
 app.register_blueprint(dashboard_bp)
 
 # 10. Webhook Route สำหรับรับสัญญาน LINE
@@ -600,7 +600,7 @@ def handle_text_message(event):
         config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
 # 12. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
-@handler.add(MessageEvent, message=LocationMessage)
+@config.handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
     latitude = event.message.latitude
@@ -639,7 +639,7 @@ def handle_location_message(event):
                 
         if not db_connected:
             reply_text = "⚠️ ขออภัยครับ ขณะนี้ระบบขัดข้องไม่สามารถตรวจสอบสิทธิ์การอ่านข้อมูลศูนย์พักพิงจริงได้ โปรดโทรติดต่อเบอร์สายด่วนภัยพิบัติ ปภ. 1784 ทันทีครับ"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
                 
         nearest_shelters = []
@@ -671,7 +671,7 @@ def handle_location_message(event):
                 )
             reply_text += "⚠️ โปรดเดินเท้าตามเส้นทางหลักอย่างระมัดระวังสูงสุดเสมอนะครับ"
             
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     # --- ฟีเจอร์เมนูที่ 3: ตรวจวัดระดับน้ำภูมิสารสนเทศ (GIS Water Level Station Search) ---
     elif state == "waiting_water_location":
@@ -698,7 +698,7 @@ def handle_location_message(event):
                 
         if not db_connected:
             reply_text = "⚠️ ขออภัยครับ ขณะนี้ระบบหลังบ้านขัดข้องชั่วคราว ไม่สามารถดึงระดับน้ำจากสถานีตรวจวัดจริงมาประมวลผลพิกัดภูมิสารสนเทศได้ โปรดลองใหม่อีกครั้งนะครับ"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
             
         nearest_stations = []
@@ -727,7 +727,7 @@ def handle_location_message(event):
                 "โปรดระมัดระวังความเสี่ยงของกระแสน้ำไหลล้นตลิ่ง และเฝ้าระวังสัญญาณเตือนภัยในพื้นที่อย่างใกล้ชิดนะครับ"
             )
             
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     # --- ระบบ SOS ขั้นตอนที่ 1 (SOS Step 1): สกัดพิกัด GPS จากผู้ใช้เป็นจุดอ้างอิง แล้วป้อนเข้าสู่คำถามข้อถัดไป ---
     elif state == "sos_location":
@@ -740,14 +740,14 @@ def handle_location_message(event):
         # ปรับระดับขั้นตอนไปสู่อัตราส่วนสมาชิกติดในบ้าน (SOS Step 2)
         config.USER_STATES[user_id] = "sos_q2"
         
-        line_bot_api.reply_message(
+        config.line_bot_api.reply_message(
             event.reply_token, 
             TextSendMessage(text="📌 Step 2: โปรดพิมพ์แจ้งจำนวนคนที่ประสบภัยที่ติดอยู่ร่วมกันในบ้านของคุณในตอนนี้ครับ? (กรุณาระบุจำนวนตัวเลข เช่น '3')")
         )
         
     else:
         confirm_text = "📍 คุณส่งพิกัด GPS มาหาผม หากต้องการแจ้งขอความช่วยเหลือ โปรดกดแตะเมนู 'SOS ขอความช่วยเหลือ' บนแถบด้านล่างก่อนเพื่อให้ทีมกู้ภัยวิเคราะห์ความเร่งด่วนได้อย่างแม่นยำนะครับ"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
+        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
