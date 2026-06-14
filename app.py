@@ -1,3 +1,4 @@
+import datetime
 from flask import Flask, request, abort
 import config
 from dashboard import dashboard_bp
@@ -32,7 +33,7 @@ def callback():
 def handle_text_message(event):
     user_text = event.message.text.strip()
     user_id = event.source.user_id
-    timestamp = datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # ดึงระดับสถานะการคุยปัจจุบัน
     state = config.USER_STATES.get(user_id)
@@ -257,10 +258,8 @@ def handle_text_message(event):
                 f"📞 เบอร์โทรศัพท์: {phone}\n"
                 f"📍 พิกัดแจ้งเหตุ: {data.get('latitude', '0')}, {data.get('longitude', '0')}\n"
                 f"👥 สมาชิกติดในบ้าน: {data.get('people_count', '1')} คน\n"
-                f"👶 เด็กเล็ก: {data.get('children', 'NO')}\n"
-                f"🧓 ผู้สูงอายุ: {data.get('elderly', 'NO')}\n"
-                f"🏥 ผู้ป่วยติดเตียง: {data.get('bedridden', 'NO')}\n"
-                f"🐶 สัตว์เลี้ยง: {data.get('pets', 'NO')}\n"
+                f"👶 เด็กเล็ก: {data.get('children', 'NO')} | 🧓 ผู้สูงอายุ: {data.get('elderly', 'NO')}\n"
+                f"🏥 ผู้ป่วยติดเตียง: {data.get('bedridden', 'NO')} | 🐶 สัตว์เลี้ยง: {data.get('pets', 'NO')}\n"
                 f"🌊 ระดับน้ำโดยประมาณ: {data.get('water_level', '-')}\n"
                 f"📝 รายละเอียดอื่น ๆ: {data.get('note', '-')}\n\n"
                 f"📊 ประเมินความเร็วช่วยเหลือ: {priority}\n\n"
@@ -589,7 +588,7 @@ def handle_text_message(event):
             print(f"Gemini API Error: {e}")
             ai_response = "⚠️ บริการ AI ขัดข้องชั่วคราว หากตกอยู่ในภาวะอันตราย โทร ปภ. 1784 ทันทีครับ"
             
-        sheets_client = config.get_sheets_client()
+        sheets_client = get_sheets_client()
         if sheets_client:
             try:
                 sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
@@ -611,7 +610,7 @@ def handle_location_message(event):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     state = config.USER_STATES.pop(user_id, "default")
-    sheets_client = config.get_sheets_client()
+    sheets_client = get_sheets_client()
 
     # --- ค้นหาศูนย์อพยพใกล้ที่สุดในรัศมี 5-20 กม. (อิงพิกัดและดึงฐานข้อมูลจริงจาก Google Sheets) ---
     if state == "waiting_shelter_location":
