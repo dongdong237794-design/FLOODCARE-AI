@@ -76,8 +76,7 @@ def handle_text_message(event):
         
     elif state == "register_last_name":
         if user_id not in bot_config.USER_DATA:
-            config = bot_config
-            config.USER_DATA[user_id] = {}
+            bot_config.USER_DATA[user_id] = {}
         bot_config.USER_DATA[user_id]["temp_last_name"] = user_text
         bot_config.USER_STATES[user_id] = "register_phone"
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ระบุ 'เบอร์โทรศัพท์มือถือ' 9-10 หลักของคุณสำหรับการติดต่อกลับครับ"))
@@ -360,7 +359,7 @@ def handle_text_message(event):
             prompt = f"ผู้ใช้ต้องการประเมินสถานการณ์น้ำหรือเช็กข้อมูลน้ำท่วมในพื้นที่: '{user_text}' โปรดแนะนำแนวทางเฝ้าระวังภัยพิบัติอย่างสั้นและกระชับ"
             try:
                 res = bot_config.gemini_model.generate_content(prompt)
-                reply = bot_config.clean_text_for_line(res.text.strip())
+                reply = config.clean_text_for_line(res.text.strip())
             except:
                 reply = "🌊 แนะนำติดตามการรายงานระดับน้ำอย่างใกล้ชิด และสามารถเช็กระดับลุ่มน้ำได้ผ่านแอปฯ ThaiWater ครับ"
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
@@ -441,7 +440,7 @@ def handle_text_message(event):
                     f"🟢 บันทึกความต้องการจำลองของคุณสำเร็จแล้วครับ!\n📝 ความประสงค์: {user_text}\n\n"
                     "*(หมายเหตุ: ระบบยังไม่สามารถเขียนลงแผ่นงาน Google Sheets ได้เนื่องจากสเปรดชีตขัดข้องสิทธิ์เข้าถึง)"
                 )
-            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
     # ==================== ส่วนที่ 11.6: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
