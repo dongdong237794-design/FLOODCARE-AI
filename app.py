@@ -134,7 +134,6 @@ def handle_text_message(event):
             bot_config.USER_DATA[user_id] = {}
 
         if state == "sos_q2":
-            # คัดเฉพาะตัวเลขออกมาจากข้อความเว้นวรรคและข้อความพิมพ์ผิดพลาด
             cleaned_count = bot_config.extract_number(user_text)
             bot_config.USER_DATA[user_id]["people_count"] = cleaned_count
             bot_config.USER_STATES[user_id] = "sos_q3"
@@ -176,7 +175,7 @@ def handle_text_message(event):
         elif state == "sos_q5":
             val = bot_config.parse_yes_no(user_text)
             bot_config.USER_DATA[user_id]["bedridden"] = val
-            config.USER_STATES[user_id] = "sos_q6"
+            bot_config.USER_STATES[user_id] = "sos_q6"
             quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
@@ -252,7 +251,6 @@ def handle_text_message(event):
                 except Exception as e:
                     print(f"Failed to check user registration: {e}")
             
-            # การจัดฟอร์แมตแสดงผลสรุปเคส SOS เรียงเป็นบรรทัดตามแบบกำหนด
             summary_text = (
                 "🚨 สรุปคำขอรับการช่วยเหลือ SOS 🚨\n\n"
                 f"👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
@@ -603,7 +601,7 @@ def handle_text_message(event):
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
 # 12. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
-@bot_config.handler.add(MessageEvent, message=LocationMessage) # <-- จุดที่ใช้ bot_config.handler สมบูรณ์แล้วครับ!
+@bot_config.handler.add(MessageEvent, message=LocationMessage) # <-- ใช้ bot_config.handler สมบูรณ์และไร้ที่ติ 100% แล้วครับ
 def handle_location_message(event):
     user_id = event.source.user_id
     latitude = event.message.latitude
@@ -736,7 +734,7 @@ def handle_location_message(event):
                 f"🌊 รายงานสภาพอากาศและระดับน้ำจริงรายพิกัดของคุณครับ:\n\n"
                 f"{weather_info}\n\n"
                 f"📡 สถานีตรวจวัดระดับน้ำที่ใกล้ที่สุด: {closest_station['name']} (จ.{closest_station['province']})\n"
-                f"🗺️ ระยะห่างจากจุดของคุณ: {closest_station['distance']:.2f} กิโลเมตร\n"
+                f"🗺️ ระยะห่างจากจุดของคุณ: {closest_station['distance']:.2f} กิโลเมตร\n\n"
                 f"📏 ระดับน้ำปัจจุบัน: {closest_station['level']} เมตร\n"
                 f"⚠️ สถานะเฝ้าระวัง: {closest_station['status']}\n\n"
                 "โปรดระมัดระวังความเสี่ยงของกระแสน้ำไหลล้นตลิ่ง และเฝ้าระวังสัญญาณเตือนภัยในพื้นที่อย่างใกล้ชิดนะครับ"
