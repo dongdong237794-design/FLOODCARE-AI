@@ -77,7 +77,7 @@ def extract_sheet_id(sheet_var):
                 return sub_parts[0].strip()
     return sheet_var.strip()
 
-# 5. [Web Scraper] ขูดข้อมูลสภาพอากาศเรียลไทม์ตามพิกัดผู้ประสบภัย
+# 5. [Web Scraper] ดึงพิกัด GPS มาขูดข้อมูลตรวจสภาพอากาศ ปริมาณฝน ทิศทางลม เรียลไทม์
 def get_live_weather_scraper(lat, lon):
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
@@ -102,7 +102,40 @@ def get_live_weather_scraper(lat, lon):
         print(f"Weather Scraper Error: {e}")
         return "🌡️ อุณหภูมิปัจจุบัน: 28.5 °C\n🌧️ สภาพอากาศ: ท้องฟ้าครึ้มมีเมฆฝนเฝ้าระวัง"
 
-# 6. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
+# 6. [Web Scraper] ขูดระดับการไหลของน้ำป่าหลากสะสม ณ พิกัดจริง (River Runoff Scraper)
+def get_live_water_scraper(lat, lon):
+    try:
+        url = f"https://flood-api.open-meteo.com/v1/flood?latitude={lat}&longitude={lon}&daily=river_discharge"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode())
+            daily = data.get("daily", {})
+            discharges = daily.get("river_discharge", [])
+            current_flow = discharges[-1] if discharges else 0.0
+            
+            status = "🟢  สถานการณ์ปกติ"
+            icon = "🟢"
+            if current_flow >= 50.0:
+                status = "🔴  อันตรายวิกฤตน้ำท่วมขังเฉียบพลัน"
+                icon = "🔴"
+            elif current_flow >= 15.0:
+                status = "🟡  เฝ้าระวังน้ำล้นตลิ่ง"
+                icon = "🟡"
+                
+            return {
+                "flow": f"{current_flow:.2f} ลบ.ม./วินาที",
+                "status": status,
+                "icon": icon
+            }
+    except Exception as e:
+        print(f"Water Level Scraper Error: {e}")
+        return {
+            "flow": "รอตรวจสอบพารามิเตอร์",
+            "status": "🟢  เฝ้าระวังระดับน้ำหลากชั่วคราว",
+            "icon": "🟢"
+        }
+
+# 7. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
 def setup_sheets_automatically(sheet):
     try:
         existing_sheets = [w.title for w in sheet.worksheets()]
