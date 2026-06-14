@@ -4,7 +4,6 @@ import config
 
 # สร้างระบบ Blueprint สำหรับครอบหน้าต่างเว็บแดชบอร์ด
 dashboard_bp = Blueprint('dashboard', __name__)
-
 # หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์ แผนภูมิวินิจฉัยฐานข้อมูลกลาง (Diagnostic Control Panel)
 @dashboard_bp.route("/", methods=['GET'])
 def index():
