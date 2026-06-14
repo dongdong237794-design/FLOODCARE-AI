@@ -102,10 +102,9 @@ def get_live_weather_scraper(lat, lon):
         print(f"Weather Scraper Error: {e}")
         return "🌡️ อุณหภูมิปัจจุบัน: 28.5 °C\n🌧️ สภาพอากาศ: ท้องฟ้าครึ้มมีเมฆฝนเฝ้าระวัง"
 
-# 6. [ฟีเจอร์อัปเกรดเรียลไทม์] ขูดระดับและอัตราการไหลของน้ำป่าหลากสะสมในไทยจากโมเดลอุทกศาสตร์ (River Runoff Scraper)
+# 6. [Web Scraper] ขูดระดับการไหลของน้ำป่าหลากสะสม ณ พิกัดจริง (River Runoff Scraper)
 def get_live_water_scraper(lat, lon):
     try:
-        # ยิงขูดข้อมูลระดับการไหลของน้ำป่าและลุ่มน้ำหลากของสเปกพื้นที่ ณ วินาทีจริง
         url = f"https://flood-api.open-meteo.com/v1/flood?latitude={lat}&longitude={lon}&daily=river_discharge"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response:
@@ -117,7 +116,7 @@ def get_live_water_scraper(lat, lon):
             status = "🟢  สถานการณ์ปกติเฝ้าระวัง"
             icon = "🟢"
             # คำนวณระดับความสูงน้ำจำลองเทียบเคียงข้อมูลภาครัฐตามหลักฟิสิกส์อัตโนมัติ
-            simulated_height = 1.20 + (current_flow * 0.05) # คำนวณระดับความสูงแม่น้ำในจุดนั้นตามปริมาณการไหลจริง
+            simulated_height = 1.20 + (current_flow * 0.05)
             
             if current_flow >= 50.0:
                 status = "🔴  อันตรายวิกฤตน้ำท่วมขังล้นตลิ่งเฉียบพลัน"
