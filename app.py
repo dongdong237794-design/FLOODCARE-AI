@@ -1,4 +1,5 @@
 import datetime
+@config
 from flask import Flask, request, abort
 import bot_config
 from dashboard import dashboard_bp
@@ -252,7 +253,7 @@ def handle_text_message(event):
                 except Exception as e:
                     print(f"Failed to check user registration: {e}")
             
-            # การเรียงข้อมูลคำขอกู้ภัยรายบุคคลแบบจัดแถวแนวตั้งบรรทัดต่อบรรทัด (Line-by-line)
+            # การจัดฟอร์แมตแสดงผลสรุปเคส SOS เรียงเป็นบรรทัดตามแบบกำหนด
             summary_text = (
                 "🚨 สรุปคำขอรับการช่วยเหลือ SOS 🚨\n\n"
                 f"👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
@@ -441,7 +442,7 @@ def handle_text_message(event):
                     f"🟢 บันทึกความต้องการจำลองของคุณสำเร็จแล้วครับ!\n📝 ความประสงค์: {user_text}\n\n"
                     "*(หมายเหตุ: ระบบยังไม่สามารถเขียนลงแผ่นงาน Google Sheets ได้เนื่องจากสเปรดชีตขัดข้องสิทธิ์เข้าถึง)"
                 )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
     # ==================== ส่วนที่ 11.6: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
@@ -603,7 +604,7 @@ def handle_text_message(event):
         config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
 # 12. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
-@config.handler.add(MessageEvent, message=LocationMessage)
+@bot_config.handler.add(MessageEvent, message=LocationMessage) # <-- จุดที่แก้ไขเป็น bot_config.handler แล้วครับ!
 def handle_location_message(event):
     user_id = event.source.user_id
     latitude = event.message.latitude
@@ -612,7 +613,7 @@ def handle_location_message(event):
     title = event.message.title or "จุดพิกัด"
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    state = config.USER_STATES.pop(user_id, "default")
+    state = bot_config.USER_STATES.pop(user_id, "default")
     sheets_client = get_sheets_client()
 
     # --- ค้นหาศูนย์อพยพใกล้ที่สุดในรัศมี 5-20 กม. (อิงพิกัดและดึงฐานข้อมูลจริงจาก Google Sheets) ---
@@ -642,14 +643,14 @@ def handle_location_message(event):
                 
         if not db_connected:
             reply_text = "⚠️ ขออภัยครับ ขณะนี้ระบบขัดข้องไม่สามารถตรวจสอบสิทธิ์การอ่านข้อมูลศูนย์พักพิงจริงได้ โปรดโทรติดต่อเบอร์สายด่วนภัยพิบัติ ปภ. 1784 ทันทีครับ"
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
                 
         nearest_shelters = []
         for sh in shelter_list:
-            distance = config.calculate_distance(latitude, longitude, sh['lat'], sh['lon'])
+            distance = bot_config.calculate_distance(latitude, longitude, sh['lat'], sh['lon'])
             if 5.0 <= distance <= 20.0 or distance < 5.0:
-                vacancy_status = config.check_shelter_vacancy(sh['capacity'], sh['occupancy'])
+                vacancy_status = bot_config.check_shelter_vacancy(sh['capacity'], sh['occupancy'])
                 nearest_shelters.append({
                     "name": sh['name'],
                     "distance": distance,
@@ -674,12 +675,12 @@ def handle_location_message(event):
                 )
             reply_text += "⚠️ โปรดเดินเท้าตามเส้นทางหลักอย่างระมัดระวังสูงสุดเสมอนะครับ"
             
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     # --- ฟีเจอร์เมนูที่ 3: ตรวจวัดระดับน้ำภูมิสารสนเทศ (ขูดข้อมูลสภาพอากาศเรียลไทม์จากระบบ Web Scraper ทันที!) ---
     elif state == "waiting_water_location":
         # เรียกใช้ฟังก์ชันขูดข้อมูลสภาพอากาศจริงตามจุดพิกัดผ่านดาวเทียมแบบเรียลไทม์
-        weather_info = config.get_live_weather_scraper(latitude, longitude)
+        weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
         
         water_stations = []
         db_connected = False
@@ -708,7 +709,7 @@ def handle_location_message(event):
                 f"{weather_info}\n\n"
                 "โปรดตรวจสอบระดับน้ำทางสายด่วน ปภ. 1784 ชั่วคราวก่อนนะครับ"
             )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
             
         nearest_stations = []
@@ -742,7 +743,7 @@ def handle_location_message(event):
                 "โปรดระมัดระวังความเสี่ยงของกระแสน้ำไหลล้นตลิ่ง และเฝ้าระวังสัญญาณเตือนภัยในพื้นที่อย่างใกล้ชิดนะครับ"
             )
             
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     # --- ระบบ SOS ขั้นตอนที่ 1 (SOS Step 1): สกัดพิกัด GPS จากผู้ใช้เป็นจุดอ้างอิง แล้วป้อนเข้าสู่คำถามข้อถัดไป ---
     elif state == "sos_location":
