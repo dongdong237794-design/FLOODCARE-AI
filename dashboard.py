@@ -10,7 +10,6 @@ def index():
     bot_config.get_sheets_client()
     db_status = f"<span style='color: #10b981; font-weight: bold;'>🟢 {bot_config.LAST_SHEETS_ERROR}</span>" if bot_config.SHEETS_INITIALIZED else f"<span style='color: #ef4444; font-weight: bold;'>🔴 เชื่อมต่อล้มเหลว (สาเหตุ: {bot_config.LAST_SHEETS_ERROR})</span>"
     
-    # ดึงเส้นทางแบบแบนราบของระบบ
     routes_html = """
     <li style='margin-bottom:8px;'>🗺️ <b>index</b>: <code style='background:#f1f1f1; padding:3px 8px;'>/</code> (Methods: GET)</li>
     <li style='margin-bottom:8px;'>🗺️ <b>dashboard</b>: <code style='background:#f1f1f1; padding:3px 8px;'>/dashboard</code> (Methods: GET)</li>
@@ -144,7 +143,6 @@ def dashboard():
     total_cases = len(sos_cases)
     critical_count = sum(1 for c in sos_cases if "CRITICAL" in str(c.get("priority", "")))
     high_count = sum(1 for c in sos_cases if "HIGH" in str(c.get("priority", "")))
-    bedridden_count = sum(1_count for c in sos_cases if "YES" in str(c.get("bedridden", "")) or "ใช่" in str(c.get("bedridden", ""))) if sos_cases else 0 # ป้องกัน Error ตัวหารศูนย์
     bedridden_count = sum(1 for c in sos_cases if "YES" in str(c.get("bedridden", "")) or "ใช่" in str(c.get("bedridden", "")))
     
     # ดึงค่าพิกัดพิกัด GIS สำหรับแผนที่เวกเตอร์ Leaflet.js
@@ -400,4 +398,164 @@ def dashboard():
                 <button onclick="toggleModal(false)" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-xl font-bold">&times;</button>
                 <h3 class="text-xl font-bold text-gray-800 mb-4">🏠 เพิ่มศูนย์พักพิงใหม่ (Add Shelter)</h3>
                 
-                <form id="shelterForm" action="/dashboard/add_shelter"
+                <form id="shelterForm" action="/dashboard/add_shelter" method="POST">
+                    <!-- Step 1: ข้อมูลพื้นฐาน -->
+                    <div id="step1" class="space-y-4">
+                        <span class="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold">Step 1/3: ข้อมูลพื้นฐาน</span>
+                        <div class="mt-3">
+                            <label class="block text-xs font-bold text-gray-600 mb-1">รหัสศูนย์พักพิง (Shelter ID)</label>
+                            <input type="text" name="sh_id" placeholder="เช่น SH004" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-600 mb-1">ชื่อสถานที่/ศูนย์พักพิง</label>
+                            <input type="text" name="sh_name" placeholder="เช่น โรงเรียนกู้ภัยอุทกภัย" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">จังหวัด</label>
+                                <input type="text" name="sh_province" placeholder="เช่น สงขลา" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">อำเภอ</label>
+                                <input type="text" name="sh_district" placeholder="เช่น หาดใหญ่" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">ละติจูด (Latitude)</label>
+                                <input type="text" id="sh_lat" name="sh_lat" placeholder="7.0125" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-600 mb-1">ลองจิจูด (Longitude)</label>
+                                <input type="text" id="sh_lon" name="sh_lon" placeholder="100.4560" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
+                            </div>
+                        </div>
+                        <button type="button" onclick="getCurrentLocation()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-xs font-bold rounded-xl text-slate-700 transition">📍 ดึงพิกัดจากตำแหน่งปัจจุบันของฉัน</button>
+                        <button type="button" onclick="goToStep(2)" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-sm font-bold text-white rounded-xl transition">ถัดไป (Next)</button>
+                    </div>
+
+                    <!-- Step 2: ความจุ -->
+                    <div id="step2" class="space-y-4 hidden">
+                        <span class="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold">Step 2/3: ความจุและสิ่งก่อสร้าง</span>
+                        <div class="mt-3">
+                            <label class="block text-xs font-bold text-gray-600 mb-1">ความจุคนสูงสุด (คน)</label>
+                            <input type="number" name="sh_capacity" value="100" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-600 mb-1">จำนวนผู้เข้าพักในปัจจุบัน (คน)</label>
+                            <input type="number" name="sh_occupancy" value="0" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
+                        </div>
+                        <div class="flex gap-4">
+                            <button type="button" onclick="goToStep(1)" class="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 text-sm font-bold text-slate-700 rounded-xl transition">ย้อนกลับ (Back)</button>
+                            <button type="button" onclick="goToStep(3)" class="w-1/2 py-3 bg-blue-600 hover:bg-blue-700 text-sm font-bold text-white rounded-xl transition">ถัดไป (Next)</button>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: สิ่งอำนวยความสะดวก -->
+                    <div id="step3" class="space-y-4 hidden">
+                        <span class="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold">Step 3/3: สิ่งอำนวยความสะดวกภายใน</span>
+                        <div class="grid grid-cols-2 gap-3 mt-3 text-sm">
+                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_elec" checked> <span>⚡ มีไฟฟ้า</span></label>
+                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_water" checked> <span>💧 น้ำสะอาด</span></label>
+                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_net"> <span>📶 อินเทอร์เน็ต</span></label>
+                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_wheelchair"> <span>♿ รองรับผู้พิการ</span></label>
+                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_pet"> <span>🐶 รับสัตว์เลี้ยง</span></label>
+                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_doc"> <span>🩹 มีแพทย์ประจำ</span></label>
+                        </div>
+                        <div class="flex gap-4 mt-6">
+                            <button type="button" onclick="goToStep(2)" class="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 text-sm font-bold text-slate-700 rounded-xl transition">ย้อนกลับ (Back)</button>
+                            <button type="submit" class="w-1/2 py-3 bg-green-600 hover:bg-green-700 text-sm font-bold text-white rounded-xl transition">บันทึกข้อมูล (Save)</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script>
+            // ระบบสไลด์แผนที่กู้ภัยจริงบน Leaflet.js
+            var map = L.map('map').setView([13.7563, 100.5018], 6); // ซูมดูภาพรวมทั้งไทย
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            var sosData = {{ sos_map_data|tojson }};
+            var shelterData = {{ shelter_map_data|tojson }};
+
+            // วาดหมุดสีแดงกรณีเคส SOS ฉุกเฉิน
+            sosData.forEach(function(c) {
+                if(c.lat && c.lon) {
+                    L.circleMarker([c.lat, c.lon], {
+                        radius: 8,
+                        fillColor: "#EF4444",
+                        color: "#B91C1C",
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    }).addTo(map).bindPopup("<b>🆘 เคส SOS:</b> " + c.name + "<br>ระดับภัย: " + c.prio);
+                }
+            });
+
+            // วาดหมุดกรณีศูนย์อพยพ
+            shelterData.forEach(function(s) {
+                if(s.lat && s.lon) {
+                    L.marker([s.lat, s.lon]).addTo(map).bindPopup("<b>🏠 ศูนย์อพยพ:</b> " + s.name);
+                }
+            });
+
+            // ฟังก์ชันซ่อน/เปิด Add Shelter Modal
+            function toggleModal(open) {
+                var modal = document.getElementById("shelterModal");
+                if (open) {
+                    modal.classList.remove("hidden");
+                    goToStep(1); // รีเซ็ตมาหน้า 1 เสมอเมื่อกดเปิด
+                } else {
+                    modal.classList.add("hidden");
+                }
+            }
+
+            // จัดการ Wizard สเต็ปของหน้าฟอร์ม
+            function goToStep(stepNum) {
+                document.getElementById("step1").classList.add("hidden");
+                document.getElementById("step2").classList.add("hidden");
+                document.getElementById("step3").classList.add("hidden");
+                document.getElementById("step" + stepNum).classList.remove("hidden");
+            }
+
+            // ระบบดึงพิกัด GPS อัตโนมัติจากเบราว์เซอร์ของผู้ใช้
+            function getCurrentLocation() {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(function(position) {
+                        document.getElementById("sh_lat").value = position.coords.latitude;
+                        document.getElementById("sh_lon").value = position.coords.longitude;
+                    }, function() {
+                        alert("โปรดกดอนุญาตสิทธิ์เบราว์เซอร์เพื่อดึงตำแหน่งพิกัด GPS ครับ");
+                    });
+                } else {
+                    alert("เบราว์เซอร์ของคุณไม่รองรับการดึงพิกัดอัตโนมัติครับ");
+                }
+            }
+
+            // ฟังก์ชันฟิลเตอร์ตารางด่วนตามตัวอักษร
+            function filterCases() {
+                var input = document.getElementById("searchInput");
+                var filter = input.value.toLowerCase();
+                var table = document.getElementById("sosTable");
+                var tr = table.getElementsByTagName("tr");
+
+                for (var i = 0; i < tr.length; i++) {
+                    var areaCell = tr[i].getElementsByTagName("td")[1];
+                    if (areaCell) {
+                        var textValue = areaCell.textContent || areaCell.innerText;
+                        if (textValue.toLowerCase().indexOf(filter) > -1) {
+                            tr[i].style.display = "";
+                        } else {
+                            tr[i].style.display = "none";
+                        }
+                    }
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, urgent_count=critical_count, high_count=high_count, bedridden_count=bedridden_count, sos_map_data=sos_map_data, shelter_map_data=shelter_map_data)
