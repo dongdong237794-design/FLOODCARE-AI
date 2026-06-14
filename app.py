@@ -134,7 +134,7 @@ def handle_text_message(event):
             bot_config.USER_DATA[user_id] = {}
 
         if state == "sos_q2":
-            # คัดเฉพาะตัวเลขออกมาจากข้อความเว้นวรรค
+            # คัดเฉพาะตัวเลขออกมาจากข้อความเว้นวรรคและข้อความพิมพ์ผิดพลาด
             cleaned_count = bot_config.extract_number(user_text)
             bot_config.USER_DATA[user_id]["people_count"] = cleaned_count
             bot_config.USER_STATES[user_id] = "sos_q3"
@@ -252,6 +252,7 @@ def handle_text_message(event):
                 except Exception as e:
                     print(f"Failed to check user registration: {e}")
             
+            # การเรียงข้อมูลคำขอกู้ภัยรายบุคคลแบบจัดแถวแนวตั้งบรรทัดต่อบรรทัด (Line-by-line)
             summary_text = (
                 "🚨 สรุปคำขอรับการช่วยเหลือ SOS 🚨\n\n"
                 f"👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
@@ -359,7 +360,7 @@ def handle_text_message(event):
             prompt = f"ผู้ใช้ต้องการประเมินสถานการณ์น้ำหรือเช็กข้อมูลน้ำท่วมในพื้นที่: '{user_text}' โปรดแนะนำแนวทางเฝ้าระวังภัยพิบัติอย่างสั้นและกระชับ"
             try:
                 res = bot_config.gemini_model.generate_content(prompt)
-                reply = config.clean_text_for_line(res.text.strip())
+                reply = bot_config.clean_text_for_line(res.text.strip())
             except:
                 reply = "🌊 แนะนำติดตามการรายงานระดับน้ำอย่างใกล้ชิด และสามารถเช็กระดับลุ่มน้ำได้ผ่านแอปฯ ThaiWater ครับ"
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
