@@ -1,14 +1,14 @@
 import json
 from flask import Blueprint, render_template_string, request, redirect
-import config
+import bot_config
 
-# สร้างระบบ Blueprint สำหรับครอบหน้าต่างเว็บแดชบอร์ด
 dashboard_bp = Blueprint('dashboard', __name__)
+
 # หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์ แผนภูมิวินิจฉัยฐานข้อมูลกลาง (Diagnostic Control Panel)
 @dashboard_bp.route("/", methods=['GET'])
 def index():
-    config.get_sheets_client()
-    db_status = f"<span style='color: #10b981; font-weight: bold;'>🟢 {config.LAST_SHEETS_ERROR}</span>" if config.SHEETS_INITIALIZED else f"<span style='color: #ef4444; font-weight: bold;'>🔴 เชื่อมต่อล้มเหลว (สาเหตุ: {config.LAST_SHEETS_ERROR})</span>"
+    bot_config.get_sheets_client()
+    db_status = f"<span style='color: #10b981; font-weight: bold;'>🟢 {bot_config.LAST_SHEETS_ERROR}</span>" if bot_config.SHEETS_INITIALIZED else f"<span style='color: #ef4444; font-weight: bold;'>🔴 เชื่อมต่อล้มเหลว (สาเหตุ: {bot_config.LAST_SHEETS_ERROR})</span>"
     
     # ดึงเส้นทางแบบแบนราบของระบบ
     routes_html = """
@@ -40,31 +40,27 @@ def index():
     </div>
     """
 
-# ----------------- [ฟีเจอร์เพิ่มใหม่] Endpoint สำหรับรับเคสและปิดเคสจากหน้าเว็บตรง -----------------
+# Endpoint สำหรับรับเคสและปิดเคสจากหน้าเว็บตรง
 @dashboard_bp.route("/dashboard/update_status/<request_id>/<new_status>", methods=['GET'])
 def update_status(request_id, new_status):
-    sheets_client = config.get_sheets_client()
-    clean_sheet_id = config.extract_sheet_id(config.GOOGLE_SHEET_ID)
+    sheets_client = bot_config.get_sheets_client()
+    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
     if sheets_client:
         try:
             sheet = sheets_client.open_by_key(clean_sheet_id)
             sos_worksheet = sheet.worksheet("sos_requests")
-            
-            # ค้นหาแถวเคสที่ตรงกันในสเปรดชีตเพื่ออัปเดตสิทธิ
             cell = sos_worksheet.find(request_id)
             if cell:
-                # คอลัมน์ที่ 14 คือคอลัมน์สถานะ (status)
                 sos_worksheet.update_cell(cell.row, 14, new_status)
         except Exception as e:
             print(f"Failed to update status on Sheets: {e}")
-            
     return redirect("/dashboard")
 
-# ----------------- [ฟีเจอร์เพิ่มใหม่] Endpoint สำหรับบันทึกศูนย์พักพิงที่ถูกสร้างขึ้นใหม่ -----------------
+# Endpoint สำหรับบันทึกศูนย์พักพิงที่ถูกสร้างขึ้นใหม่
 @dashboard_bp.route("/dashboard/add_shelter", methods=['POST'])
 def add_shelter():
-    sheets_client = config.get_sheets_client()
-    clean_sheet_id = config.extract_sheet_id(config.GOOGLE_SHEET_ID)
+    sheets_client = bot_config.get_sheets_client()
+    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
     
     sh_id = request.form.get("sh_id")
     sh_name = request.form.get("sh_name")
@@ -75,7 +71,6 @@ def add_shelter():
     sh_capacity = request.form.get("sh_capacity", "100")
     sh_occupancy = request.form.get("sh_occupancy", "0")
     
-    # ดึงค่าสิ่งอำนวยความสะดวกที่ถูกติ๊กเลือก (Facilities Checklist)
     facs = []
     if request.form.get("fac_elec"): facs.append("ไฟฟ้า")
     if request.form.get("fac_water"): facs.append("น้ำสะอาด")
@@ -95,23 +90,24 @@ def add_shelter():
             ])
         except Exception as e:
             print(f"Failed to save shelter: {e}")
-            
     return redirect("/dashboard")
 
-# ----------------- หน้าแผงควบคุมหลักคุมสไตล์กู้ภัยสากล (Command Center Dashboard) -----------------
+# หน้าแผงควบคุมหลัก (Command Center Dashboard - Modern Light Minimal)
 @dashboard_bp.route("/dashboard", methods=['GET'])
 def dashboard():
-    sheets_client = config.get_sheets_client()
-    clean_sheet_id = config.extract_sheet_id(config.GOOGLE_SHEET_ID)
+    sheets_client = bot_config.get_sheets_client()
+    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
     sos_cases = []
     shelters = []
     error_msg = ""
     
     if not sheets_client:
-        error_msg = f"⚠️ ระบบตรวจพบข้อขัดข้องในการเรียกสิทธิ์: {config.LAST_SHEETS_ERROR}"
+        error_msg = f"⚠️ ระบบตรวจพบข้อขัดข้องในการเรียกสิทธิ์: {bot_config.LAST_SHEETS_ERROR}"
     else:
         try:
             sheet = sheets_client.open_by_key(clean_sheet_id)
+            
+            # ดึงข้อมูลผู้ใช้เพื่อนำมา JOIN หาชื่อจริงและเบอร์โทรศัพท์บน Dashboard
             try:
                 users_ws = sheet.worksheet("users")
                 users_rows = users_ws.get_all_records()
@@ -148,9 +144,10 @@ def dashboard():
     total_cases = len(sos_cases)
     critical_count = sum(1 for c in sos_cases if "CRITICAL" in str(c.get("priority", "")))
     high_count = sum(1 for c in sos_cases if "HIGH" in str(c.get("priority", "")))
+    bedridden_count = sum(1_count for c in sos_cases if "YES" in str(c.get("bedridden", "")) or "ใช่" in str(c.get("bedridden", ""))) if sos_cases else 0 # ป้องกัน Error ตัวหารศูนย์
     bedridden_count = sum(1 for c in sos_cases if "YES" in str(c.get("bedridden", "")) or "ใช่" in str(c.get("bedridden", "")))
     
-    # ซีเรียลไลซ์ข้อมูลสำหรับป้อนเข้าไปที่ระบบแผนที่เวกเตอร์ Leaflet.js
+    # ดึงค่าพิกัดพิกัด GIS สำหรับแผนที่เวกเตอร์ Leaflet.js
     sos_map_data = []
     for c in sos_cases:
         try:
@@ -250,7 +247,7 @@ def dashboard():
                     <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
                             <div>
-                                <p class="text-sm font-semibold text-gray-500">จำนวนเคสทั้งหมด</p>
+                                <p class="text-sm text-gray-500">เคสแจ้งเหตุทั้งหมด</p>
                                 <p class="text-3xl font-bold text-gray-900 mt-2">{{ total_cases }} เคส</p>
                             </div>
                             <span class="text-3xl bg-blue-50 p-3 rounded-xl">📊</span>
@@ -325,7 +322,7 @@ def dashboard():
                                                 <p class="text-xs text-blue-600 font-semibold mt-1">📞 {{ case.get('phone', '-') }}</p>
                                             </td>
                                             <td class="py-4 px-2">
-                                                <p class="text-gray-700">สมาชิก: <b>{{ case.get('people_count', '1') }}</b> คน</p>
+                                                <p class="text-slate-700">จำนวน: <b>{{ case.get('people_count', '1') }}</b> คน</p>
                                                 <p class="text-xs text-purple-600 mt-1">ติดเตียง: {{ case.get('bedridden', 'NO') }} | สัตว์เลี้ยง: {{ case.get('pets', 'NO') }}</p>
                                             </td>
                                             <td class="py-4 px-2">
@@ -363,7 +360,6 @@ def dashboard():
                                 <h3 class="text-lg font-bold text-gray-800 flex items-center space-x-2">
                                     <span>🏠</span> <span>ศูนย์พักพิงในพื้นที่</span>
                                 </h3>
-                                <!-- ปุ่มทริกเกอร์เปิด Add Shelter Wizard Modal -->
                                 <button onclick="toggleModal(true)" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 transition text-white text-xs font-bold rounded-xl shadow-sm">+ Add Shelter</button>
                             </div>
 
@@ -404,175 +400,4 @@ def dashboard():
                 <button onclick="toggleModal(false)" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-xl font-bold">&times;</button>
                 <h3 class="text-xl font-bold text-gray-800 mb-4">🏠 เพิ่มศูนย์พักพิงใหม่ (Add Shelter)</h3>
                 
-                <form id="shelterForm" action="/dashboard/add_shelter" method="POST">
-                    <!-- Step 1: ข้อมูลพื้นฐาน -->
-                    <div id="step1" class="space-y-4">
-                        <span class="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold">Step 1/3: ข้อมูลพื้นฐาน</span>
-                        <div class="mt-3">
-                            <label class="block text-xs font-bold text-gray-600 mb-1">รหัสศูนย์พักพิง (Shelter ID)</label>
-                            <input type="text" name="sh_id" placeholder="เช่น SH004" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-600 mb-1">ชื่อสถานที่/ศูนย์พักพิง</label>
-                            <input type="text" name="sh_name" placeholder="เช่น โรงเรียนกู้ภัยอุทกภัย" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-xs font-bold text-gray-600 mb-1">จังหวัด</label>
-                                <input type="text" name="sh_province" placeholder="เช่น สงขลา" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-gray-600 mb-1">อำเภอ</label>
-                                <input type="text" name="sh_district" placeholder="เช่น หาดใหญ่" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-xs font-bold text-gray-600 mb-1">ละติจูด (Latitude)</label>
-                                <input type="text" id="sh_lat" name="sh_lat" placeholder="7.0125" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-gray-600 mb-1">ลองจิจูด (Longitude)</label>
-                                <input type="text" id="sh_lon" name="sh_lon" placeholder="100.4560" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
-                            </div>
-                        </div>
-                        <button type="button" onclick="getCurrentLocation()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-xs font-bold rounded-xl text-slate-700 transition">📍 ดึงพิกัดจากตำแหน่งปัจจุบันของฉัน</button>
-                        <button type="button" onclick="goToStep(2)" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-sm font-bold text-white rounded-xl transition">ถัดไป (Next)</button>
-                    </div>
-
-                    <!-- Step 2: ความจุ -->
-                    <div id="step2" class="space-y-4 hidden">
-                        <span class="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold">Step 2/3: ความจุและสิ่งก่อสร้าง</span>
-                        <div class="mt-3">
-                            <label class="block text-xs font-bold text-gray-600 mb-1">ความจุคนสูงสุด (คน)</label>
-                            <input type="number" name="sh_capacity" value="100" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-600 mb-1">จำนวนผู้เข้าพักในปัจจุบัน (คน)</label>
-                            <input type="number" name="sh_occupancy" value="0" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" required>
-                        </div>
-                        <div class="flex gap-4">
-                            <button type="button" onclick="goToStep(1)" class="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 text-sm font-bold text-slate-700 rounded-xl transition">ย้อนกลับ (Back)</button>
-                            <button type="button" onclick="goToStep(3)" class="w-1/2 py-3 bg-blue-600 hover:bg-blue-700 text-sm font-bold text-white rounded-xl transition">ถัดไป (Next)</button>
-                        </div>
-                    </div>
-
-                    <!-- Step 3: สิ่งอำนวยความสะดวก -->
-                    <div id="step3" class="space-y-4 hidden">
-                        <span class="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold">Step 3/3: สิ่งอำนวยความสะดวกภายใน</span>
-                        <div class="grid grid-cols-2 gap-3 mt-3 text-sm">
-                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_elec" checked> <span>⚡ มีไฟฟ้า</span></label>
-                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_water" checked> <span>💧 น้ำสะอาด</span></label>
-                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_net"> <span>📶 อินเทอร์เน็ต</span></label>
-                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_wheelchair"> <span>♿ รองรับผู้พิการ</span></label>
-                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_pet"> <span>🐶 รับสัตว์เลี้ยง</span></label>
-                            <label class="flex items-center space-x-2"><input type="checkbox" name="fac_doc"> <span>🩹 มีแพทย์ประจำ</span></label>
-                        </div>
-                        <div class="flex gap-4 mt-6">
-                            <button type="button" onclick="goToStep(2)" class="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 text-sm font-bold text-slate-700 rounded-xl transition">ย้อนกลับ (Back)</button>
-                            <button type="submit" class="w-1/2 py-3 bg-green-600 hover:bg-green-700 text-sm font-bold text-white rounded-xl transition">บันทึกข้อมูล (Save)</button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <script>
-            // ระบบสไลด์แผนที่กู้ภัยจริงบน Leaflet.js
-            var map = L.map('map').setView([13.7563, 100.5018], 6); // ซูมดูภาพรวมทั้งไทย
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors'
-            }).addTo(map);
-
-            // ดึงพิกัดจากฝั่งหลังบ้านมาวาด Marker แผนที่
-            var sosData = {{ sos_map_data|tojson }};
-            var shelterData = {{ shelter_map_data|tojson }};
-
-            // วาดหมุดสีแดงกรณีเคส SOS ฉุกเฉิน
-            sosData.forEach(function(c) {
-                if(c.lat && c.lon) {
-                    L.circleMarker([c.lat, c.lon], {
-                        radius: 8,
-                        fillColor: "#EF4444",
-                        color: "#B91C1C",
-                        weight: 2,
-                        opacity: 1,
-                        fillOpacity: 0.8
-                    }).addTo(map).bindPopup("<b>🆘 เคส SOS:</b> " + c.name + "<br>ระดับภัย: " + c.prio);
-                }
-            });
-
-            // วาดหมุดสีน้ำเงินกรณีศูนย์อพยพจริงในสงขลา/กทม.
-            shelter_icon = L.icon({
-                iconUrl: 'https://cdn-icons-png.flaticon.com/512/25/25694.png',
-                iconSize: [20, 20]
-            });
-            shelterData.forEach(function(s) {
-                if(s.lat && s.lon) {
-                    L.marker([s.lat, s.lon]).addTo(map).bindPopup("<b>🏠 ศูนย์อพยพ:</b> " + s.name);
-                }
-            });
-
-            // ฟังก์ชันซ่อน/เปิด Add Shelter Modal
-            def toggleModal(open) {
-                var modal = document.getElementById("shelterModal");
-                if (open) {
-                    modal.classList.remove("hidden");
-                    goToStep(1); // รีเซ็ตมาหน้า 1 เสมอเมื่อกดเปิด
-                } else {
-                    modal.classList.add("hidden");
-                }
-            }
-
-            // จัดการ Wizard สเต็ปของหน้าฟอร์ม
-            def goToStep(stepNum) {
-                document.getElementById("step1").classList.add("hidden");
-                document.getElementById("step2").classList.add("hidden");
-                document.getElementById("step3").classList.add("hidden");
-                document.getElementById("step" + stepNum).classList.remove("hidden");
-            }
-
-            // ระบบดึงพิกัด GPS อัตโนมัติจากเบราว์เซอร์ของผู้ใช้
-            def getCurrentLocation() {
-                if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition(function(position) {
-                        document.getElementById("sh_lat").value = position.coords.latitude;
-                        document.getElementById("sh_lon").value = position.coords.longitude;
-                    }, function() {
-                        alert("โปรดกดอนุญาตสิทธิ์เบราว์เซอร์เพื่อดึงตำแหน่งพิกัด GPS ครับ");
-                    });
-                } else {
-                    alert("เบราว์เซอร์ของคุณไม่รองรับการดึงพิกัดอัตโนมัติครับ");
-                }
-            }
-
-            // ฟังก์ชันฟิลเตอร์ตารางด่วนตามตัวอักษร
-            def filterCases() {
-                var input = document.getElementById("searchInput");
-                var filter = input.value.toLowerCase();
-                var table = document.getElementById("sosTable");
-                var tr = table.getElementsByTagName("tr");
-
-                for (var i = 0; i < tr.length; i++) {
-                    var areaCell = tr[i].getElementsByTagName("td")[1];
-                    if (areaCell) {
-                        var textValue = areaCell.textContent || areaCell.innerText;
-                        if (textValue.toLowerCase().indexOf(filter) > -1) {
-                            tr[i].style.display = "";
-                        } else {
-                            tr[i].style.display = "none";
-                        }
-                    }
-                }
-            }
-        </script>
-    </body>
-    </html>
-    """
-    # ปรับแต่งให้ตัวส่งหน้าเว็บเรียกใช้ฟังก์ชันการกรอกข้อความที่ถูกต้อง
-    html_template = html_template.replace("def toggleModal(open)", "function toggleModal(open)")
-    html_template = html_template.replace("def goToStep(stepNum)", "function goToStep(stepNum)")
-    html_template = html_template.replace("def getCurrentLocation()", "function getCurrentLocation()")
-    html_template = html_template.replace("def filterCases()", "function filterCases()")
-    
-    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, critical_count=critical_count, high_count=high_count, bedridden_count=bedridden_count, sos_map_data=sos_map_data, shelter_map_data=shelter_map_data)
+                <form id="shelterForm" action="/dashboard/add_shelter"
