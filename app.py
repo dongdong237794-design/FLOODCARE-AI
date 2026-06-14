@@ -254,15 +254,17 @@ def handle_text_message(event):
             
             summary_text = (
                 "🚨 สรุปคำขอรับการช่วยเหลือ SOS 🚨\n\n"
-                f"👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
-                f"📞 เบอร์โทรศัพท์: {phone}\n"
-                f"📍 พิกัดแจ้งเหตุ: {data.get('latitude', '0')}, {data.get('longitude', '0')}\n"
-                f"👥 สมาชิกติดในบ้าน: {data.get('people_count', '1')} คน\n"
-                f"👶 เด็กเล็ก: {data.get('children', 'NO')} | 🧓 ผู้สูงอายุ: {data.get('elderly', 'NO')}\n"
-                f"🏥 ผู้ป่วยติดเตียง: {data.get('bedridden', 'NO')} | 🐶 สัตว์เลี้ยง: {data.get('pets', 'NO')}\n"
-                f"🌊 ระดับน้ำโดยประมาณ: {data.get('water_level', '-')}\n"
-                f"📝 รายละเอียดอื่น ๆ: {data.get('note', '-')}\n\n"
-                f"📊 ประเมินความเร็วช่วยเหลือ: {priority}\n\n"
+                f" 👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
+                f" 📞 เบอร์โทรศัพท์: {phone}\n"
+                f" 📍 พิกัดแจ้งเหตุ: {data.get('latitude', '0')}, {data.get('longitude', '0')}\n"
+                f" 👥 สมาชิกติดในบ้าน: {data.get('people_count', '1')} คน\n"
+                f" 👶 เด็กเล็ก: {data.get('children', 'NO')}\n"
+                f" 🧓 ผู้สูงอายุ: {data.get('elderly', 'NO')}\n"
+                f" 🏥 ผู้ป่วยติดเตียง: {data.get('bedridden', 'NO')}\n"
+                f" 🐶 สัตว์เลี้ยง: {data.get('pets', 'NO')}\n"
+                f" 🌊 ระดับน้ำโดยประมาณ: {data.get('water_level', '-')}\n"
+                f" 📝 รายละเอียดอื่น ๆ: {data.get('note', '-')}\n\n"
+                f" 📊 ประเมินความเร็วช่วยเหลือ: {priority}\n\n"
                 "ต้องการส่งข้อมูลเพื่อยืนยันแจ้งกู้ภัยหรือไม่ครับ? (กรุณากดเลือกปุ่มด้านล่าง)"
             )
             
@@ -560,7 +562,7 @@ def handle_text_message(event):
                 f"🚨 สวัสดีครับคุณ {first_name}! ระบบพบข้อมูลการลงทะเบียนของคุณแล้วครับ "
                 "โปรดกดปุ่มแชร์พิกัด 'Location' สีเขียวด้านล่างนี้ เพื่อระบุตำแหน่งที่คุณต้องการให้ทีมกู้ภัยเข้าช่วยเหลือด่วนที่สุดทันทีเลยครับ"
             )
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text, quick_reply=location_quick_reply))
+            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text, quick_reply=location_quick_reply))
             return
             
         config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
@@ -673,8 +675,11 @@ def handle_location_message(event):
             
         config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
-    # --- ฟีเจอร์เมนูที่ 3: ตรวจวัดระดับน้ำภูมิสารสนเทศ (GIS Water Level Station Search) ---
+    # --- ฟีเจอร์เมนูที่ 3: ตรวจวัดระดับน้ำภูมิสารสนเทศ (ขูดข้อมูลสภาพอากาศเรียลไทม์จากระบบ Web Scraper ทันที!) ---
     elif state == "waiting_water_location":
+        # เรียกใช้ฟังก์ชันขูดข้อมูลสภาพอากาศจริงตามจุดพิกัดผ่านดาวเทียมแบบเรียลไทม์
+        weather_info = config.get_live_weather_scraper(latitude, longitude)
+        
         water_stations = []
         db_connected = False
         
@@ -697,7 +702,11 @@ def handle_location_message(event):
                 print(f"Failed to fetch water levels from Sheets: {e}")
                 
         if not db_connected:
-            reply_text = "⚠️ ขออภัยครับ ขณะนี้ระบบหลังบ้านขัดข้องชั่วคราว ไม่สามารถดึงระดับน้ำจากสถานีตรวจวัดจริงมาประมวลผลพิกัดภูมิสารสนเทศได้ โปรดลองใหม่อีกครั้งนะครับ"
+            reply_text = (
+                "⚠️ ขัดข้องชั่วคราวในการเชื่อมโยงพิกัดระดับน้ำจาก Google Sheets ครับ แต่ระบบ Web Scraper ขูดข้อมูลสภาพอากาศจริงของคุณสำเร็จแล้วดังนี้ครับ:\n\n"
+                f"{weather_info}\n\n"
+                "โปรดตรวจสอบระดับน้ำทางสายด่วน ปภ. 1784 ชั่วคราวก่อนนะครับ"
+            )
             config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
             
@@ -716,14 +725,19 @@ def handle_location_message(event):
         closest_station = nearest_stations[0] if nearest_stations else None
         
         if not closest_station:
-            reply_text = "📍 ปัจจุบันไม่พบสถานีโทรมาตรตรวจวัดระดับน้ำติดตั้งอยู่ใกล้บริเวณพิกัดของคุณเลยครับ แนะนำเฝ้าสังเกตทิศทางน้ำด้วยตัวเองรอบบ้านนะครับ"
+            reply_text = (
+                "🌊 รายงานสภาพอากาศเรียลไทม์จากระบบ Web Scraper พิกัดของคุณครับ:\n\n"
+                f"{weather_info}\n\n"
+                "📍 หมายเหตุ: ไม่พบสถานีโทรมาตรตรวจวัดน้ำติดตั้งอยู่ในรัศมีรอบตัวพิกัดของคุณเลยครับ"
+            )
         else:
             reply_text = (
-                f"🌊 รายงานระดับน้ำจากสถานีตรวจวัดทางราชการที่ใกล้ตัวคุณมากที่สุดครับ:\n\n"
-                f"📡 สถานีตรวจวัด: {closest_station['name']} (จ.{closest_station['province']})\n"
-                f"🗺️ ระยะทางห่างจากจุดของคุณ: {closest_station['distance']:.2f} กิโลเมตร\n\n"
+                f"🌊 รายงานสภาพอากาศและระดับน้ำจริงรายพิกัดของคุณครับ:\n\n"
+                f"{weather_info}\n\n"
+                f"📡 สถานีตรวจวัดระดับน้ำที่ใกล้ที่สุด: {closest_station['name']} (จ.{closest_station['province']})\n"
+                f"🗺️ ระยะห่างจากจุดของคุณ: {closest_station['distance']:.2f} กิโลเมตร\n"
                 f"📏 ระดับน้ำปัจจุบัน: {closest_station['level']} เมตร\n"
-                f"⚠️ ระดับความปลอดภัย: {closest_station['status']}\n\n"
+                f"⚠️ สถานะเฝ้าระวัง: {closest_station['status']}\n\n"
                 "โปรดระมัดระวังความเสี่ยงของกระแสน้ำไหลล้นตลิ่ง และเฝ้าระวังสัญญาณเตือนภัยในพื้นที่อย่างใกล้ชิดนะครับ"
             )
             
