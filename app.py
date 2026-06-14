@@ -1,4 +1,5 @@
 import datetime
+@config
 from flask import Flask, request, abort
 import bot_config
 from dashboard import dashboard_bp
