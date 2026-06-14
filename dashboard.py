@@ -2,6 +2,7 @@ import json
 from flask import Blueprint, render_template_string, request, redirect
 import bot_config
 
+# สร้างระบบ Blueprint สำหรับครอบหน้าต่างเว็บแดชบอร์ด
 dashboard_bp = Blueprint('dashboard', __name__)
 
 # หน้าหลักเช็กสถานะการรันเซิร์ฟเวอร์ แผนภูมิวินิจฉัยฐานข้อมูลกลาง (Diagnostic Control Panel)
@@ -10,6 +11,7 @@ def index():
     bot_config.get_sheets_client()
     db_status = f"<span style='color: #10b981; font-weight: bold;'>🟢 {bot_config.LAST_SHEETS_ERROR}</span>" if bot_config.SHEETS_INITIALIZED else f"<span style='color: #ef4444; font-weight: bold;'>🔴 เชื่อมต่อล้มเหลว (สาเหตุ: {bot_config.LAST_SHEETS_ERROR})</span>"
     
+    # ดึงเส้นทางแบบแบนราบของระบบ
     routes_html = """
     <li style='margin-bottom:8px;'>🗺️ <b>index</b>: <code style='background:#f1f1f1; padding:3px 8px;'>/</code> (Methods: GET)</li>
     <li style='margin-bottom:8px;'>🗺️ <b>dashboard</b>: <code style='background:#f1f1f1; padding:3px 8px;'>/dashboard</code> (Methods: GET)</li>
@@ -320,7 +322,7 @@ def dashboard():
                                                 <p class="text-xs text-blue-600 font-semibold mt-1">📞 {{ case.get('phone', '-') }}</p>
                                             </td>
                                             <td class="py-4 px-2">
-                                                <p class="text-slate-700">จำนวน: <b>{{ case.get('people_count', '1') }}</b> คน</p>
+                                                <p class="text-gray-700">จำนวน: <b>{{ case.get('people_count', '1') }}</b> คน</p>
                                                 <p class="text-xs text-purple-600 mt-1">ติดเตียง: {{ case.get('bedridden', 'NO') }} | สัตว์เลี้ยง: {{ case.get('pets', 'NO') }}</p>
                                             </td>
                                             <td class="py-4 px-2">
