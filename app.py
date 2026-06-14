@@ -176,7 +176,7 @@ def handle_text_message(event):
         elif state == "sos_q5":
             val = bot_config.parse_yes_no(user_text)
             bot_config.USER_DATA[user_id]["bedridden"] = val
-            bot_config.USER_STATES[user_id] = "sos_q6"
+            config.USER_STATES[user_id] = "sos_q6"
             quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
@@ -603,7 +603,7 @@ def handle_text_message(event):
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
 # 12. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
-@bot_config.handler.add(MessageEvent, message=LocationMessage) # <-- จุดนี้ใช้ bot_config.handler สมบูรณ์แล้วครับ!
+@bot_config.handler.add(MessageEvent, message=LocationMessage) # <-- จุดที่ใช้ bot_config.handler สมบูรณ์แล้วครับ!
 def handle_location_message(event):
     user_id = event.source.user_id
     latitude = event.message.latitude
@@ -706,7 +706,7 @@ def handle_location_message(event):
             reply_text = (
                 "⚠️ ขัดข้องชั่วคราวในการเชื่อมโยงพิกัดระดับน้ำจาก Google Sheets ครับ แต่ระบบ Web Scraper ขูดข้อมูลสภาพอากาศจริงของคุณสำเร็จแล้วดังนี้ครับ:\n\n"
                 f"{weather_info}\n\n"
-                "PROT ตรวจสอบระดับน้ำทางสายด่วน ปภ. 1784 ชั่วคราวก่อนนะครับ"
+                "โปรดตรวจสอบระดับน้ำทางสายด่วน ปภ. 1784 ชั่วคราวก่อนนะครับ"
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
