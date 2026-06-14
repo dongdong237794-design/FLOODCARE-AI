@@ -1,6 +1,6 @@
 import datetime
 from flask import Flask, request, abort
-import config
+import bot_config
 from dashboard import dashboard_bp
 
 # LINE SDK
@@ -23,27 +23,27 @@ def callback():
     signature = request.headers.get('X-Line-Signature')
     body = request.get_data(as_text=True)
     try:
-        config.handler.handle(body, signature)
+        bot_config.handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
     return 'OK'
 
 # 11. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
-@config.handler.add(MessageEvent, message=TextMessage)
+@bot_config.handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
     user_id = event.source.user_id
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # ดึงระดับสถานะการคุยปัจจุบัน
-    state = config.USER_STATES.get(user_id)
-    sheets_client = config.get_sheets_client()
+    state = bot_config.USER_STATES.get(user_id)
+    sheets_client = bot_config.get_sheets_client()
 
     # 11.1 ฟีเจอร์พิมพ์ "ยกเลิก" เพื่อเคลียร์สิทธิ์แชตและรีสตาร์ตคุยใหม่ได้ตลอดเวลา
     if user_text == "ยกเลิก":
-        config.USER_STATES.pop(user_id, None)
-        config.USER_DATA.pop(user_id, None)
-        config.line_bot_api.reply_message(
+        bot_config.USER_STATES.pop(user_id, None)
+        bot_config.USER_DATA.pop(user_id, None)
+        bot_config.line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="❌ ยกเลิกขั้นตอนการทำงานปัจจุบันเรียบร้อยแล้วครับ คุณสามารถกดใช้งานปุ่มเมนูหลักใหม่ได้ทันทีเลยครับ")
         )
@@ -56,7 +56,7 @@ def handle_text_message(event):
                 QuickReplyButton(action=LocationAction(label="กดส่งพิกัดตำแหน่งแจ้งเหตุ"))
             ]
         )
-        config.line_bot_api.reply_message(
+        bot_config.line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(
                 text="🚨 ระบบกำลังรอตำแหน่งพิกัดของคุณอยู่ครับ โปรดกดปุ่มสีเขียว 'กดส่งพิกัดตำแหน่งแจ้งเหตุ' ด้านล่างเพื่อส่งข้อมูลความละเอียดด่วน หรือพิมพ์คำว่า 'ยกเลิก' เพื่อเริ่มต้นใหม่ครับ",
@@ -67,39 +67,40 @@ def handle_text_message(event):
 
     # ==================== ส่วนที่ 11.3: ดักจับและประมวลสถานะลงทะเบียนผู้ใช้รายใหม่ (First-Time User Registration) ====================
     if state == "register_first_name":
-        if user_id not in config.USER_DATA:
-            config.USER_DATA[user_id] = {}
-        config.USER_DATA[user_id]["temp_first_name"] = user_text
-        config.USER_STATES[user_id] = "register_last_name"
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ระบุ 'นามสกุล' ของคุณเพื่อใช้ยืนยันตัวตนกับกู้ภัยครับ"))
+        if user_id not in bot_config.USER_DATA:
+            bot_config.USER_DATA[user_id] = {}
+        bot_config.USER_DATA[user_id]["temp_first_name"] = user_text
+        bot_config.USER_STATES[user_id] = "register_last_name"
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ระบุ 'นามสกุล' ของคุณเพื่อใช้ยืนยันตัวตนกับกู้ภัยครับ"))
         return
         
     elif state == "register_last_name":
-        if user_id not in config.USER_DATA:
+        if user_id not in bot_config.USER_DATA:
+            config = bot_config
             config.USER_DATA[user_id] = {}
-        config.USER_DATA[user_id]["temp_last_name"] = user_text
-        config.USER_STATES[user_id] = "register_phone"
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ระบุ 'เบอร์โทรศัพท์มือถือ' 9-10 หลักของคุณสำหรับการติดต่อกลับครับ"))
+        bot_config.USER_DATA[user_id]["temp_last_name"] = user_text
+        bot_config.USER_STATES[user_id] = "register_phone"
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ระบุ 'เบอร์โทรศัพท์มือถือ' 9-10 หลักของคุณสำหรับการติดต่อกลับครับ"))
         return
         
     elif state == "register_phone":
-        if user_id not in config.USER_DATA:
-            config.USER_DATA[user_id] = {}
+        if user_id not in bot_config.USER_DATA:
+            bot_config.USER_DATA[user_id] = {}
         # คัดกรองเว้นวรรคและดึงหมายเลขเบอร์โทรศัพท์จริง
-        clean_phone = config.extract_number(user_text)
+        clean_phone = bot_config.extract_number(user_text)
         if len(clean_phone) < 9 or len(clean_phone) > 10:
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ เบอร์โทรศัพท์ไม่ถูกต้องครับ! โปรดพิมพ์หมายเลขมือถือเฉพาะตัวเลข 9-10 หลักใหม่อีกครั้งครับ (เช่น 0812345678)"))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ เบอร์โทรศัพท์ไม่ถูกต้องครับ! โปรดพิมพ์หมายเลขมือถือเฉพาะตัวเลข 9-10 หลักใหม่อีกครั้งครับ (เช่น 0812345678)"))
             return
             
-        first_name = config.USER_DATA[user_id].get("temp_first_name", "ผู้แจ้ง")
-        last_name = config.USER_DATA[user_id].get("temp_last_name", "ทั่วไป")
+        first_name = bot_config.USER_DATA[user_id].get("temp_first_name", "ผู้แจ้ง")
+        last_name = bot_config.USER_DATA[user_id].get("temp_last_name", "ทั่วไป")
         register_date = datetime.datetime.now().strftime("%Y-%m-%d")
         
         # บันทึกข้อมูลเข้าตารางผู้ใช้ 'users'
         success = False
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
+                sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
                 users_ws = sheet.worksheet("users")
                 users_ws.append_row([user_id, first_name, last_name, clean_phone, register_date, "ACTIVE"])
                 success = True
@@ -107,12 +108,12 @@ def handle_text_message(event):
                 print(f"Failed to save user to Sheets: {e}")
                 
         # ปรับโปรไฟล์ชั่วคราวในหน่วยความจำ (In-memory Backup) เพื่อให้ระบบใช้งานต่อได้แม้ชีตพัง
-        config.USER_DATA[user_id]["first_name"] = first_name
-        config.USER_DATA[user_id]["last_name"] = last_name
-        config.USER_DATA[user_id]["phone"] = clean_phone
+        bot_config.USER_DATA[user_id]["first_name"] = first_name
+        bot_config.USER_DATA[user_id]["last_name"] = last_name
+        bot_config.USER_DATA[user_id]["phone"] = clean_phone
         
         # ล้างสถานะลงทะเบียนเข้าสู่ระบบปกติ
-        config.USER_STATES.pop(user_id, None)
+        bot_config.USER_STATES.pop(user_id, None)
         
         if success:
             reply_text = (
@@ -125,71 +126,71 @@ def handle_text_message(event):
                 f"🎉 สมัครสมาชิกจำลองสำเร็จแล้วครับ คุณ {first_name} {last_name}!\n"
                 "ระบบได้บันทึกโปรไฟล์สำรองของคุณไว้บนเซิร์ฟเวอร์ชั่วคราวแล้ว คุณสามารถกดปุ่ม SOS เพื่อขอรับการช่วยเหลือได้ทันทีครับ"
             )
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
     # ==================== ส่วนที่ 11.4: ระบบดักจับการพิมพ์โต้ตอบระหว่างทำแบบสอบถาม SOS (Steps 2-8) ====================
     if state:
-        if user_id not in config.USER_DATA:
-            config.USER_DATA[user_id] = {}
+        if user_id not in bot_config.USER_DATA:
+            bot_config.USER_DATA[user_id] = {}
 
         if state == "sos_q2":
             # คัดเฉพาะตัวเลขออกมาจากข้อความเว้นวรรค
-            cleaned_count = config.extract_number(user_text)
-            config.USER_DATA[user_id]["people_count"] = cleaned_count
-            config.USER_STATES[user_id] = "sos_q3"
+            cleaned_count = bot_config.extract_number(user_text)
+            bot_config.USER_DATA[user_id]["people_count"] = cleaned_count
+            bot_config.USER_STATES[user_id] = "sos_q3"
             quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
                     QuickReplyButton(action=MessageAction(label="ไม่มี (NO)", text="NO"))
                 ]
             )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 3: ในบ้านมีเด็กเล็ก (อายุต่ำกว่า 12 ปี) หรือไม่ครับ?", quick_reply=quick_reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 3: ในบ้านมีเด็กเล็ก (อายุต่ำกว่า 12 ปี) หรือไม่ครับ?", quick_reply=quick_reply))
             return
             
         elif state == "sos_q3":
-            val = config.parse_yes_no(user_text)
-            config.USER_DATA[user_id]["children"] = val
-            config.USER_STATES[user_id] = "sos_q4"
+            val = bot_config.parse_yes_no(user_text)
+            bot_config.USER_DATA[user_id]["children"] = val
+            bot_config.USER_STATES[user_id] = "sos_q4"
             quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
                     QuickReplyButton(action=MessageAction(label="ไม่มี (NO)", text="NO"))
                 ]
             )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 4: ในบ้านมีผู้สูงอายุหรือไม่ครับ?", quick_reply=quick_reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 4: ในบ้านมีผู้สูงอายุหรือไม่ครับ?", quick_reply=quick_reply))
             return
             
         elif state == "sos_q4":
-            val = config.parse_yes_no(user_text)
-            config.USER_DATA[user_id]["elderly"] = val
-            config.USER_STATES[user_id] = "sos_q5"
+            val = bot_config.parse_yes_no(user_text)
+            bot_config.USER_DATA[user_id]["elderly"] = val
+            bot_config.USER_STATES[user_id] = "sos_q5"
             quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
                     QuickReplyButton(action=MessageAction(label="ไม่มี (NO)", text="NO"))
                 ]
             )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 5: ในบ้านมีผู้ป่วยติดเตียงหรือไม่ครับ?", quick_reply=quick_reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 5: ในบ้านมีผู้ป่วยติดเตียงหรือไม่ครับ?", quick_reply=quick_reply))
             return
             
         elif state == "sos_q5":
-            val = config.parse_yes_no(user_text)
-            config.USER_DATA[user_id]["bedridden"] = val
-            config.USER_STATES[user_id] = "sos_q6"
+            val = bot_config.parse_yes_no(user_text)
+            bot_config.USER_DATA[user_id]["bedridden"] = val
+            bot_config.USER_STATES[user_id] = "sos_q6"
             quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label="มี (YES)", text="YES")),
                     QuickReplyButton(action=MessageAction(label="ไม่มี (NO)", text="NO"))
                 ]
             )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 6: มีสัตว์เลี้ยงที่ต้องอพยพร่วมด้วยหรือไม่ครับ?", quick_reply=quick_reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 6: มีสัตว์เลี้ยงที่ต้องอพยพร่วมด้วยหรือไม่ครับ?", quick_reply=quick_reply))
             return
             
         elif state == "sos_q6":
-            val = config.parse_yes_no(user_text)
-            config.USER_DATA[user_id]["pets"] = val
-            config.USER_STATES[user_id] = "sos_q7"
+            val = bot_config.parse_yes_no(user_text)
+            bot_config.USER_DATA[user_id]["pets"] = val
+            bot_config.USER_STATES[user_id] = "sos_q7"
             quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label="ต่ำกว่า 30 ซม.", text="ต่ำกว่า 30 ซม.")),
@@ -198,19 +199,19 @@ def handle_text_message(event):
                     QuickReplyButton(action=MessageAction(label="สูงกว่า 1 เมตร", text="สูงกว่า 1 เมตร"))
                 ]
             )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 7: ระดับน้ำท่วมบ้านในปัจจุบันโดยประมาณครับ?", quick_reply=quick_reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 7: ระดับน้ำท่วมบ้านในปัจจุบันโดยประมาณครับ?", quick_reply=quick_reply))
             return
             
         elif state == "sos_q7":
-            config.USER_DATA[user_id]["water_level"] = user_text
-            config.USER_STATES[user_id] = "sos_q8"
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 8: โปรดระบุข้อมูลเพิ่มเติมเฉพาะหน้าเพื่อแจ้งกู้ภัยครับ (เช่น น้ำท่วมมิดชั้นหนึ่ง, ไฟฟ้าดับ, ขาดแคลนอาหารหนัก หรือไม่ระบุ)"))
+            bot_config.USER_DATA[user_id]["water_level"] = user_text
+            bot_config.USER_STATES[user_id] = "sos_q8"
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 8: โปรดระบุข้อมูลเพิ่มเติมเฉพาะหน้าเพื่อแจ้งกู้ภัยครับ (เช่น น้ำท่วมมิดชั้นหนึ่ง, ไฟฟ้าดับ, ขาดแคลนอาหารหนัก หรือไม่ระบุ)"))
             return
             
         elif state == "sos_q8":
-            config.USER_DATA[user_id]["note"] = user_text
+            bot_config.USER_DATA[user_id]["note"] = user_text
             
-            data = config.USER_DATA[user_id]
+            data = bot_config.USER_DATA[user_id]
             bedridden = data.get("bedridden", "NO")
             water_level = data.get("water_level", "")
             elderly = data.get("elderly", "NO")
@@ -225,16 +226,16 @@ def handle_text_message(event):
             else:
                 priority = "🟢  NORMAL (สถานการณ์ปกติ)"
                 
-            config.USER_DATA[user_id]["priority"] = priority
-            config.USER_STATES[user_id] = "sos_confirm"
+            bot_config.USER_DATA[user_id]["priority"] = priority
+            bot_config.USER_STATES[user_id] = "sos_confirm"
             
-            first_name = config.USER_DATA[user_id].get("first_name", "ผู้แจ้ง")
-            last_name = config.USER_DATA[user_id].get("last_name", "ทั่วไป")
-            phone = config.USER_DATA[user_id].get("phone", "-")
+            first_name = bot_config.USER_DATA[user_id].get("first_name", "ผู้แจ้ง")
+            last_name = bot_config.USER_DATA[user_id].get("last_name", "ทั่วไป")
+            phone = bot_config.USER_DATA[user_id].get("phone", "-")
             
             if sheets_client:
                 try:
-                    sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
+                    sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
                     users_ws = sheet.worksheet("users")
                     rows = users_ws.get_all_records()
                     for r in rows:
@@ -243,28 +244,28 @@ def handle_text_message(event):
                             last_name = r.get("last_name", "")
                             phone = r.get("phone", "-")
                             
-                            if user_id not in config.USER_DATA:
-                                config.USER_DATA[user_id] = {}
-                            config.USER_DATA[user_id]["first_name"] = first_name
-                            config.USER_DATA[user_id]["last_name"] = last_name
-                            config.USER_DATA[user_id]["phone"] = phone
+                            if user_id not in bot_config.USER_DATA:
+                                bot_config.USER_DATA[user_id] = {}
+                            bot_config.USER_DATA[user_id]["first_name"] = first_name
+                            bot_config.USER_DATA[user_id]["last_name"] = last_name
+                            bot_config.USER_DATA[user_id]["phone"] = phone
                             break
                 except Exception as e:
                     print(f"Failed to check user registration: {e}")
             
             summary_text = (
                 "🚨 สรุปคำขอรับการช่วยเหลือ SOS 🚨\n\n"
-                f" 👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
-                f" 📞 เบอร์โทรศัพท์: {phone}\n"
-                f" 📍 พิกัดแจ้งเหตุ: {data.get('latitude', '0')}, {data.get('longitude', '0')}\n"
-                f" 👥 สมาชิกติดในบ้าน: {data.get('people_count', '1')} คน\n"
-                f" 👶 เด็กเล็ก: {data.get('children', 'NO')}\n"
-                f" 🧓 ผู้สูงอายุ: {data.get('elderly', 'NO')}\n"
-                f" 🏥 ผู้ป่วยติดเตียง: {data.get('bedridden', 'NO')}\n"
-                f" 🐶 สัตว์เลี้ยง: {data.get('pets', 'NO')}\n"
-                f" 🌊 ระดับน้ำโดยประมาณ: {data.get('water_level', '-')}\n"
-                f" 📝 รายละเอียดอื่น ๆ: {data.get('note', '-')}\n\n"
-                f" 📊 ประเมินความเร็วช่วยเหลือ: {priority}\n\n"
+                f"👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
+                f"📞 เบอร์โทรศัพท์: {phone}\n"
+                f"📍 พิกัดแจ้งเหตุ: {data.get('latitude', '0')}, {data.get('longitude', '0')}\n"
+                f"👥 สมาชิกติดในบ้าน: {data.get('people_count', '1')} คน\n"
+                f"👶 เด็กเล็ก: {data.get('children', 'NO')}\n"
+                f"🧓 ผู้สูงอายุ: {data.get('elderly', 'NO')}\n"
+                f"🏥 ผู้ป่วยติดเตียง: {data.get('bedridden', 'NO')}\n"
+                f"🐶 สัตว์เลี้ยง: {data.get('pets', 'NO')}\n"
+                f"🌊 ระดับน้ำโดยประมาณ: {data.get('water_level', '-')}\n"
+                f"📝 รายละเอียดอื่น ๆ: {data.get('note', '-')}\n\n"
+                f"📊 ประเมินความเร็วช่วยเหลือ: {priority}\n\n"
                 "ต้องการส่งข้อมูลเพื่อยืนยันแจ้งกู้ภัยหรือไม่ครับ? (กรุณากดเลือกปุ่มด้านล่าง)"
             )
             
@@ -274,13 +275,13 @@ def handle_text_message(event):
                     QuickReplyButton(action=MessageAction(label="ยกเลิกและแก้ไขใหม่", text="ยกเลิกและแก้ไขใหม่"))
                 ]
             )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
             return
 
         elif state == "sos_confirm":
             if "ยืนยัน" in user_text:
-                data = config.USER_DATA.pop(user_id, {})
-                config.USER_STATES.pop(user_id, None)
+                data = bot_config.USER_DATA.pop(user_id, {})
+                bot_config.USER_STATES.pop(user_id, None)
                 
                 today_str = datetime.datetime.now().strftime("%Y%m%d")
                 random_suffix = datetime.datetime.now().strftime("%f")[:4]
@@ -289,7 +290,7 @@ def handle_text_message(event):
                 success = False
                 if sheets_client:
                     try:
-                        sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
+                        sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
                         sos_ws = sheet.worksheet("sos_requests")
                         sos_ws.append_row([
                             case_id,
@@ -323,55 +324,55 @@ def handle_text_message(event):
                         f"🎉 บันทึกสัญญาณ SOS จำลองสำเร็จแล้วครับ!\n🎫 เลขเคสอ้างอิง: {case_id}\n\n"
                         "*(หมายเหตุ: ระบบยังไม่สามารถเขียนลงแผ่นงาน Google Sheets ได้เนื่องจากรหัสสิทธิ์สเปรดชีตขัดข้อง แต่พิกัดของคุณยืนยันบนระบบบอตแล้วครับ)"
                     )
-                config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
                 return
             else:
-                config.USER_STATES.pop(user_id, None)
-                config.USER_DATA.pop(user_id, None)
-                config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกเคสเดิมและล้างข้อมูลเรียบร้อยแล้วครับ คุณสามารถกดปุ่มเริ่ม SOS ใหม่อีกครั้งได้ทันทีครับ"))
+                bot_config.USER_STATES.pop(user_id, None)
+                bot_config.USER_DATA.pop(user_id, None)
+                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกเคสเดิมและล้างข้อมูลเรียบร้อยแล้วครับ คุณสามารถกดปุ่มเริ่ม SOS ใหม่อีกครั้งได้ทันทีครับ"))
                 return
 
         # ==================== ส่วนที่ 11.5: ดักจับสัญญานเมื่อพิมพ์ข้อความตอบกลับตามหมวดอื่นย้อนกลับ ====================
         elif state == "waiting_emergency_type":
-            config.USER_STATES.pop(user_id, None)
+            bot_config.USER_STATES.pop(user_id, None)
             prompt = f"ผู้ประสบภัยต้องการติดต่อขอกู้ภัยด้วยเรื่องเฉพาะหน้าคือ: '{user_text}' โปรดระบุเบอร์โทรฉุกเฉินและประสานงานกู้ภัยอย่างสั้น กระชับและสุภาพ"
             try:
-                res = config.gemini_model.generate_content(prompt)
-                reply = config.clean_text_for_line(res.text.strip())
+                res = bot_config.gemini_model.generate_content(prompt)
+                reply = bot_config.clean_text_for_line(res.text.strip())
             except:
                 reply = "🚨 แนะนำโทรประสานงานเร่งด่วนที่สายด่วนกู้ชีพ 1669 หรือ สายด่วน ปภ. 1784 ครับ"
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
             return
 
         elif state == "waiting_first_aid_detail":
-            config.USER_STATES.pop(user_id, None)
+            bot_config.USER_STATES.pop(user_id, None)
             prompt = f"ผู้ใช้ต้องการคำแนะนำวิธีการอพยพจากสถานการณ์อุทกภัย: '{user_text}' ในฐานะ FLOODCARE AI โปรดแนะนำขั้นตอนการหนีภัยและเตรียมตัวอพยพเฉพาะหน้าที่สั้น กระชับ เป็นขั้นเป็นตอน (1, 2, 3) เน้นความปลอดภัย และความมีสติ หลีกเลี่ยงข้อความที่ยาวและเครื่องหมายดอกจัน"
             try:
-                res = config.gemini_model.generate_content(prompt)
-                reply = config.clean_text_for_line(res.text.strip())
+                res = bot_config.gemini_model.generate_content(prompt)
+                reply = bot_config.clean_text_for_line(res.text.strip())
             except:
                 reply = "🏃 ปลอดภัยไว้ก่อนนะครับ! แนะนำให้มีสติ สวมเสื้อชูชีพหรือเตรียมอุปกรณ์ลอยตัว ตัดกระแสไฟในบ้าน และอพยพขึ้นพิกัดที่สูงตามการนำของเจ้าหน้าที่ครับ"
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
             return
 
         elif state == "waiting_water_location":
-            config.USER_STATES.pop(user_id, None)
+            bot_config.USER_STATES.pop(user_id, None)
             prompt = f"ผู้ใช้ต้องการประเมินสถานการณ์น้ำหรือเช็กข้อมูลน้ำท่วมในพื้นที่: '{user_text}' โปรดแนะนำแนวทางเฝ้าระวังภัยพิบัติอย่างสั้นและกระชับ"
             try:
-                res = config.gemini_model.generate_content(prompt)
-                reply = config.clean_text_for_line(res.text.strip())
+                res = bot_config.gemini_model.generate_content(prompt)
+                reply = bot_config.clean_text_for_line(res.text.strip())
             except:
                 reply = "🌊 แนะนำติดตามการรายงานระดับน้ำอย่างใกล้ชิด และสามารถเช็กระดับลุ่มน้ำได้ผ่านแอปฯ ThaiWater ครับ"
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
             return
 
         # ==================== ฟีเจอร์สแกนสืบค้นหาศูนย์อพยพด้วยชื่อจังหวัดหรือชื่ออำเภอจาก Google Sheets ====================
         elif state == "waiting_shelter_location":
-            config.USER_STATES.pop(user_id, None)
+            bot_config.USER_STATES.pop(user_id, None)
             shelter_list = []
             db_connected = False
             
-            clean_sheet_id = config.extract_sheet_id(config.GOOGLE_SHEET_ID)
+            clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
             if sheets_client:
                 try:
                     sheet = sheets_client.open_by_key(clean_sheet_id)
@@ -383,7 +384,7 @@ def handle_text_message(event):
                         sh_district = str(row.get('District', '')).strip()
                         
                         if user_text in sh_name or user_text in sh_province or user_text in sh_district:
-                            vacancy_status = config.check_shelter_vacancy(row.get('Capacity', 100), row.get('Occupancy', 0))
+                            vacancy_status = bot_config.check_shelter_vacancy(row.get('Capacity', 100), row.get('Occupancy', 0))
                             shelter_list.append({
                                 "name": sh_name,
                                 "province": sh_province,
@@ -412,13 +413,13 @@ def handle_text_message(event):
                     )
                 reply_text += "⚠️ โปรดโทรตรวจสอบความจุกับทางศูนย์อพยพก่อนออกเดินทาง หรือเดินทางด้วยความระมัดระวังสูงสุดนะครับ"
                 
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
         # ==================== ฟีเจอร์แจ้งความต้องการเพิ่มเติม (แผ่นงานย่อย user_needs) ====================
         elif state == "waiting_needs_form":
-            config.USER_STATES.pop(user_id, None)
-            clean_sheet_id = config.extract_sheet_id(config.GOOGLE_SHEET_ID)
+            bot_config.USER_STATES.pop(user_id, None)
+            clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
             success = False
             if sheets_client:
                 try:
@@ -440,7 +441,7 @@ def handle_text_message(event):
                     f"🟢 บันทึกความต้องการจำลองของคุณสำเร็จแล้วครับ!\n📝 ความประสงค์: {user_text}\n\n"
                     "*(หมายเหตุ: ระบบยังไม่สามารถเขียนลงแผ่นงาน Google Sheets ได้เนื่องจากสเปรดชีตขัดข้องสิทธิ์เข้าถึง)"
                 )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
     # ==================== ส่วนที่ 11.6: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
@@ -449,7 +450,7 @@ def handle_text_message(event):
         contact_list = []
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
+                sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
                 contacts_worksheet = sheet.worksheet("Contacts")
                 rows = contacts_worksheet.get_all_records()
                 for r in rows:
