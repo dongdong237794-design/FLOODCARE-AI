@@ -31,7 +31,7 @@ def callback():
     return 'OK'
 
 # =============================================================================
-# 2. ตรวจจับการเพิ่มเพื่อนของบอตเป็นครั้งแรก (Follow Event) เพื่อบังคับลงทะเบียนประวัติ
+# 2. ตรวจจับการเพิ่มเพื่อนของบอตเป็นครั้งแรก (Follow Event)
 # =============================================================================
 @cfg.handler.add(FollowEvent)
 def handle_follow_event(event):
@@ -43,7 +43,7 @@ def handle_follow_event(event):
     
     welcome_text = (
         "🎉 ยินดีต้อนรับเข้าสู่ระบบ FLOODCARE AI ผู้ช่วยกู้ภัยอุทกภัยอัจฉริยะครับ!\n\n"
-        "เพื่อประโยชน์สูงสุดในการแจ้งพิกัดและส่งต่อข้อมูลประสานงานทีมกู้ชีพกรณีเกิดเหตุอุทกภัย "
+        "เพื่อประโยชน์สูงสุดในการประสานงานช่วยเหลือกรณีเกิดเหตุอุทกภัย "
         "โปรดลงทะเบียนประวัติผู้ประสบภัยสั้นๆ ก่อนเริ่มใช้งานระบบครับ\n\n"
         "📝 **ขั้นตอนที่ 1:** โปรดพิมพ์ส่งเฉพาะ **'ชื่อจริง'** ของคุณส่งเข้ามาในแชทนี้ได้เลยครับ (เช่น 'สมชาย')"
     )
@@ -74,13 +74,13 @@ def handle_text_message(event):
         cfg.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
         return
 
-    # คำสั่งเคลียร์ระบบ
+    # คำสั่งยกเลิกสถานะ
     if user_text == "ยกเลิก":
         cfg.USER_STATES.pop(user_id, None)
         cfg.USER_DATA.pop(user_id, None)
         cfg.line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="❌ ยกเลิกขั้นตอนการทำงานปัจจุบันเรียบร้อยแล้ว คุณสามารถเลือกเมนูหลักใหม่ได้ทันทีครับ")
+            TextSendMessage(text="❌ ยกเลิกขั้นตอนปัจจุบันเรียบร้อยแล้ว คุณสามารถเลือกเมนูหลักใหม่ได้ทันทีครับ")
         )
         return
 
@@ -137,20 +137,20 @@ def handle_text_message(event):
         if "selected_groups" not in cfg.USER_DATA[user_id]:
             cfg.USER_DATA[user_id]["selected_groups"] = []
 
-        if user_text == "👉 ยืนยันการเลือกกลุ่ม":
+        if user_text == "👉 ยืนยันเลือกกลุ่ม":
             if not cfg.USER_DATA[user_id]["selected_groups"]:
                 cfg.USER_DATA[user_id]["selected_groups"].append("ผู้ใหญ่ทั่วไป")
             
             cfg.USER_STATES[user_id] = "sos_step3"
             qr = QuickReply(items=[
-                QuickReplyButton(action=MessageAction(label="🔴 วิกฤต (มิดหัว/ติดบนหลังคา)", text="วิกฤตสูงสุด")),
-                QuickReplyButton(action=MessageAction(label="🟠 สูง (ระดับเอวถึงหน้าอก)", text="ระดับสูง")),
-                QuickReplyButton(action=MessageAction(label="🟢 ต่ำ (ระดับหน้าแข้ง)", text="ปานกลางปกติ"))
+                QuickReplyButton(action=MessageAction(label="🔴 วิกฤต (มิดหลังคา)", text="วิกฤตสูงสุด")),
+                QuickReplyButton(action=MessageAction(label="🟠 สูง (ระดับเอว)", text="ระดับสูง")),
+                QuickReplyButton(action=MessageAction(label="🟢 ต่ำ (ระดับเข่า)", text="ปานกลางปกติ"))
             ])
             cfg.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🌊 **SOS - ขั้นที่ 3**\nโปรดระบุระดับความสูงของน้ำที่ท่วมในบ้านปัจจุบันครับ:", quick_reply=qr))
             return
         
-        # เพิ่มสิ่งที่เลือกเข้าไปในลิสต์ป้องกันซ้ำ
+        # เพิ่มสิ่งที่เลือกเข้าไปในลิสต์ป้องกันการซ้ำ
         if user_text not in cfg.USER_DATA[user_id]["selected_groups"]:
             cfg.USER_DATA[user_id]["selected_groups"].append(user_text)
             
@@ -159,12 +159,12 @@ def handle_text_message(event):
         qr = QuickReply(items=[
             QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก", text="เด็กเล็ก")),
             QuickReplyButton(action=MessageAction(label="🧓 ผู้สูงอายุ", text="ผู้สูงอายุ")),
-            QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วยติดเตียง", text="ผู้ป่วยติดเตียง")),
-            QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="สัตว์เลี้ยง")),
-            QuickReplyButton(action=MessageAction(label="👉 ยืนยันการเลือกกลุ่ม", text="👉 ยืนยันการเลือกกลุ่ม"))
+            QuickReplyButton(action=MessageAction(label="🚑 ติดเตียง", text="ผู้ป่วยติดเตียง")),
+            QuickReplyButton(action=MessageAction(label="🐱 สัตว์เลี้ยง", text="สัตว์เลี้ยง")),
+            QuickReplyButton(action=MessageAction(label="👉 ยืนยันเลือกกลุ่ม", text="👉 ยืนยันเลือกกลุ่ม"))
         ])
         
-        msg = f"🛒 เลือกสะสมแล้ว: [{current_selection}]\n\nคุณสามารถกดเพิ่มกลุ่มอื่นได้อีก หรือกดปุ่ม **'👉 ยืนยันการเลือกกลุ่ม'** ด้านล่างได้ทันทีครับ"
+        msg = f"🛒 เลือกสะสมแล้ว: [{current_selection}]\n\nคุณสามารถกดเพิ่มกลุ่มอื่นได้อีก หรือกดปุ่ม **'👉 ยืนยันเลือกกลุ่ม'** ด้านล่างได้ทันทีครับ"
         cfg.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg, quick_reply=qr))
         return
 
@@ -213,7 +213,7 @@ def handle_text_message(event):
 
             if success:
                 reply_text = (
-                    f"🚀 **ส่งสัญญาณ SOS คลื่นความถี่วิทยุกู้ภัยกึ่งออนไลน์สำเร็จ!**\n\n"
+                    f"🚀 **ส่งสัญญาณ SOS แก่ศูนย์กู้ภัยสำเร็จ!**\n\n"
                     f"🎫 รหัสเคสของคุณ: `{case_id}`\n"
                     f"📊 ลำดับวิกฤต: {data.get('severity')}\n\n"
                     "🛡️ **คำแนะนำระหว่างรอเรือกู้ชีพเข้าพื้นที่:**\n"
@@ -283,7 +283,7 @@ def handle_text_message(event):
     # ==========================================
     if user_text == "ตรวจสอบระดับน้ำ":
         cfg.USER_STATES[user_id] = "waiting_water_location"
-        qr = QuickReply(items=[QuickReplyButton(action=LocationAction(label="แชร์พิกัดเช็กระดับน้ำ"))])
+        qr = QuickReply(items=[QuickReplyButton(action=LocationAction(label="📍 เช็กระดับน้ำ"))])
         cfg.line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="🌊 โปรดกดปุ่มแชร์พิกัด 'Location' ด้านล่าง เพื่อให้ระบบคำนวณระดับน้ำจากสถานีที่ใกล้ตัวคุณที่สุดครับ", quick_reply=qr)
@@ -292,7 +292,7 @@ def handle_text_message(event):
 
     elif user_text == "ศูนย์พักพิง":
         cfg.USER_STATES[user_id] = "waiting_shelter_location"
-        qr = QuickReply(items=[QuickReplyButton(action=LocationAction(label="แชร์พิกัดหาศูนย์พักพิง"))])
+        qr = QuickReply(items=[QuickReplyButton(action=LocationAction(label="📍 หาศูนย์พักพิง"))])
         cfg.line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="🏠 โปรดกดแชร์พิกัด 'Location' ด้านล่าง เพื่อค้นหาศูนย์พักพิงที่มีที่ว่างและอยู่ใกล้คุณที่สุดในขณะนี้ครับ", quick_reply=qr)
@@ -319,7 +319,7 @@ def handle_text_message(event):
             except Exception as e:
                 print(f"Error checking register: {e}")
 
-        # ลอจิกพิเศษ Fast-Track SOS: หากไม่ได้ลงทะเบียนไว้แต่เดิม จะไม่บังคับล็อกอิน แต่จะตั้งชื่อชั่วคราวและส่งพิกัดช่วยชีวิตทันที!
+        # Fast-Track SOS: หากไม่ได้ลงทะเบียนไว้แต่เดิม จะไม่บังคับล็อกอิน แต่จะตั้งชื่อชั่วคราวและส่งพิกัดช่วยชีวิตทันที!
         if registered:
             cfg.USER_DATA[user_id] = {
                 "first_name": first_name,
@@ -336,13 +336,13 @@ def handle_text_message(event):
             reply_text = "🚨 **แจ้งกู้ภัยฉุกเฉินเร่งด่วน!**\nระบบไม่พบข้อมูลลงทะเบียนของคุณล่วงหน้า แต่เนื่องจากเป็นเคสวิกฤตเร่งด่วน ระบบได้ตั้งประวัติให้ชั่วคราวแล้ว โปรดกดปุ่มแชร์พิกัด 'Location' สีเขียวด้านล่างเพื่อยืนยันพิกัดจุดแจ้งเหตุให้กู้ภัยทันทีครับ!"
 
         cfg.USER_STATES[user_id] = "sos_location"
-        qr = QuickReply(items=[QuickReplyButton(action=LocationAction(label="กดส่งพิกัดตำแหน่งแจ้งเหตุ SOS"))])
+        qr = QuickReply(items=[QuickReplyButton(action=LocationAction(label="📍 ส่งพิกัดกู้ภัย SOS"))])
         cfg.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text, quick_reply=qr))
         return
 
     elif user_text in ["แจ้งความต้องการเพิ่มเติม", "ความต้องการ", "แจ้งความต้องการ"]:
         cfg.USER_STATES[user_id] = "needs_location"
-        qr = QuickReply(items=[QuickReplyButton(action=LocationAction(label="แชร์พิกัดรับของบรรเทาทุกข์"))])
+        qr = QuickReply(items=[QuickReplyButton(action=LocationAction(label="📍 พิกัดรับสิ่งของ"))])
         cfg.line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="📦 **ขั้นตอนแจ้งรับของบรรเทาทุกข์**\nโปรดกดแชร์พิกัด 'Location' ด้านล่าง เพื่อระบุตำแหน่งที่คุณอยู่ ณ ปัจจุบันสำหรับรับถุงยังชีพครับ", quick_reply=qr)
@@ -517,9 +517,9 @@ def handle_location_message(event):
             qr = QuickReply(items=[
                 QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก", text="เด็กเล็ก")),
                 QuickReplyButton(action=MessageAction(label="🧓 ผู้สูงอายุ", text="ผู้สูงอายุ")),
-                QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วยติดเตียง", text="ผู้ป่วยติดเตียง")),
-                QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="สัตว์เลี้ยง")),
-                QuickReplyButton(action=MessageAction(label="👉 ยืนยันการเลือกกลุ่ม", text="👉 ยืนยันการเลือกกลุ่ม"))
+                QuickReplyButton(action=MessageAction(label="🚑 ติดเตียง", text="ผู้ป่วยติดเตียง")),
+                QuickReplyButton(action=MessageAction(label="🐱 สัตว์เลี้ยง", text="สัตว์เลี้ยง")),
+                QuickReplyButton(action=MessageAction(label="👉 ยืนยันเลือกกลุ่ม", text="👉 ยืนยันการเลือกกลุ่ม"))
             ])
             cfg.line_bot_api.reply_message(
                 event.reply_token,
@@ -535,7 +535,7 @@ def handle_location_message(event):
             
             qr = QuickReply(items=[
                 QuickReplyButton(action=MessageAction(label="🍲 อาหาร/น้ำดื่ม", text="อาหาร/น้ำดื่ม")),
-                QuickReplyButton(action=MessageAction(label="💊 ยารักษาโรค", text="ยารักษาโรค/เวชภัณฑ์")),
+                QuickReplyButton(action=MessageAction(label="💊 ยารักษาโรค", text="ยารักษาโรค")),
                 QuickReplyButton(action=MessageAction(label="👶 ของใช้เด็กอ่อน", text="ของใช้เด็กอ่อน")),
                 QuickReplyButton(action=MessageAction(label="🧼 ของใช้ส่วนตัว", text="ของใช้ส่วนตัว")),
                 QuickReplyButton(action=MessageAction(label="🔦 อุปกรณ์ส่องสว่าง", text="อุปกรณ์ส่องสว่าง")),
@@ -573,7 +573,3 @@ def handle_image_message(event):
     if state == "sos_step4":
         cfg.USER_DATA[user_id]["image_url"] = "แนบรูปถ่ายสภาพระดับน้ำประกอบพิกัดมายังแผนที่"
         send_sos_summary(event, user_id)
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
