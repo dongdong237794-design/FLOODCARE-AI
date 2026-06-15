@@ -559,4 +559,4 @@ def dashboard():
     </body>
     </html>
     """
-    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, urgent_count=critical_count, high_count=high_count, bedridden_count=bedridden_count, sos_map_data=sos_map_data, shelter_map_data=shelter_map_data)
+    return render_template_string(html_template, sos_cases=sos_cases, shelters=shelters, error_msg=error_msg, total_cases=total_cases, critical_count=critical_count, high_count=high_count, bedridden_count=bedridden_count, sos_map_data=sos_map_data, shelter_map_data=shelter_map_data)
