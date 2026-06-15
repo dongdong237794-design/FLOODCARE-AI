@@ -27,7 +27,7 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash",
+    model_name="gemini-2.0-flash",
     system_instruction=(
         "คุณคือ FLOODCARE AI ผู้ช่วยอัจฉริยะและผู้เชี่ยวชาญด้านอุทกภัยประจำประเทศไทย "
         "มีบทบาทคอยตอบคำถามและให้คำแนะนำในการเอาชีวิตรอดและการรับมือภัยน้ำท่วมอย่างถูกต้องตามหลักสากล\n\n"
@@ -77,7 +77,16 @@ def extract_sheet_id(sheet_var):
                 return sub_parts[0].strip()
     return sheet_var.strip()
 
-# 5. [Web Scraper] ดึงพิกัด GPS มาขูดข้อมูลตรวจสภาพอากาศ ปริมาณฝน ทิศทางลม เรียลไทม์
+# 5. ฟังก์ชันคำนวณระยะทาง Haversine (หากิโลเมตรระหว่าง 2 พิกัด GPS)
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371  # รัศมีโลกเป็นกิโลเมตร
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+# 6. [Web Scraper] ดึงพิกัด GPS มาขูดข้อมูลตรวจสภาพอากาศ ปริมาณฝน ทิศทางลม เรียลไทม์
 def get_live_weather_scraper(lat, lon):
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
@@ -102,7 +111,7 @@ def get_live_weather_scraper(lat, lon):
         print(f"Weather Scraper Error: {e}")
         return "🌡️ อุณหภูมิปัจจุบัน: 28.5 °C\n🌧️ สภาพอากาศ: ท้องฟ้าครึ้มมีเมฆฝนเฝ้าระวัง"
 
-# 6. [Web Scraper] ขูดระดับการไหลของน้ำป่าหลากสะสม ณ พิกัดจริง (River Runoff Scraper)
+# 7. [Web Scraper] ขูดระดับการไหลของน้ำป่าหลากสะสม ณ พิกัดจริง (River Runoff Scraper)
 def get_live_water_scraper(lat, lon):
     try:
         url = f"https://flood-api.open-meteo.com/v1/flood?latitude={lat}&longitude={lon}&daily=river_discharge"
@@ -140,7 +149,7 @@ def get_live_water_scraper(lat, lon):
             "icon": "🟢"
         }
 
-# 7. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
+# 8. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup)
 def setup_sheets_automatically(sheet):
     try:
         existing_sheets = [w.title for w in sheet.worksheets()]
@@ -232,7 +241,7 @@ def setup_sheets_automatically(sheet):
 SHEETS_INITIALIZED = False
 LAST_SHEETS_ERROR = "ยังไม่ได้เปิดใช้งานการเชื่อมต่อ"
 
-# 8. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client)
+# 9. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client)
 def get_sheets_client():
     global SHEETS_INITIALIZED, LAST_SHEETS_ERROR
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
