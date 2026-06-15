@@ -18,7 +18,10 @@ app = Flask(__name__)
 # ลงทะเบียน Blueprint ดึงหน้าต่างเว็บมาทำงาน
 app.register_blueprint(dashboard_bp)
 
+
+# ===========================
 # 10. Webhook Route สำหรับรับสัญญาน LINE
+# ===========================
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -29,18 +32,23 @@ def callback():
         abort(400)
     return 'OK'
 
-# 11. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ (Intake State Machine)
+
+# ================================================================
+# 11. รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ
+# ================================================================
 @bot_config.handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_text = event.message.text.strip()
     user_id = event.source.user_id
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
     # ดึงระดับสถานะการคุยปัจจุบัน
     state = bot_config.USER_STATES.get(user_id)
     sheets_client = bot_config.get_sheets_client()
 
-    # 11.1 ฟีเจอร์พิมพ์ "ยกเลิก" เพื่อเคลียร์สิทธิ์แชตและรีสตาร์ตคุยใหม่ได้ตลอดเวลา
+    # ===========================
+    # 11.1 ฟีเจอร์พิมพ์ "ยกเลิก"
+    # ===========================
     if user_text == "ยกเลิก":
         bot_config.USER_STATES.pop(user_id, None)
         bot_config.USER_DATA.pop(user_id, None)
@@ -50,7 +58,9 @@ def handle_text_message(event):
         )
         return
 
-    # 11.2 ดักจับกรณีผู้ใช้เผลอพิมพ์ตัวอักษรเข้ามาระหว่างที่ระบบรอยิงพิกัด GPS ของ SOS
+    # ===========================
+    # 11.2 ดักจับ SOS location state
+    # ===========================
     if state == "sos_location":
         location_quick_reply = QuickReply(
             items=[
@@ -66,7 +76,9 @@ def handle_text_message(event):
         )
         return
 
-    # ==================== ส่วนที่ 11.3: ดักจับและประมวลสถานะลงทะเบียนผู้ใช้รายใหม่ (First-Time User Registration) ====================
+    # ===========================
+    # 11.3 สถานะลงทะเบียนผู้ใช้รายใหม่
+    # ===========================
     if state == "register_first_name":
         if user_id not in bot_config.USER_DATA:
             bot_config.USER_DATA[user_id] = {}
@@ -74,7 +86,7 @@ def handle_text_message(event):
         bot_config.USER_STATES[user_id] = "register_last_name"
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ระบุ 'นามสกุล' ของคุณเพื่อใช้ยืนยันตัวตนกับกู้ภัยครับ"))
         return
-        
+
     elif state == "register_last_name":
         if user_id not in bot_config.USER_DATA:
             bot_config.USER_DATA[user_id] = {}
@@ -82,21 +94,19 @@ def handle_text_message(event):
         bot_config.USER_STATES[user_id] = "register_phone"
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ระบุ 'เบอร์โทรศัพท์มือถือ' 9-10 หลักของคุณสำหรับการติดต่อกลับครับ"))
         return
-        
+
     elif state == "register_phone":
         if user_id not in bot_config.USER_DATA:
             bot_config.USER_DATA[user_id] = {}
-        # คัดกรองเว้นวรรคและดึงหมายเลขเบอร์โทรศัพท์จริง
         clean_phone = bot_config.extract_number(user_text)
         if len(clean_phone) < 9 or len(clean_phone) > 10:
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ เบอร์โทรศัพท์ไม่ถูกต้องครับ! โปรดพิมพ์หมายเลขมือถือเฉพาะตัวเลข 9-10 หลักใหม่อีกครั้งครับ (เช่น 0812345678)"))
             return
-            
+
         first_name = bot_config.USER_DATA[user_id].get("temp_first_name", "ผู้แจ้ง")
         last_name = bot_config.USER_DATA[user_id].get("temp_last_name", "ทั่วไป")
         register_date = datetime.datetime.now().strftime("%Y-%m-%d")
-        
-        # บันทึกข้อมูลเข้าตารางผู้ใช้ 'users'
+
         success = False
         if sheets_client:
             try:
@@ -106,15 +116,12 @@ def handle_text_message(event):
                 success = True
             except Exception as e:
                 print(f"Failed to save user to Sheets: {e}")
-                
-        # ปรับโปรไฟล์ชั่วคราวในหน่วยความจำ (In-memory Backup) เพื่อให้ระบบใช้งานต่อได้แม้ชีตพัง
+
         bot_config.USER_DATA[user_id]["first_name"] = first_name
         bot_config.USER_DATA[user_id]["last_name"] = last_name
         bot_config.USER_DATA[user_id]["phone"] = clean_phone
-        
-        # ล้างสถานะลงทะเบียนเข้าสู่ระบบปกติ
         bot_config.USER_STATES.pop(user_id, None)
-        
+
         if success:
             reply_text = (
                 f"🎉 ยินดีต้อนรับครับ คุณ {first_name} {last_name}!\n"
@@ -129,13 +136,14 @@ def handle_text_message(event):
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
-    # ==================== ส่วนที่ 11.4: ระบบดักจับการพิมพ์โต้ตอบระหว่างทำแบบสอบถาม SOS (Steps 2-8) ====================
+    # ===========================
+    # 11.4 ระบบ SOS Steps 2-8
+    # ===========================
     if state:
         if user_id not in bot_config.USER_DATA:
             bot_config.USER_DATA[user_id] = {}
 
         if state == "sos_q2":
-            # คัดเฉพาะตัวเลขออกมาจากข้อความเว้นวรรคและข้อความพิมพ์ผิดพลาด
             cleaned_count = bot_config.extract_number(user_text)
             bot_config.USER_DATA[user_id]["people_count"] = cleaned_count
             bot_config.USER_STATES[user_id] = "sos_q3"
@@ -147,7 +155,7 @@ def handle_text_message(event):
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 3: ในบ้านมีเด็กเล็ก (อายุต่ำกว่า 12 ปี) หรือไม่ครับ?", quick_reply=quick_reply))
             return
-            
+
         elif state == "sos_q3":
             val = bot_config.parse_yes_no(user_text)
             bot_config.USER_DATA[user_id]["children"] = val
@@ -160,7 +168,7 @@ def handle_text_message(event):
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 4: ในบ้านมีผู้สูงอายุหรือไม่ครับ?", quick_reply=quick_reply))
             return
-            
+
         elif state == "sos_q4":
             val = bot_config.parse_yes_no(user_text)
             bot_config.USER_DATA[user_id]["elderly"] = val
@@ -173,7 +181,7 @@ def handle_text_message(event):
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 5: ในบ้านมีผู้ป่วยติดเตียงหรือไม่ครับ?", quick_reply=quick_reply))
             return
-            
+
         elif state == "sos_q5":
             val = bot_config.parse_yes_no(user_text)
             bot_config.USER_DATA[user_id]["bedridden"] = val
@@ -186,7 +194,7 @@ def handle_text_message(event):
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 6: มีสัตว์เลี้ยงที่ต้องอพยพร่วมด้วยหรือไม่ครับ?", quick_reply=quick_reply))
             return
-            
+
         elif state == "sos_q6":
             val = bot_config.parse_yes_no(user_text)
             bot_config.USER_DATA[user_id]["pets"] = val
@@ -201,38 +209,38 @@ def handle_text_message(event):
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 7: ระดับน้ำท่วมบ้านในปัจจุบันโดยประมาณครับ?", quick_reply=quick_reply))
             return
-            
+
         elif state == "sos_q7":
             bot_config.USER_DATA[user_id]["water_level"] = user_text
             bot_config.USER_STATES[user_id] = "sos_q8"
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📌 Step 8: โปรดระบุข้อมูลเพิ่มเติมเฉพาะหน้าเพื่อแจ้งกู้ภัยครับ (เช่น น้ำท่วมมิดชั้นหนึ่ง, ไฟฟ้าดับ, ขาดแคลนอาหารหนัก หรือไม่ระบุ)"))
             return
-            
+
         elif state == "sos_q8":
             bot_config.USER_DATA[user_id]["note"] = user_text
-            
+
             data = bot_config.USER_DATA[user_id]
             bedridden = data.get("bedridden", "NO")
             water_level = data.get("water_level", "")
             elderly = data.get("elderly", "NO")
             children = data.get("children", "NO")
-            
+
             is_critical_water = "สูงกว่า 1 เมตร" in water_level or "1 เมตร" in water_level
-            
+
             if bedridden == "YES" or is_critical_water or (bedridden == "YES" and elderly == "YES") or (bedridden == "YES" and children == "YES"):
                 priority = "🔴  CRITICAL (เร่งด่วนวิกฤตสูงสุด)"
             elif elderly == "YES" or children == "YES" or "50 ซม." in water_level:
                 priority = "🟠  HIGH (ความเสี่ยงสูง)"
             else:
                 priority = "🟢  NORMAL (สถานการณ์ปกติ)"
-                
+
             bot_config.USER_DATA[user_id]["priority"] = priority
             bot_config.USER_STATES[user_id] = "sos_confirm"
-            
+
             first_name = bot_config.USER_DATA[user_id].get("first_name", "ผู้แจ้ง")
             last_name = bot_config.USER_DATA[user_id].get("last_name", "ทั่วไป")
             phone = bot_config.USER_DATA[user_id].get("phone", "-")
-            
+
             if sheets_client:
                 try:
                     sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
@@ -243,7 +251,7 @@ def handle_text_message(event):
                             first_name = r.get("first_name", "ผู้แจ้ง")
                             last_name = r.get("last_name", "")
                             phone = r.get("phone", "-")
-                            
+
                             if user_id not in bot_config.USER_DATA:
                                 bot_config.USER_DATA[user_id] = {}
                             bot_config.USER_DATA[user_id]["first_name"] = first_name
@@ -252,8 +260,7 @@ def handle_text_message(event):
                             break
                 except Exception as e:
                     print(f"Failed to check user registration: {e}")
-            
-            # การจัดฟอร์แมตแสดงผลสรุปเคส SOS เรียงเป็นบรรทัดตามแบบกำหนดอย่างครบถ้วน
+
             summary_text = (
                 "🚨 สรุปคำขอรับการช่วยเหลือ SOS 🚨\n\n"
                 f"👤 ชื่อ-นามสกุล: {first_name} {last_name}\n"
@@ -269,7 +276,7 @@ def handle_text_message(event):
                 f"📊 ประเมินความเร็วช่วยเหลือ: {priority}\n\n"
                 "ต้องการส่งข้อมูลเพื่อยืนยันแจ้งกู้ภัยหรือไม่ครับ? (กรุณากดเลือกปุ่มด้านล่าง)"
             )
-            
+
             quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label="ยืนยันการส่งข้อมูล", text="ยืนยันการส่งข้อมูล")),
@@ -283,11 +290,11 @@ def handle_text_message(event):
             if "ยืนยัน" in user_text:
                 data = bot_config.USER_DATA.pop(user_id, {})
                 bot_config.USER_STATES.pop(user_id, None)
-                
+
                 today_str = datetime.datetime.now().strftime("%Y%m%d")
                 random_suffix = datetime.datetime.now().strftime("%f")[:4]
                 case_id = f"SOS-{today_str}-{random_suffix}"
-                
+
                 success = False
                 if sheets_client:
                     try:
@@ -312,7 +319,7 @@ def handle_text_message(event):
                         success = True
                     except Exception as e:
                         print(f"Failed to save SOS request: {e}")
-                        
+
                 if success:
                     reply_text = (
                         "🎉 ยืนยันบันทึกข้อมูลเข้ารหัสกู้ภัยออนไลน์เรียบร้อยแล้วครับ!\n\n"
@@ -333,7 +340,9 @@ def handle_text_message(event):
                 bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกเคสเดิมและล้างข้อมูลเรียบร้อยแล้วครับ คุณสามารถกดปุ่มเริ่ม SOS ใหม่อีกครั้งได้ทันทีครับ"))
                 return
 
-        # ==================== ส่วนที่ 11.5: ดักจับสัญญานเมื่อพิมพ์ข้อความตอบกลับตามหมวดอื่นย้อนกลับ ====================
+        # ===========================
+        # 11.5 สัญญานเมนูอื่นๆ
+        # ===========================
         elif state == "waiting_emergency_type":
             bot_config.USER_STATES.pop(user_id, None)
             prompt = f"ผู้ประสบภัยต้องการติดต่อขอกู้ภัยด้วยเรื่องเฉพาะหน้าคือ: '{user_text}' โปรดระบุเบอร์โทรฉุกเฉินและประสานงานกู้ภัยอย่างสั้น กระชับและสุภาพ"
@@ -357,6 +366,7 @@ def handle_text_message(event):
             return
 
         elif state == "waiting_water_location":
+            # ผู้ใช้พิมพ์ชื่อสถานที่แทนการแชร์ GPS
             bot_config.USER_STATES.pop(user_id, None)
             prompt = f"ผู้ใช้ต้องการประเมินสถานการณ์น้ำหรือเช็กข้อมูลน้ำท่วมในพื้นที่: '{user_text}' โปรดแนะนำแนวทางเฝ้าระวังภัยพิบัติอย่างสั้นและกระชับ"
             try:
@@ -367,12 +377,14 @@ def handle_text_message(event):
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
             return
 
-        # ==================== ฟีเจอร์สแกนสืบค้นหาศูนย์อพยพด้วยชื่อจังหวัดหรือชื่ออำเภอจาก Google Sheets ====================
+        # ===========================
+        # 11.5.1 ฟีเจอร์ค้นหาศูนย์อพยพ
+        # ===========================
         elif state == "waiting_shelter_location":
             bot_config.USER_STATES.pop(user_id, None)
             shelter_list = []
             db_connected = False
-            
+
             clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
             if sheets_client:
                 try:
@@ -383,7 +395,7 @@ def handle_text_message(event):
                         sh_name = str(row.get('Name', '')).strip()
                         sh_province = str(row.get('Province', '')).strip()
                         sh_district = str(row.get('District', '')).strip()
-                        
+
                         if user_text in sh_name or user_text in sh_province or user_text in sh_district:
                             vacancy_status = bot_config.check_shelter_vacancy(row.get('Capacity', 100), row.get('Occupancy', 0))
                             shelter_list.append({
@@ -413,11 +425,13 @@ def handle_text_message(event):
                         f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
                     )
                 reply_text += "⚠️ โปรดโทรตรวจสอบความจุกับทางศูนย์อพยพก่อนออกเดินทาง หรือเดินทางด้วยความระมัดระวังสูงสุดนะครับ"
-                
+
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
-        # ==================== ฟีเจอร์แจ้งความต้องการเพิ่มเติม (แผ่นงานย่อย user_needs) ====================
+        # ===========================
+        # 11.5.2 ฟีเจอร์แจ้งความต้องการเพิ่มเติม
+        # ===========================
         elif state == "waiting_needs_form":
             bot_config.USER_STATES.pop(user_id, None)
             clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
@@ -430,7 +444,7 @@ def handle_text_message(event):
                     success = True
                 except Exception as e:
                     print(f"Failed to save needs: {e}")
-                    
+
             if success:
                 reply_text = (
                     "🟢 ระบบทำการบันทึกความต้องการเพิ่มเติมของคุณเรียบร้อยแล้วครับ!\n\n"
@@ -445,7 +459,9 @@ def handle_text_message(event):
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
 
-    # ==================== ส่วนที่ 11.6: ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม ====================
+    # ===========================
+    # 11.6 ตรวจสอบการคลิกปุ่มหลักบนเมนู 6 ปุ่ม
+    # ===========================
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
         db_connected = False
         contact_list = []
@@ -459,7 +475,7 @@ def handle_text_message(event):
                 db_connected = True
             except Exception as e:
                 print(f"Failed to load contacts from sheet: {e}")
-                
+
         if db_connected and contact_list:
             reply_text = "📞 เบอร์โทรศัพท์ฉุกเฉินและหน่วยงานประสานงานกู้ภัยจริงในระบบ:\n\n" + "\n\n".join(contact_list)
         else:
@@ -471,7 +487,7 @@ def handle_text_message(event):
                 "🚨 ตำรวจทางหลวง 1193 (ประสานงานเดินทางเส้นทางน้ำท่วม)"
             )
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
+
     elif user_text == "ศูนย์พักพิง":
         bot_config.USER_STATES[user_id] = "waiting_shelter_location"
         location_quick_reply = QuickReply(
@@ -480,13 +496,13 @@ def handle_text_message(event):
             ]
         )
         bot_config.line_bot_api.reply_message(
-            event.reply_token, 
+            event.reply_token,
             TextSendMessage(
                 text="📍 โปรดกดแชร์พิกัด 'Location' ด้านล่างนี้ หรือพิมพ์บอกชื่ออำเภอ/จังหวัดที่คุณอยู่ในปัจจุบัน เพื่อให้ผมช่วยค้นหาศูนย์พักพิงจริงรอบตัวคุณครับ",
                 quick_reply=location_quick_reply
             )
         )
-        
+
     elif user_text == "ตรวจสอบระดับน้ำ":
         bot_config.USER_STATES[user_id] = "waiting_water_location"
         location_quick_reply = QuickReply(
@@ -495,27 +511,25 @@ def handle_text_message(event):
             ]
         )
         bot_config.line_bot_api.reply_message(
-            event.reply_token, 
+            event.reply_token,
             TextSendMessage(
-                text="🌊 โปรดกดปุ่มแชร์พิกัด 'Location' ด้านล่าง เพื่อให้ระบบค้นหาและรายงานสถานการณ์ระดับน้ำและระดับความรุนแรงจากสถานีตรวจวัดที่ใกล้ตัวคุณที่สุดครับ",
+                text="🌊 โปรดกดปุ่มแชร์พิกัด 'Location' ด้านล่าง เพื่อให้ระบบค้นหาและรายงานสถานการณ์ระดับน้ำและระดับความรุนแรงจากสถานีตรวจวัด ThaiWater ที่ใกล้ตัวคุณที่สุดครับ",
                 quick_reply=location_quick_reply
             )
         )
-        
+
     elif user_text == "SOS ขอความช่วยเหลือ":
         is_registered = False
         first_name = ""
         last_name = ""
         phone = "-"
-        
-        # 1. ค้นหาความจำสำรองระบบในกรณีชีตสิทธิ์ไม่ผ่าน
+
         if user_id in bot_config.USER_DATA and "first_name" in bot_config.USER_DATA[user_id]:
             is_registered = True
             first_name = bot_config.USER_DATA[user_id]["first_name"]
             last_name = bot_config.USER_DATA[user_id]["last_name"]
             phone = bot_config.USER_DATA[user_id]["phone"]
 
-        # 2. ค้นหาประวัติตารางข้อมูลผู้ใช้ใน Google Sheets 'users'
         if sheets_client:
             try:
                 sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
@@ -527,8 +541,7 @@ def handle_text_message(event):
                         first_name = r.get("first_name", "ผู้แจ้ง")
                         last_name = r.get("last_name", "")
                         phone = r.get("phone", "-")
-                        
-                        # สำรองข้อมูลไว้ในหน่วยความจำเพื่อความรวดเร็ว
+
                         if user_id not in bot_config.USER_DATA:
                             bot_config.USER_DATA[user_id] = {}
                         bot_config.USER_DATA[user_id]["first_name"] = first_name
@@ -537,9 +550,8 @@ def handle_text_message(event):
                         break
             except Exception as e:
                 print(f"Failed to check user registration: {e}")
-                
+
         if not is_registered:
-            # เข้าสู่กระบวนการลงทะเบียนผู้ใช้รายใหม่ครั้งแรกสุด (First-Time User Registration)
             bot_config.USER_STATES[user_id] = "register_first_name"
             bot_config.USER_DATA[user_id] = {}
             reply_text = (
@@ -547,14 +559,13 @@ def handle_text_message(event):
                 "โปรดพิมพ์แจ้ง 'ชื่อจริง' ของคุณเพื่อใช้ลงทะเบียนประวัติในระบบสักนิดนึงนะครับ (เช่น 'สมชาย')"
             )
         else:
-            # เริ่มต้นกระบวนการ SOS สำหรับผู้ใช้เก่าที่เคยลงทะเบียนแล้ว
             bot_config.USER_STATES[user_id] = "sos_location"
             bot_config.USER_DATA[user_id] = {
                 "first_name": first_name,
                 "last_name": last_name,
                 "phone": phone
             }
-            
+
             location_quick_reply = QuickReply(
                 items=[
                     QuickReplyButton(action=LocationAction(label="กดส่งพิกัดตำแหน่งแจ้งเหตุ"))
@@ -566,9 +577,9 @@ def handle_text_message(event):
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text, quick_reply=location_quick_reply))
             return
-            
+
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
+
     elif user_text == "แจ้งความต้องการเพิ่มเติม" or user_text == "ความต้องการ":
         bot_config.USER_STATES[user_id] = "waiting_needs_form"
         reply_text = (
@@ -577,11 +588,11 @@ def handle_text_message(event):
             "ที่คุณต้องการได้รับความช่วยเหลือเพิ่มเติมเข้ามาได้ทันทีเลยครับ ระบบจะนำความประสงค์ส่งต่อให้อาสาสมัครกู้ชีพเข้าจัดการด่วนครับ"
         )
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
+
     elif user_text == "ถาม AI เรื่องน้ำท่วม" or "ถาม-ตอบด้วย AI" in user_text or "ถาม–ตอบด้วย AI" in user_text:
         reply_text = "🤖 คุณสามารถพิมพ์รายละเอียดคำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมในครั้งนี้เข้ามาได้ทันทีเลยครับ ผมพร้อมตอบคำถามแบบเป็นกันเองให้ครับ"
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
+
     else:
         # ระบบคุยตอบโต้แบบอิสระทั่วไป
         ai_response = ""
@@ -591,7 +602,7 @@ def handle_text_message(event):
         except Exception as e:
             print(f"Gemini API Error: {e}")
             ai_response = "⚠️ บริการ AI ขัดข้องชั่วคราว หากตกอยู่ในภาวะอันตราย โทร ปภ. 1784 ทันทีครับ"
-            
+
         sheets_client = bot_config.get_sheets_client()
         if sheets_client:
             try:
@@ -600,10 +611,13 @@ def handle_text_message(event):
                 log_worksheet.append_row([timestamp, user_id, user_text, ai_response])
             except Exception as se:
                 print(f"Sheets Log Error: {se}")
-                
+
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
-# 12. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
+
+# =============================================================================
+# 12. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS
+# =============================================================================
 @bot_config.handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
@@ -612,15 +626,17 @@ def handle_location_message(event):
     address = event.message.address or "ไม่ระบุที่อยู่ชัดเจน"
     title = event.message.title or "จุดพิกัด"
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
     state = bot_config.USER_STATES.pop(user_id, "default")
     sheets_client = bot_config.get_sheets_client()
 
-    # --- ค้นหาศูนย์อพยพใกล้ที่สุดในรัศมี 5-20 กม. (อิงพิกัดและดึงฐานข้อมูลจริงจาก Google Sheets) ---
+    # ===========================
+    # 12.1 ค้นหาศูนย์อพยพใกล้ที่สุด
+    # ===========================
     if state == "waiting_shelter_location":
         shelter_list = []
         db_connected = False
-        
+
         if sheets_client:
             try:
                 sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
@@ -640,16 +656,16 @@ def handle_location_message(event):
                 db_connected = True
             except Exception as e:
                 print(f"Failed to fetch shelters from Sheets: {e}")
-                
+
         if not db_connected:
             reply_text = "⚠️ ขออภัยครับ ขณะนี้ระบบขัดข้องไม่สามารถตรวจสอบสิทธิ์การอ่านข้อมูลศูนย์พักพิงจริงได้ โปรดโทรติดต่อเบอร์สายด่วนภัยพิบัติ ปภ. 1784 ทันทีครับ"
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
-                
+
         nearest_shelters = []
         for sh in shelter_list:
             distance = bot_config.calculate_distance(latitude, longitude, sh['lat'], sh['lon'])
-            if 5.0 <= distance <= 20.0 or distance < 5.0:
+            if distance <= 20.0:
                 vacancy_status = bot_config.check_shelter_vacancy(sh['capacity'], sh['occupancy'])
                 nearest_shelters.append({
                     "name": sh['name'],
@@ -658,14 +674,14 @@ def handle_location_message(event):
                     "lat": sh['lat'],
                     "lon": sh['lon']
                 })
-                
+
         nearest_shelters.sort(key=lambda x: x['distance'])
         top_shelters = nearest_shelters[:3]
-        
+
         if not top_shelters:
-            reply_text = "📍 ปัจจุบันไม่พบศูนย์พักพิงจริงเปิดทำการในรัศมี 5-20 กม. รอบพิกัดของคุณครับ แนะนำติดต่อสอบถามพิกัดจัดตั้งชั่วคราวโดยตรงทาง ปภ. 1784 ครับ"
+            reply_text = "📍 ปัจจุบันไม่พบศูนย์พักพิงจริงเปิดทำการในรัศมี 20 กม. รอบพิกัดของคุณครับ แนะนำติดต่อสอบถามพิกัดจัดตั้งชั่วคราวโดยตรงทาง ปภ. 1784 ครับ"
         else:
-            reply_text = "📍 รายชื่อศูนย์พักพิงจริงที่อยู่ใกล้ตัวคุณที่สุดในรัศมี 5-20 กม. ครับ:\n\n"
+            reply_text = "📍 รายชื่อศูนย์พักพิงจริงที่อยู่ใกล้ตัวคุณที่สุดในรัศมี 20 กม. ครับ:\n\n"
             for index, sh in enumerate(top_shelters, 1):
                 reply_text += (
                     f"{index}️⃣ {sh['name']}\n"
@@ -674,96 +690,81 @@ def handle_location_message(event):
                     f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
                 )
             reply_text += "⚠️ โปรดเดินเท้าตามเส้นทางหลักอย่างระมัดระวังสูงสุดเสมอนะครับ"
-            
+
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
-    # --- ฟีเจอร์เมนูที่ 3: ตรวจวัดระดับน้ำภูมิสารสนเทศ (ขูดข้อมูลสภาพอากาศเรียลไทม์จากระบบ Web Scraper ทันที!) ---
+    # =============================================================================
+    # 12.2 ตรวจสอบระดับน้ำจาก ThaiWater API (NEW - WITH FALLBACK CHAIN)
+    # =============================================================================
     elif state == "waiting_water_location":
-        # เรียกใช้ฟังก์ชันขูดข้อมูลสภาพอากาศจริงตามจุดพิกัดผ่านดาวเทียมแบบเรียลไทม์
-        weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
-        
-        water_stations = []
-        db_connected = False
-        
-        if sheets_client:
-            try:
-                sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
-                water_worksheet = sheet.worksheet("Water_Levels")
-                rows = water_worksheet.get_all_records()
-                for row in rows:
-                    water_stations.append({
-                        "name": row.get('Name', 'ไม่ระบุชื่อ'),
-                        "province": row.get('Province', ''),
-                        "lat": float(row.get('Latitude', 0)),
-                        "lon": float(row.get('Longitude', 0)),
-                        "level": row.get('WaterLevel_M', '-'),
-                        "status": row.get('Status', '🟢 เฝ้าระวัง')
-                    })
-                db_connected = True
-            except Exception as e:
-                print(f"Failed to fetch water levels from Sheets: {e}")
-                
-        if not db_connected:
-            reply_text = (
-                "⚠️ ขัดข้องชั่วคราวในการเชื่อมโยงพิกัดระดับน้ำจาก Google Sheets ครับ แต่ระบบ Web Scraper ขูดข้อมูลสภาพอากาศจริงของคุณสำเร็จแล้วดังนี้ครับ:\n\n"
-                f"{weather_info}\n\n"
-                "โปรดตรวจสอบระดับน้ำทางสายด่วน ปภ. 1784 ชั่วคราวก่อนนะครับ"
-            )
-            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            return
-            
-        nearest_stations = []
-        for ws in water_stations:
-            distance = bot_config.calculate_distance(latitude, longitude, ws['lat'], ws['lon'])
-            nearest_stations.append({
-                "name": ws['name'],
-                "province": ws['province'],
-                "distance": distance,
-                "level": ws['level'],
-                "status": ws['status']
-            })
-            
-        nearest_stations.sort(key=lambda x: x['distance'])
-        closest_station = nearest_stations[0] if nearest_stations else None
-        
-        if not closest_station:
-            reply_text = (
-                "🌊 รายงานสภาพอากาศเรียลไทม์จากระบบ Web Scraper พิกัดของคุณครับ:\n\n"
-                f"{weather_info}\n\n"
-                "📍 หมายเหตุ: ไม่พบสถานีโทรมาตรตรวจวัดน้ำติดตั้งอยู่ในรัศมีรอบตัวพิกัดของคุณเลยครับ"
-            )
-        else:
-            reply_text = (
-                f"🌊 รายงานสภาพอากาศและระดับน้ำจริงรายพิกัดของคุณครับ:\n\n"
-                f"{weather_info}\n\n"
-                f"📡 สถานีตรวจวัดระดับน้ำที่ใกล้ที่สุด: {closest_station['name']} (จ.{closest_station['province']})\n"
-                f"🗺️ ระยะทางห่างจากจุดของคุณ: {closest_station['distance']:.2f} กิโลเมตร\n\n"
-                f"📏 ระดับน้ำปัจจุบัน: {closest_station['level']} เมตร\n"
-                f"⚠️ สถานะเฝ้าระวัง: {closest_station['status']}\n\n"
-                "โปรดระมัดระวังความเสี่ยงของกระแสน้ำไหลล้นตลิ่ง และเฝ้าระวังสัญญาณเตือนภัยในพื้นที่อย่างใกล้ชิดนะครับ"
-            )
-            
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        # ---- Step 1: ดึงข้อมูลจาก ThaiWater API (Primary Source) ----
+        thaiwater_stations = []
+        thaiwater_success = False
 
-    # --- ระบบ SOS ขั้นตอนที่ 1 (SOS Step 1): สกัดพิกัด GPS จากผู้ใช้เป็นจุดอ้างอิง แล้วป้อนเข้าสู่คำถามข้อถัดไป ---
+        try:
+            thaiwater_stations = bot_config.find_nearest_water_stations(
+                latitude, longitude, max_stations=3, max_distance_km=50
+            )
+            if thaiwater_stations:
+                thaiwater_success = True
+                print(f"[WaterLevel] ThaiWater API success: {len(thaiwater_stations)} stations found")
+        except Exception as e:
+            print(f"[WaterLevel] ThaiWater API failed: {e}")
+
+        # ---- Step 2: Fallback to Google Sheets ถ้า ThaiWater ล่ม ----
+        if not thaiwater_success and sheets_client:
+            try:
+                clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
+                thaiwater_stations = bot_config.get_water_data_from_sheets(
+                    sheets_client, clean_sheet_id, latitude, longitude
+                )
+                if thaiwater_stations:
+                    print(f"[WaterLevel] Fallback to Sheets: {len(thaiwater_stations)} stations")
+            except Exception as e:
+                print(f"[WaterLevel] Sheets fallback failed: {e}")
+
+        # ---- Step 3: ดึงข้อมูลสภาพอากาศ (Open-Meteo) ----
+        weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
+
+        # ---- Step 4: ดึงข้อมูลน้ำหลากประมาณการ (Open-Meteo Flood) ----
+        water_flow = bot_config.get_live_water_scraper(latitude, longitude)
+
+        # ---- Step 5: สร้างและส่งรายงาน ----
+        try:
+            # พยายามส่ง Flex Message ก่อน (สวยงามกว่า)
+            flex_msg = bot_config.build_water_level_flex_message(
+                latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
+            )
+            bot_config.line_bot_api.reply_message(event.reply_token, flex_msg)
+            print("[WaterLevel] Sent Flex Message successfully")
+        except Exception as e:
+            # ถ้า Flex Message ส่งไม่ได้ ให้ fallback เป็น Text Message
+            print(f"[WaterLevel] Flex Message failed: {e}, falling back to text")
+            text_report = bot_config.build_water_level_text_report(
+                latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
+            )
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=text_report))
+
+    # ===========================
+    # 12.3 ระบบ SOS Step 1: รับพิกัด GPS
+    # ===========================
     elif state == "sos_location":
         if user_id not in bot_config.USER_DATA:
             bot_config.USER_DATA[user_id] = {}
-        # บันทึกพิกัดไว้ในความจำก่อนนำทาง
         bot_config.USER_DATA[user_id]["latitude"] = latitude
         bot_config.USER_DATA[user_id]["longitude"] = longitude
-        
-        # ปรับระดับขั้นตอนไปสู่อัตราส่วนสมาชิกติดในบ้าน (SOS Step 2)
+
         bot_config.USER_STATES[user_id] = "sos_q2"
-        
+
         bot_config.line_bot_api.reply_message(
-            event.reply_token, 
+            event.reply_token,
             TextSendMessage(text="📌 Step 2: โปรดพิมพ์แจ้งจำนวนคนที่ประสบภัยที่ติดอยู่ร่วมกันในบ้านของคุณในตอนนี้ครับ? (กรุณาระบุจำนวนตัวเลข เช่น '3')")
         )
-        
+
     else:
         confirm_text = "📍 คุณส่งพิกัด GPS มาหาผม หากต้องการแจ้งขอความช่วยเหลือ โปรดกดแตะเมนู 'SOS ขอความช่วยเหลือ' บนแถบด้านล่างก่อนเพื่อให้ทีมกู้ภัยวิเคราะห์ความเร่งด่วนได้อย่างแม่นยำนะครับ"
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
