@@ -1,3 +1,4 @@
+import os
 import datetime
 from flask import Flask, request, abort
 import bot_config
@@ -360,7 +361,7 @@ def handle_text_message(event):
             prompt = f"ผู้ใช้ต้องการประเมินสถานการณ์น้ำหรือเช็กข้อมูลน้ำท่วมในพื้นที่: '{user_text}' โปรดแนะนำแนวทางเฝ้าระวังภัยพิบัติอย่างสั้นและกระชับ"
             try:
                 res = bot_config.gemini_model.generate_content(prompt)
-                reply = config.clean_text_for_line(res.text.strip())
+                reply = bot_config.clean_text_for_line(res.text.strip())
             except:
                 reply = "🌊 แนะนำติดตามการรายงานระดับน้ำอย่างใกล้ชิด และสามารถเช็กระดับลุ่มน้ำได้ผ่านแอปฯ ThaiWater ครับ"
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
@@ -469,16 +470,16 @@ def handle_text_message(event):
                 "🚨 สายด่วนกู้ภัยทางน้ำ 1196 (ขอความช่วยเหลือทางเรือ)\n"
                 "🚨 ตำรวจทางหลวง 1193 (ประสานงานเดินทางเส้นทางน้ำท่วม)"
             )
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ศูนย์พักพิง":
-        config.USER_STATES[user_id] = "waiting_shelter_location"
+        bot_config.USER_STATES[user_id] = "waiting_shelter_location"
         location_quick_reply = QuickReply(
             items=[
                 QuickReplyButton(action=LocationAction(label="แชร์พิกัดหาศูนย์พักพิง"))
             ]
         )
-        config.line_bot_api.reply_message(
+        bot_config.line_bot_api.reply_message(
             event.reply_token, 
             TextSendMessage(
                 text="📍 โปรดกดแชร์พิกัด 'Location' ด้านล่างนี้ หรือพิมพ์บอกชื่ออำเภอ/จังหวัดที่คุณอยู่ในปัจจุบัน เพื่อให้ผมช่วยค้นหาศูนย์พักพิงจริงรอบตัวคุณครับ",
@@ -487,13 +488,13 @@ def handle_text_message(event):
         )
         
     elif user_text == "ตรวจสอบระดับน้ำ":
-        config.USER_STATES[user_id] = "waiting_water_location"
+        bot_config.USER_STATES[user_id] = "waiting_water_location"
         location_quick_reply = QuickReply(
             items=[
                 QuickReplyButton(action=LocationAction(label="แชร์พิกัดเช็กระดับน้ำ"))
             ]
         )
-        config.line_bot_api.reply_message(
+        bot_config.line_bot_api.reply_message(
             event.reply_token, 
             TextSendMessage(
                 text="🌊 โปรดกดปุ่มแชร์พิกัด 'Location' ด้านล่าง เพื่อให้ระบบค้นหาและรายงานสถานการณ์ระดับน้ำและระดับความรุนแรงจากสถานีตรวจวัดที่ใกล้ตัวคุณที่สุดครับ",
@@ -508,16 +509,16 @@ def handle_text_message(event):
         phone = "-"
         
         # 1. ค้นหาความจำสำรองระบบในกรณีชีตสิทธิ์ไม่ผ่าน
-        if user_id in config.USER_DATA and "first_name" in config.USER_DATA[user_id]:
+        if user_id in bot_config.USER_DATA and "first_name" in bot_config.USER_DATA[user_id]:
             is_registered = True
-            first_name = config.USER_DATA[user_id]["first_name"]
-            last_name = config.USER_DATA[user_id]["last_name"]
-            phone = config.USER_DATA[user_id]["phone"]
+            first_name = bot_config.USER_DATA[user_id]["first_name"]
+            last_name = bot_config.USER_DATA[user_id]["last_name"]
+            phone = bot_config.USER_DATA[user_id]["phone"]
 
         # 2. ค้นหาประวัติตารางข้อมูลผู้ใช้ใน Google Sheets 'users'
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
+                sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
                 users_ws = sheet.worksheet("users")
                 rows = users_ws.get_all_records()
                 for r in rows:
@@ -528,27 +529,27 @@ def handle_text_message(event):
                         phone = r.get("phone", "-")
                         
                         # สำรองข้อมูลไว้ในหน่วยความจำเพื่อความรวดเร็ว
-                        if user_id not in config.USER_DATA:
-                            config.USER_DATA[user_id] = {}
-                        config.USER_DATA[user_id]["first_name"] = first_name
-                        config.USER_DATA[user_id]["last_name"] = last_name
-                        config.USER_DATA[user_id]["phone"] = phone
+                        if user_id not in bot_config.USER_DATA:
+                            bot_config.USER_DATA[user_id] = {}
+                        bot_config.USER_DATA[user_id]["first_name"] = first_name
+                        bot_config.USER_DATA[user_id]["last_name"] = last_name
+                        bot_config.USER_DATA[user_id]["phone"] = phone
                         break
             except Exception as e:
                 print(f"Failed to check user registration: {e}")
                 
         if not is_registered:
             # เข้าสู่กระบวนการลงทะเบียนผู้ใช้รายใหม่ครั้งแรกสุด (First-Time User Registration)
-            config.USER_STATES[user_id] = "register_first_name"
-            config.USER_DATA[user_id] = {}
+            bot_config.USER_STATES[user_id] = "register_first_name"
+            bot_config.USER_DATA[user_id] = {}
             reply_text = (
-                "📝 ขออภัยด้วยครับ เนื่องจากคุณเข้าใช้งานระบบเป็นครั้งแรก เพื่อประโยชน์สูงสุดในการประสานงานส่งต่อข้อมูลให้ทีมกู้ภัย "
+                "📝 ขออภัยด้วยครับ เนื่องจากคุณเข้าใช้งานระบบเป็นครั้งแรก เพื่อประโยช์สูงสุดในการประสานงานส่งต่อข้อมูลให้ทีมกู้ภัย "
                 "โปรดพิมพ์แจ้ง 'ชื่อจริง' ของคุณเพื่อใช้ลงทะเบียนประวัติในระบบสักนิดนึงนะครับ (เช่น 'สมชาย')"
             )
         else:
             # เริ่มต้นกระบวนการ SOS สำหรับผู้ใช้เก่าที่เคยลงทะเบียนแล้ว
-            config.USER_STATES[user_id] = "sos_location"
-            config.USER_DATA[user_id] = {
+            bot_config.USER_STATES[user_id] = "sos_location"
+            bot_config.USER_DATA[user_id] = {
                 "first_name": first_name,
                 "last_name": last_name,
                 "phone": phone
@@ -563,19 +564,19 @@ def handle_text_message(event):
                 f"🚨 สวัสดีครับคุณ {first_name}! ระบบพบข้อมูลการลงทะเบียนของคุณแล้วครับ "
                 "โปรดกดปุ่มแชร์พิกัด 'Location' สีเขียวด้านล่างนี้ เพื่อระบุตำแหน่งที่คุณต้องการให้ทีมกู้ภัยเข้าช่วยเหลือด่วนที่สุดทันทีเลยครับ"
             )
-            config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text, quick_reply=location_quick_reply))
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text, quick_reply=location_quick_reply))
             return
             
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
-    elif user_text == "แจ้งความต้องการเพิ่มเติม" or user_text == "ความต้องการ" or user_text == "ความต้องการ":
-        config.USER_STATES[user_id] = "waiting_needs_form"
+    elif user_text == "แจ้งความต้องการเพิ่มเติม" or user_text == "ความต้องการ":
+        bot_config.USER_STATES[user_id] = "waiting_needs_form"
         reply_text = (
             "📌 แจ้งแบบฟอร์มความต้องการพิเศษ:\n\n"
             "โปรดพิมพ์อธิบายสิ่งของ อาหาร ยารักษาโรค นมผงเด็ก หรือเวชภัณฑ์อื่นๆ "
             "ที่คุณต้องการได้รับความช่วยเหลือเพิ่มเติมเข้ามาได้ทันทีเลยครับ ระบบจะนำความประสงค์ส่งต่อให้อาสาสมัครกู้ชีพเข้าจัดการด่วนครับ"
         )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         
     elif user_text == "ถาม AI เรื่องน้ำท่วม" or "ถาม-ตอบด้วย AI" in user_text or "ถาม–ตอบด้วย AI" in user_text:
         reply_text = "🤖 คุณสามารถพิมพ์รายละเอียดคำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมในครั้งนี้เข้ามาได้ทันทีเลยครับ ผมพร้อมตอบคำถามแบบเป็นกันเองให้ครับ"
@@ -591,19 +592,19 @@ def handle_text_message(event):
             print(f"Gemini API Error: {e}")
             ai_response = "⚠️ บริการ AI ขัดข้องชั่วคราว หากตกอยู่ในภาวะอันตราย โทร ปภ. 1784 ทันทีครับ"
             
-        sheets_client = get_sheets_client()
+        sheets_client = bot_config.get_sheets_client()
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
+                sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
                 log_worksheet = sheet.worksheet("AI Logs")
                 log_worksheet.append_row([timestamp, user_id, user_text, ai_response])
             except Exception as se:
                 print(f"Sheets Log Error: {se}")
                 
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
 # 12. รับข้อมูลพิกัด (Location Message) และประมวลผล GIS / ดึงและเก็บข้อมูลลงแผ่นงาน Google Sheets
-@bot_config.handler.add(MessageEvent, message=LocationMessage) # <-- ใช้ bot_config.handler สมบูรณ์แล้วครับ!
+@bot_config.handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
     user_id = event.source.user_id
     latitude = event.message.latitude
@@ -613,7 +614,7 @@ def handle_location_message(event):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     state = bot_config.USER_STATES.pop(user_id, "default")
-    sheets_client = get_sheets_client()
+    sheets_client = bot_config.get_sheets_client()
 
     # --- ค้นหาศูนย์อพยพใกล้ที่สุดในรัศมี 5-20 กม. (อิงพิกัดและดึงฐานข้อมูลจริงจาก Google Sheets) ---
     if state == "waiting_shelter_location":
@@ -622,7 +623,7 @@ def handle_location_message(event):
         
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
+                sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
                 shelters_worksheet = sheet.worksheet("Shelters")
                 rows = shelters_worksheet.get_all_records()
                 for row in rows:
@@ -647,9 +648,9 @@ def handle_location_message(event):
                 
         nearest_shelters = []
         for sh in shelter_list:
-            distance = config.calculate_distance(latitude, longitude, sh['lat'], sh['lon'])
+            distance = bot_config.calculate_distance(latitude, longitude, sh['lat'], sh['lon'])
             if 5.0 <= distance <= 20.0 or distance < 5.0:
-                vacancy_status = config.check_shelter_vacancy(sh['capacity'], sh['occupancy'])
+                vacancy_status = bot_config.check_shelter_vacancy(sh['capacity'], sh['occupancy'])
                 nearest_shelters.append({
                     "name": sh['name'],
                     "distance": distance,
@@ -686,7 +687,7 @@ def handle_location_message(event):
         
         if sheets_client:
             try:
-                sheet = sheets_client.open_by_key(config.extract_sheet_id(config.GOOGLE_SHEET_ID))
+                sheet = sheets_client.open_by_key(bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID))
                 water_worksheet = sheet.worksheet("Water_Levels")
                 rows = water_worksheet.get_all_records()
                 for row in rows:
@@ -713,7 +714,7 @@ def handle_location_message(event):
             
         nearest_stations = []
         for ws in water_stations:
-            distance = config.calculate_distance(latitude, longitude, ws['lat'], ws['lon'])
+            distance = bot_config.calculate_distance(latitude, longitude, ws['lat'], ws['lon'])
             nearest_stations.append({
                 "name": ws['name'],
                 "province": ws['province'],
@@ -746,23 +747,23 @@ def handle_location_message(event):
 
     # --- ระบบ SOS ขั้นตอนที่ 1 (SOS Step 1): สกัดพิกัด GPS จากผู้ใช้เป็นจุดอ้างอิง แล้วป้อนเข้าสู่คำถามข้อถัดไป ---
     elif state == "sos_location":
-        if user_id not in config.USER_DATA:
-            config.USER_DATA[user_id] = {}
+        if user_id not in bot_config.USER_DATA:
+            bot_config.USER_DATA[user_id] = {}
         # บันทึกพิกัดไว้ในความจำก่อนนำทาง
-        config.USER_DATA[user_id]["latitude"] = latitude
-        config.USER_DATA[user_id]["longitude"] = longitude
+        bot_config.USER_DATA[user_id]["latitude"] = latitude
+        bot_config.USER_DATA[user_id]["longitude"] = longitude
         
         # ปรับระดับขั้นตอนไปสู่อัตราส่วนสมาชิกติดในบ้าน (SOS Step 2)
-        config.USER_STATES[user_id] = "sos_q2"
+        bot_config.USER_STATES[user_id] = "sos_q2"
         
-        config.line_bot_api.reply_message(
+        bot_config.line_bot_api.reply_message(
             event.reply_token, 
             TextSendMessage(text="📌 Step 2: โปรดพิมพ์แจ้งจำนวนคนที่ประสบภัยที่ติดอยู่ร่วมกันในบ้านของคุณในตอนนี้ครับ? (กรุณาระบุจำนวนตัวเลข เช่น '3')")
         )
         
     else:
         confirm_text = "📍 คุณส่งพิกัด GPS มาหาผม หากต้องการแจ้งขอความช่วยเหลือ โปรดกดแตะเมนู 'SOS ขอความช่วยเหลือ' บนแถบด้านล่างก่อนเพื่อให้ทีมกู้ภัยวิเคราะห์ความเร่งด่วนได้อย่างแม่นยำนะครับ"
-        config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
