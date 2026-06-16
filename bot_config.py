@@ -27,6 +27,7 @@ USER_DATA = {}
 
 # ========== THAIWATER API CONFIGURATION ==========
 THAIWATER_API_BASE = "https://api.thaiwater.net/twsapi/v1.0"
+THAIWATER_WEB_URL = "https://www.thaiwater.net/water/wl"
 # Cache สำหรับสถานี ThaiWater (cache 1 ชั่วโมง)
 _WATER_STATIONS_CACHE = []
 _WATER_STATIONS_CACHE_TIME = 0
@@ -42,16 +43,31 @@ if GEMINI_API_KEY:
 gemini_model = genai.GenerativeModel(
     model_name="gemini-2.5-flash",
     system_instruction=(
-        "คุณคือ FLOODCARE AI ผู้ช่วยอัจฉริยะและผู้เชี่ยวชาญด้านอุทกภัยประจำประเทศไทย "
-        "มีบทบาทคอยตอบคำถามและให้คำแนะนำในการเอาชีวิตรอดและการรับมือภัยน้ำท่วมอย่างถูกต้องตามหลักสากล\n\n"
+        "คุณคือ FLOODCARE AI ผู้ช่วยกู้ภัยมืออาชีพประจำศูนย์ประสานงานภัยน้ำท่วมระดับชาติ "
+        "มีบทบาทเป็นผู้นำในวิกฤตที่ใจดีแต่เด็ดขาด ให้คำแนะนำด้านการเอาชีวิตรอดและการรับมือภัยน้ำท่วม "
+        "ด้วยข้อมูลที่แม่นยำและตรงประเด็นเสมอ\n\n"
         "กฎเหล็กในการตอบและจัดรูปแบบข้อความเพื่อนำไปแสดงผลบน LINE App:\n"
-        "1. น้ำเสียงและสรรพนาม: สุภาพ อบอุ่น อ่อนโยน และเป็นกันเองเสมือนคนในครอบครัวคอยดูแลกัน "
-        "ให้ใช้คำลงท้ายว่า 'ครับ' หรือ 'นะครับ' เป็นหลักเพื่อความสม่ำเสมอ (หลีกเลี่ยงการสะกดสแลช เช่น 'ครับ/ค่ะ' หรือ 'นะครับ/คะ' ที่ดูแข็งทื่อแบบหุ่นยนต์)\n"
-        "2. ความกระชับ: ตอบให้กระชับ ได้ใจความสั้นๆ ไม่ยาวเป็นเรียงความ และแบ่งย่อหน้าให้เหมาะสมกับการอ่านบนหน้าจอมือถือ\n"
-        "3. รูปแบบสัญลักษณ์: ห้ามใช้เครื่องหมายดอกจัน (*) ในการทำสัญลักษณ์หัวข้อย่อยหรือเน้นคำเด็ดขาด "
-        "แต่ให้ใช้ 'อิโมจิ' ที่แสดงอารมณ์อบอุ่นและปลอดภัยแทนสัญลักษณ์นำหน้าหัวข้อย่อยเสมอ (เช่น 📌, 🏃, 🩹, 📞, 💬, ⚠️, 🟢, 🔴) เพื่อความเป็นระเบียบและสวยงาม\n"
-        "4. ความปลอดภัยสูงสุด: ห้ามเดาข้อมูลหรือจินตนาการสิ่งที่ไม่เป็นความจริงเด็ดขาด หากข้อมูลใดไม่แน่ชัด หรือเป็นกรณีฉุกเฉินเฉพาะหน้า "
-        "ให้แสดงความห่วงใจและแนะนำเบอร์โทรสายด่วนภัยพิบัติที่ถูกต้องทันที เช่น สายด่วน ปภ. 1784 หรือสายด่วนกู้ชีพ 1669"
+        "1. น้ำเสียงและสรรพนาม: ใช้โทนเสียงที่เป็นใจดีแต่เด็ดขาด (Calm and Firm) "
+        "ให้ความรู้สึกมั่นใจและปลอดภัย ใช้คำลงท้ายว่า 'ครับ' หรือ 'นะครับ' เป็นหลัก "
+        "หลีกเลี่ยงการสะกดสแลช เช่น 'ครับ/ค่ะ' หรือ 'นะครับ/คะ'\n"
+        "2. ความกระชับและลำดับความสำคัญ: ข้อมูลสำคัญที่สุดต้องอยู่ใน 3 บรรทัดแรกเสมอ "
+        "เน้นการสั่งการเป็นขั้นตอน (1, 2, 3) แทนการพูดคลุมเครือ "
+        "เช่น '1. ยกเบรกเกอร์ 2. ขึ้นที่สูง 3. เตรียมไฟฉาย'\n"
+        "3. การตรวจจับความเร่งด่วน (Emergency Detection): "
+        "หากผู้ใช้ส่งข้อความที่มีคำสำคัญบ่งบอกถึงอันตรายถึงชีวิต เช่น 'ช่วยด้วย' 'จะจมแล้ว' 'ไฟดูด' 'หายใจไม่ออก' "
+        "หยุดการเกริ่นนำทันที ส่งขั้นตอนเอาตัวรอดพร้อมเบอร์ฉุกเฉิน 1784 หรือ 1669 เป็นอันดับแรก "
+        "จากนั้นค่อยถามรายละเอียดเพิ่มเติม\n"
+        "4. Data-Driven Response: ให้ความสำคัญกับข้อมูลจากระบบก่อนเสมอ "
+        "หากผู้ใช้ถามถึงสถานที่ที่ไม่มีในฐานข้อมูล ให้ยอมรับว่า 'ไม่มีข้อมูลในระบบ' "
+        "และแนะนำให้ดูลิงก์แผนที่รวมแทนการเดาพิกัดเอง\n"
+        "5. กฎศูนย์พักพิงและเส้นทาง: ห้ามยืนยันว่าเส้นทางปลอดภัย 100% "
+        "เพราะระดับน้ำเปลี่ยนตลอดเวลา ต้องมีประโยคเตือนเสมอว่า "
+        "'โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน'\n"
+        "6. รูปแบบสัญลักษณ์: ห้ามใช้เครื่องหมายดอกจัน (*) ในการทำสัญลักษณ์หัวข้อย่อยหรือเน้นคำ "
+        "ให้ใช้อิโมจิที่แสดงอารมณ์อบอุ่นแทน (เช่น 📌 🏃 🩹 📞 ⚠️ 🟢 🔴) "
+        "ใช้การเว้นบรรทัด (Spacing) เพื่อแยกหัวข้อแทนการใช้ตัวหนา\n"
+        "7. ความปลอดภัยสูงสุด: ห้ามเดาข้อมูลหรือจินตนาการสิ่งที่ไม่เป็นความจริงเด็ดขาด "
+        "หากข้อมูลใดไม่แน่ชัด ให้แสดงความห่วงใจและแนะนำเบอร์โทรสายด่วนที่ถูกต้องทันที"
     )
 )
 
@@ -144,7 +160,6 @@ def get_live_water_scraper(lat, lon):
 
             status = "🟢  สถานการณ์ปกติเฝ้าระวัง"
             icon = "🟢"
-            # คำนวณระดับความสูงน้ำจำลองเทียบเคียงข้อมูลภาครัฐตามหลักฟิสิกส์อัตโนมัติ
             simulated_height = 1.20 + (current_flow * 0.05)
 
             if current_flow >= 50.0:
@@ -171,7 +186,7 @@ def get_live_water_scraper(lat, lon):
 
 
 # =============================================================================
-# ========== THAIWATER API INTEGRATION (NEW - FULL IMPLEMENTATION) ==========
+# ========== THAIWATER API INTEGRATION ==========
 # =============================================================================
 
 def get_thaiwater_stations(use_cache=True):
@@ -181,7 +196,6 @@ def get_thaiwater_stations(use_cache=True):
     """
     global _WATER_STATIONS_CACHE, _WATER_STATIONS_CACHE_TIME
 
-    # ตรวจสอบ cache ก่อน
     if use_cache and _WATER_STATIONS_CACHE:
         elapsed = time.time() - _WATER_STATIONS_CACHE_TIME
         if elapsed < _WATER_STATIONS_CACHE_TTL:
@@ -203,13 +217,12 @@ def get_thaiwater_stations(use_cache=True):
             meta = st.get("stationMetadata", {})
             st_type = meta.get("stationType", "")
 
-            # กรองเฉพาะสถานีตรวจวัดระดับน้ำ/น้ำท่า
             if any(kw in st_type for kw in ["ระดับน้ำ", "น้ำท่า", "Runoff", "WaterLevel", "ดิน", "อุทก"]):
                 try:
                     lat = float(meta.get("latitude", 0))
                     lon = float(meta.get("longitude", 0))
                     if lat == 0 and lon == 0:
-                        continue  # ข้ามสถานีที่ไม่มีพิกัด
+                        continue
 
                     stations.append({
                         "stationCode": meta.get("stationCode", ""),
@@ -218,6 +231,7 @@ def get_thaiwater_stations(use_cache=True):
                         "provinceCode": meta.get("locationCode", ""),
                         "provinceName": meta.get("provinceName", ""),
                         "districtName": meta.get("districtName", ""),
+                        "riverName": meta.get("riverName", ""),
                         "latitude": lat,
                         "longitude": lon,
                         "status": meta.get("stationOperatingStatus", 1)
@@ -225,7 +239,6 @@ def get_thaiwater_stations(use_cache=True):
                 except (ValueError, TypeError):
                     continue
 
-        # อัพเดต cache
         _WATER_STATIONS_CACHE = stations
         _WATER_STATIONS_CACHE_TIME = time.time()
         print(f"[ThaiWater] Filtered {len(stations)} water monitoring stations")
@@ -268,6 +281,7 @@ def get_thaiwater_runoff_latest(station_code):
 
         water_level = None
         discharge = None
+        bank_level = None
 
         for r in results:
             var_type = r.get("variable", "")
@@ -284,11 +298,17 @@ def get_thaiwater_runoff_latest(station_code):
                     "uom": r.get("uom", "CMS"),
                     "time": r.get("measureTime")
                 }
+            elif var_type == "BankLevel":
+                bank_level = {
+                    "value": r.get("value"),
+                    "uom": r.get("uom", "m")
+                }
 
         return {
             "stationCode": station_code,
             "stationName": obs.get("station", {}).get("stationReference", ""),
             "water_level": water_level,
+            "bank_level": bank_level,
             "discharge": discharge,
             "resultTime": obs.get("resultTime")
         }
@@ -304,28 +324,74 @@ def get_thaiwater_runoff_latest(station_code):
         return None
 
 
+# =============================================================================
+# ========== WATER LEVEL SITUATION & TREND CALCULATION ==========
+# =============================================================================
+
+def calculate_situation(water_level, bank_level):
+    """
+    คำนวณสถานการณ์น้ำจากระดับน้ำเทียบระดับตลิ่ง
+    Returns: "ปกติ" | "เฝ้าระวัง" | "วิกฤต"
+    """
+    try:
+        wl = float(water_level) if water_level is not None else 0
+        bl = float(bank_level) if bank_level is not None else 0
+    except (ValueError, TypeError):
+        return "ไม่มีข้อมูล"
+
+    if bl <= 0:
+        return "ปกติ" if wl < 1.5 else "เฝ้าระวัง" if wl < 3.0 else "วิกฤต"
+
+    ratio = wl / bl
+    if ratio >= 0.95 or wl >= bl:
+        return "วิกฤต"
+    elif ratio >= 0.70:
+        return "เฝ้าระวัง"
+    else:
+        return "ปกติ"
+
+
+def determine_trend(current_wl, previous_wl, tolerance=0.01):
+    """
+    คำนวณแนวโน้มระดับน้ำ
+    Returns: "เพิ่มขึ้น" | "ลดลง" | "คงที่"
+    """
+    try:
+        cwl = float(current_wl) if current_wl is not None else 0
+        pwl = float(previous_wl) if previous_wl is not None else 0
+    except (ValueError, TypeError):
+        return "คงที่"
+
+    diff = cwl - pwl
+    if abs(diff) <= tolerance:
+        return "คงที่"
+    elif diff > 0:
+        return "เพิ่มขึ้น"
+    else:
+        return "ลดลง"
+
+
 def find_nearest_water_stations(user_lat, user_lon, max_stations=3, max_distance_km=50):
     """
     หาสถานีตรวจวัดน้ำที่ใกล้ผู้ใช้ที่สุด พร้อมดึงข้อมูลระดับน้ำล่าสุด
+    (Fallback: ใช้เมื่อดึงจาก Sheets ไม่ได้)
     """
     stations = get_thaiwater_stations(use_cache=True)
     if not stations:
         return []
 
-    # คำนวณระยะทางและเรียงลำดับ
     for st in stations:
         st["distance_km"] = calculate_distance(user_lat, user_lon, st["latitude"], st["longitude"])
 
-    # กรองเฉพาะสถานีในรัศมีที่ยอมรับได้ และเรียงจากใกล้ไปไกล
     nearby = [s for s in stations if s["distance_km"] <= max_distance_km]
     nearby.sort(key=lambda x: x["distance_km"])
 
-    # ดึงข้อมูลระดับน้ำล่าสุดของสถานีที่ใกล้ที่สุด
     result = []
     for st in nearby[:max_stations]:
         runoff_data = get_thaiwater_runoff_latest(st["stationCode"])
         if runoff_data:
             st["water_level"] = runoff_data.get("water_level")
+            st["bank_level"] = runoff_data.get("bank_level")
             st["discharge"] = runoff_data.get("discharge")
             st["measure_time"] = runoff_data.get("resultTime")
         result.append(st)
@@ -333,13 +399,14 @@ def find_nearest_water_stations(user_lat, user_lon, max_stations=3, max_distance
     return result
 
 
-def assess_water_level_status(water_level_value, station_name=""):
+def assess_water_level_status(water_level_value, bank_level_value=None):
     """
-    ประเมินสถานะระดับน้ำและให้คำแนะนำตามเกณฑ์ของกรมชลประทาน
+    ประเมินสถานะระดับน้ำแบบละเอียด พร้อมคำแนะนำ
     """
     if water_level_value is None:
         return {
             "status": "⚪ ไม่มีข้อมูล",
+            "situation": "ไม่มีข้อมูล",
             "color": "#9CA3AF",
             "advice": "ไม่สามารถประเมินได้ในขณะนี้ โปรดติดตามสถานการณ์อย่างใกล้ชิด",
             "risk_level": 0
@@ -350,22 +417,26 @@ def assess_water_level_status(water_level_value, station_name=""):
     except (ValueError, TypeError):
         return {
             "status": "⚪ ข้อมูลไม่ถูกต้อง",
+            "situation": "ไม่มีข้อมูล",
             "color": "#9CA3AF",
             "advice": "ไม่สามารถประเมินได้",
             "risk_level": 0
         }
 
-    # เกณฑ์การประเมินระดับน้ำ (ตามเกณฑ์ของกรมชลประทาน)
-    if wl >= 5.0:
+    situation = calculate_situation(wl, bank_level_value)
+
+    if wl >= 5.0 or situation == "วิกฤต":
         return {
             "status": "🔴 วิกฤติสูงสุด",
+            "situation": "วิกฤต",
             "color": "#EF4444",
             "advice": "⚠️ อพยพทันที! ระดับน้ำสูงเกณฑ์อันตราย อย่าอยู่ในบริเวณชั้นล่าง ตัดกระแสไฟ และขึ้นที่สูงโดยด่วน",
             "risk_level": 4
         }
-    elif wl >= 3.0:
+    elif wl >= 3.0 or situation == "เฝ้าระวัง":
         return {
             "status": "🟠 วิกฤติ",
+            "situation": "เฝ้าระวัง",
             "color": "#F97316",
             "advice": "🚨 เตรียมอพยพ! เก็บข้าวของขึ้นที่สูง ติดตามสถานการณ์ใกล้ชิด และเตรียมถุงยังชีพ",
             "risk_level": 3
@@ -373,6 +444,7 @@ def assess_water_level_status(water_level_value, station_name=""):
     elif wl >= 1.5:
         return {
             "status": "🟡 เฝ้าระวัง",
+            "situation": "เฝ้าระวัง",
             "color": "#FBBF24",
             "advice": "⚡ ระวังน้ำท่วมฉับพลัน หลีกเลี่ยงการเดินทางผ่านจุดลุ่มต่ำ และติดตามข่าวสาร",
             "risk_level": 2
@@ -380,38 +452,212 @@ def assess_water_level_status(water_level_value, station_name=""):
     else:
         return {
             "status": "🟢 ปกติ",
+            "situation": "ปกติ",
             "color": "#10B981",
             "advice": "✅ ระดับน้ำอยู่ในเกณฑ์ปกติ แต่ควรติดตามสถานการณ์อย่างต่อเนื่อง",
             "risk_level": 1
         }
 
 
+# =============================================================================
+# ========== THAIWATER LAZY SYNC & BULK UPDATE ==========
+# =============================================================================
+
+def get_water_data_from_api():
+    """
+    ดึงข้อมูลระดับน้ำทั้งหมด 738 สถานีจาก ThaiWater API
+    พร้อมคำนวณ Situation และ Trend
+    Returns: list of dicts ที่พร้อมเขียนลง Sheets
+    """
+    stations = get_thaiwater_stations(use_cache=True)
+    if not stations:
+        print("[LazySync] No stations available from cache")
+        return []
+
+    results = []
+    previous_data = {}  # เก็บค่า water level เดิมเพื่อคำนวณ trend
+
+    print(f"[LazySync] Fetching latest water levels for {len(stations)} stations...")
+
+    for i, st in enumerate(stations):
+        runoff = get_thaiwater_runoff_latest(st["stationCode"])
+        time.sleep(0.05)  # Rate limiting
+
+        wl_value = None
+        bl_value = None
+        measure_time = "-"
+        trend = "คงที่"
+
+        if runoff:
+            wl = runoff.get("water_level")
+            bl = runoff.get("bank_level")
+            if wl:
+                wl_value = wl.get("value")
+                measure_time = wl.get("time", "-")
+            if bl:
+                bl_value = bl.get("value")
+
+        situation = calculate_situation(wl_value, bl_value)
+
+        # คำนวณ trend (ต้องเก็บค่าก่อนหน้า - ใช้ค่าประมาณจาก cache หรือ sheets)
+        prev_wl = previous_data.get(st["stationCode"])
+        if wl_value is not None and prev_wl is not None:
+            trend = determine_trend(wl_value, prev_wl)
+
+        results.append({
+            "StationCode": st["stationCode"],
+            "Name": st["stationName"],
+            "River": st.get("riverName", "-"),
+            "Location": st.get("provinceName", "-"),
+            "Lat": st["latitude"],
+            "Lon": st["longitude"],
+            "WaterLevel": wl_value if wl_value is not None else "-",
+            "BankLevel": bl_value if bl_value is not None else "-",
+            "Situation": situation,
+            "Trend": trend,
+            "Time": measure_time
+        })
+
+        if wl_value is not None:
+            previous_data[st["stationCode"]] = wl_value
+
+        if (i + 1) % 100 == 0:
+            print(f"[LazySync] Processed {i + 1}/{len(stations)} stations")
+
+    print(f"[LazySync] Completed: {len(results)} stations processed")
+    return results
+
+
+def sync_water_levels_to_sheets(sheets_client, sheet_id):
+    """
+    Initial Sync + Lazy Sync: ดึงข้อมูล 738 สถานีจาก API แล้ว Bulk Update ลง Sheets
+    ใช้ ws.clear() + ws.update() เพียง 1 API call
+    """
+    if not sheets_client or not sheet_id:
+        print("[LazySync] Sheets client not available")
+        return False
+
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+
+        # เปิดหรือสร้างแท็บ Water_Levels
+        try:
+            ws = sheet.worksheet("Water_Levels")
+        except gspread.WorksheetNotFound:
+            print("[LazySync] Creating Water_Levels worksheet...")
+            ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="12")
+
+        # ดึงข้อมูลจาก ThaiWater API
+        data = get_water_data_from_api()
+        if not data:
+            print("[LazySync] No data fetched from API")
+            return False
+
+        # เตรียม header
+        header = ["StationCode", "Name", "River", "Location", "Lat", "Lon",
+                  "WaterLevel", "BankLevel", "Situation", "Trend", "Time"]
+
+        # เตรียมข้อมูลเป็น 2D array
+        rows = [header]
+        for st in data:
+            rows.append([
+                st["StationCode"],
+                st["Name"],
+                st["River"],
+                st["Location"],
+                st["Lat"],
+                st["Lon"],
+                st["WaterLevel"],
+                st["BankLevel"],
+                st["Situation"],
+                st["Trend"],
+                st["Time"]
+            ])
+
+        # Bulk Update: clear แล้วเขียนทั้งหมดในครั้งเดียว
+        print(f"[LazySync] Bulk updating {len(rows)} rows to Water_Levels...")
+        ws.clear()
+        ws.update('A1', rows, value_input_option='RAW')
+
+        # อัปเดต timestamp ใน Cell L1
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws.update_acell('L1', f"LastSync: {now}")
+
+        print(f"[LazySync] Successfully synced {len(data)} stations at {now}")
+        return True
+
+    except Exception as e:
+        print(f"[LazySync] Error syncing to sheets: {e}")
+        return False
+
+
+def get_water_data_lazy(sheets_client, sheet_id):
+    """
+    อ่านข้อมูลระดับน้ำจาก Google Sheets (แทนการดึงจาก API ตรงๆ)
+    พร้อมเช็ค timestamp ว่าข้อมูล stale หรือไม่
+    Returns: list of dicts
+    """
+    if not sheets_client or not sheet_id:
+        return []
+
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        ws = sheet.worksheet("Water_Levels")
+
+        # เช็ค timestamp
+        try:
+            last_sync = ws.acell('L1').value
+            print(f"[LazySync] Last sync: {last_sync}")
+        except:
+            last_sync = "Unknown"
+
+        records = ws.get_all_records()
+        print(f"[LazySync] Loaded {len(records)} records from Water_Levels")
+        return records
+
+    except Exception as e:
+        print(f"[LazySync] Error reading from sheets: {e}")
+        return []
+
+
 def get_water_data_from_sheets(sheets_client, sheet_id, user_lat, user_lon):
     """
-    Fallback: ดึงข้อมูลระดับน้ำจาก Google Sheets กรณี ThaiWater API ใช้ไม่ได้
+    ดึงข้อมูลระดับน้ำจาก Google Sheets พร้อมคำนวณระยะทาง
+    เลือก 3 สถานีที่ใกล้ที่สุด
     """
     water_stations = []
     try:
-        sheet = sheets_client.open_by_key(sheet_id)
-        water_worksheet = sheet.worksheet("Water_Levels")
-        rows = water_worksheet.get_all_records()
-        for row in rows:
+        records = get_water_data_lazy(sheets_client, sheet_id)
+        for row in records:
             try:
-                st_lat = float(row.get('Latitude', 0))
-                st_lon = float(row.get('Longitude', 0))
+                st_lat = float(row.get('Lat', 0))
+                st_lon = float(row.get('Lon', 0))
+                if st_lat == 0 and st_lon == 0:
+                    continue
                 distance = calculate_distance(user_lat, user_lon, st_lat, st_lon)
+
+                wl_value = row.get('WaterLevel', '-')
+                bl_value = row.get('BankLevel', '-')
+                situation = row.get('Situation', 'ปกติ')
+                trend = row.get('Trend', 'คงที่')
+
                 water_stations.append({
                     "stationName": row.get('Name', 'ไม่ระบุชื่อ'),
-                    "provinceName": row.get('Province', ''),
+                    "provinceName": row.get('Location', ''),
+                    "riverName": row.get('River', ''),
                     "latitude": st_lat,
                     "longitude": st_lon,
                     "distance_km": distance,
-                    "water_level": {"value": row.get('WaterLevel_M', '-'), "uom": "m"},
-                    "status_fallback": row.get('Status', '🟢 เฝ้าระวัง'),
+                    "water_level": {"value": wl_value, "uom": "m"},
+                    "bank_level": bl_value,
+                    "situation": situation,
+                    "trend": trend,
+                    "measure_time": row.get('Time', '-'),
                     "source": "sheets"
                 })
             except (ValueError, TypeError):
                 continue
+
         water_stations.sort(key=lambda x: x["distance_km"])
         return water_stations[:3]
     except Exception as e:
@@ -419,9 +665,13 @@ def get_water_data_from_sheets(sheets_client, sheet_id, user_lat, user_lon):
         return []
 
 
-def build_water_level_text_report(user_lat, user_lon, timestamp, thaiwater_stations, weather_info, water_flow):
+# =============================================================================
+# ========== WATER LEVEL REPORT BUILDERS ==========
+# =============================================================================
+
+def build_water_level_text_report(user_lat, user_lon, timestamp, stations, weather_info, water_flow):
     """
-    สร้างรายงานข้อความระดับน้ำแบบ text (ใช้เมื่อส่ง Flex Message ไม่ได้)
+    สร้างรายงานข้อความระดับน้ำแบบ text
     """
     lines = [
         "🌊 รายงานสถานการณ์น้ำรายพิกัดของคุณ",
@@ -430,33 +680,35 @@ def build_water_level_text_report(user_lat, user_lon, timestamp, thaiwater_stati
         ""
     ]
 
-    # สภาพอากาศ
     lines.append("🌦️ สภาพอากาศปัจจุบัน:")
     lines.append(weather_info)
     lines.append("")
 
-    # ข้อมูลระดับน้ำจาก ThaiWater
     lines.append("📡 ข้อมูลระดับน้ำจากสถานี ThaiWater ที่ใกล้ที่สุด:")
     lines.append("")
 
-    if not thaiwater_stations:
+    if not stations:
         lines.append("⚠️ ไม่พบสถานีตรวจวัดน้ำในรัศมี 50 กม. รอบพิกัดของคุณ")
     else:
-        for i, st in enumerate(thaiwater_stations, 1):
+        for i, st in enumerate(stations, 1):
             wl = st.get("water_level")
             distance = st.get("distance_km", 0)
+            situation = st.get("situation", "ไม่มีข้อมูล")
+            trend = st.get("trend", "คงที่")
 
-            if wl and wl.get("value") is not None:
+            if wl and wl.get("value") not in [None, "-", ""]:
                 try:
                     wl_value = float(wl["value"])
-                    assessment = assess_water_level_status(wl_value, st.get("stationName", ""))
+                    bl = st.get("bank_level")
+                    assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None)
                     lines.append(f"{i}. 📍 {st['stationName']}")
                     lines.append(f"   🗺️ ห่างจากคุณ: {distance:.2f} กม.")
                     lines.append(f"   📏 ระดับน้ำ: {wl_value:.2f} {wl.get('uom', 'm')}")
                     lines.append(f"   📊 สถานะ: {assessment['status']}")
+                    lines.append(f"   🌊 สถานการณ์: {situation} | แนวโน้ม: {trend}")
                     lines.append(f"   💡 คำแนะนำ: {assessment['advice']}")
-                    if wl.get('time'):
-                        lines.append(f"   ⏱️ วัดล่าสุด: {wl['time']}")
+                    if st.get('measure_time') and st['measure_time'] != '-':
+                        lines.append(f"   ⏱️ วัดล่าสุด: {st['measure_time']}")
                 except (ValueError, TypeError):
                     lines.append(f"{i}. 📍 {st['stationName']}")
                     lines.append(f"   🗺️ ห่างจากคุณ: {distance:.2f} กม.")
@@ -467,23 +719,21 @@ def build_water_level_text_report(user_lat, user_lon, timestamp, thaiwater_stati
                 lines.append(f"   ⚪ ไม่มีข้อมูลระดับน้ำล่าสุด")
             lines.append("")
 
-    # ประมาณการน้ำหลากจาก Open-Meteo
     lines.append("🌊 ประมาณการน้ำหลาก (Open-Meteo Flood API):")
     lines.append(f"   💧 อัตราการไหล: {water_flow.get('flow', 'N/A')}")
     lines.append(f"   📐 ความสูงน้ำประมาณการ: {water_flow.get('height', 'N/A')}")
     lines.append(f"   📊 สถานะ: {water_flow.get('status', 'N/A')}")
     lines.append("")
-    lines.append("📌 แหล่งข้อมูล: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater) และ Open-Meteo")
-    lines.append("🔗 ดูเพิ่มเติม: https://www.thaiwater.net")
+    lines.append("📌 แหล่งข้อมูล: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)")
+    lines.append(f"🔗 ดูเพิ่มเติม: {THAIWATER_WEB_URL}")
 
     return "\n".join(lines)
 
 
-def build_water_level_flex_message(user_lat, user_lon, timestamp, thaiwater_stations, weather_info, water_flow):
+def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weather_info, water_flow):
     """
     สร้าง Flex Message สวยงามสำหรับรายงานระดับน้ำ
     """
-    # Header section
     header_box = BoxComponent(
         layout="vertical",
         contents=[
@@ -492,10 +742,8 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, thaiwater_stat
         ]
     )
 
-    # Separator
     sep1 = SeparatorComponent(margin="lg")
 
-    # Weather section
     weather_box = BoxComponent(
         layout="vertical",
         margin="lg",
@@ -507,37 +755,36 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, thaiwater_stat
 
     sep2 = SeparatorComponent(margin="lg")
 
-    # Water stations section
     stations_box = BoxComponent(
         layout="vertical",
         margin="lg",
         contents=[TextComponent(text="📡 สถานีตรวจวัดใกล้คุณ", weight="bold", size="sm", color="#374151")]
     )
 
-    if not thaiwater_stations:
+    if not stations:
         stations_box.contents.append(
             TextComponent(text="⚠️ ไม่พบสถานีในรัศมี 50 กม.", size="xs", color="#EF4444", margin="sm")
         )
     else:
-        for st in thaiwater_stations:
+        for st in stations:
             wl = st.get("water_level")
             distance = st.get("distance_km", 0)
+            situation = st.get("situation", "ไม่มีข้อมูล")
+            trend = st.get("trend", "คงที่")
 
-            if wl and wl.get("value") is not None:
+            wl_value = "-"
+            risk_color = "#9CA3AF"
+            assessment = assess_water_level_status(None)
+
+            if wl and wl.get("value") not in [None, "-", ""]:
                 try:
                     wl_value = float(wl["value"])
-                    assessment = assess_water_level_status(wl_value)
+                    bl = st.get("bank_level")
+                    assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None)
                     risk_color = assessment["color"]
                 except (ValueError, TypeError):
-                    wl_value = "-"
-                    assessment = assess_water_level_status(None)
-                    risk_color = "#9CA3AF"
-            else:
-                wl_value = "-"
-                assessment = assess_water_level_status(None)
-                risk_color = "#9CA3AF"
+                    pass
 
-            # Station card
             station_card = BoxComponent(
                 layout="vertical",
                 margin="sm",
@@ -554,6 +801,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, thaiwater_stat
                             TextComponent(text=assessment["status"], size="xxs", color=risk_color, weight="bold"),
                         ]
                     ),
+                    TextComponent(text=f"🌊 สถานการณ์: {situation} | แนวโน้ม: {trend}", size="xxs", color="#6B7280", margin="xs"),
                     TextComponent(text=assessment["advice"], size="xxs", color="#6B7280", margin="xs", wrap=True)
                 ]
             )
@@ -561,7 +809,6 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, thaiwater_stat
 
     sep3 = SeparatorComponent(margin="lg")
 
-    # Flood estimation section
     flood_box = BoxComponent(
         layout="vertical",
         margin="lg",
@@ -573,7 +820,6 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, thaiwater_stat
         ]
     )
 
-    # Footer with link
     footer_box = BoxComponent(
         layout="vertical",
         margin="lg",
@@ -583,13 +829,12 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, thaiwater_stat
             ButtonComponent(
                 style="link",
                 height="sm",
-                action=URIAction(label="🔍 ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri="https://www.thaiwater.net"),
+                action=URIAction(label="🔍 ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=THAIWATER_WEB_URL),
                 color="#2563EB"
             )
         ]
     )
 
-    # Assemble bubble
     bubble = BubbleContainer(
         header=header_box,
         body=BoxComponent(
@@ -608,7 +853,123 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, thaiwater_stat
     return FlexSendMessage(alt_text="รายงานระดับน้ำรายพิกัด", contents=bubble)
 
 
+# =============================================================================
+# ========== SOS PRIORITY CALCULATION ==========
+# =============================================================================
+
+def calculate_sos_priority(group_types, urgency_level):
+    """
+    คำนวณ Priority จากกลุ่มผู้ประสบภัยและระดับความเร่งด่วน
+    group_types: list (เช่น ["เด็กเล็ก/คนชรา", "ผู้ป่วยติดเตียง"])
+    urgency_level: str ("วิกฤต" | "สูง" | "ปานกลาง" | "ต่ำ" | "ขาดแคลนยา")
+
+    Returns: tuple (priority_label, priority_code)
+    """
+    gt = [g.lower() for g in group_types] if group_types else []
+    ul = urgency_level.lower() if urgency_level else ""
+
+    # CRITICAL: มีผู้บาดเจ็บ OR ผู้ป่วยติดเตียง OR น้ำระดับวิกฤต OR ขาดแคลนยาหนัก
+    if any(k in g for g in gt for k in ["บาดเจ็บ", "ผู้ป่วย", "พิการ"]):
+        return ("🔴 CRITICAL (เร่งด่วนวิกฤตสูงสุด)", "CRITICAL")
+    if "วิกฤต" in ul:
+        return ("🔴 CRITICAL (เร่งด่วนวิกฤตสูงสุด)", "CRITICAL")
+    if "ขาดแคลน" in ul:
+        return ("🔴 CRITICAL (เร่งด่วนวิกฤตสูงสุด)", "CRITICAL")
+
+    # HIGH: มีเด็ก/คนชรา OR น้ำระดับสูง
+    if any(k in g for g in gt for k in ["เด็ก", "ชรา", "เด็กเล็ก"]):
+        return ("🟠 HIGH (ความเสี่ยงสูง)", "HIGH")
+    if "สูง" in ul:
+        return ("🟠 HIGH (ความเสี่ยงสูง)", "HIGH")
+
+    # NORMAL
+    return ("🟢 NORMAL (สถานการณ์ปกติ)", "NORMAL")
+
+
+def generate_case_id():
+    """สร้างเลขเคส SOS"""
+    today_str = datetime.datetime.now().strftime("%Y%m%d")
+    random_suffix = datetime.datetime.now().strftime("%f")[:4]
+    return f"SOS-{today_str}-{random_suffix}"
+
+
+def send_line_notification(user_id, message):
+    """ส่ง Push Message กลับไปหาผู้ใช้ผ่าน LINE"""
+    if not line_bot_api:
+        print("[LINE] line_bot_api not initialized")
+        return False
+    try:
+        line_bot_api.push_message(user_id, TextSendMessage(text=message))
+        print(f"[LINE] Notification sent to {user_id}")
+        return True
+    except Exception as e:
+        print(f"[LINE] Failed to send notification: {e}")
+        return False
+
+
+# =============================================================================
+# ========== USER NEEDS MANAGEMENT ==========
+# =============================================================================
+
+def save_user_need(sheets_client, sheet_id, user_id, timestamp, lat, lon, category, details, urgency):
+    """
+    บันทึกความต้องการสิ่งของลง Google Sheets (แท็บ user_needs)
+    Returns: True/False
+    """
+    if not sheets_client or not sheet_id:
+        return False
+
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        try:
+            ws = sheet.worksheet("user_needs")
+        except gspread.WorksheetNotFound:
+            ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="12")
+            ws.append_row(["Timestamp", "UserID", "Latitude", "Longitude",
+                           "Category", "Details", "Urgency", "Status"])
+
+        ws.append_row([timestamp, user_id, lat, lon, category, details, urgency, "PENDING"])
+        return True
+    except Exception as e:
+        print(f"[UserNeeds] Failed to save: {e}")
+        return False
+
+
+def get_all_user_needs(sheets_client, sheet_id):
+    """ดึงรายการความต้องการสิ่งของทั้งหมด"""
+    if not sheets_client or not sheet_id:
+        return []
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        ws = sheet.worksheet("user_needs")
+        return ws.get_all_records()
+    except Exception as e:
+        print(f"[UserNeeds] Failed to load: {e}")
+        return []
+
+
+def update_need_status(sheets_client, sheet_id, timestamp, user_id, new_status):
+    """อัปเดตสถานะความต้องการ (PENDING -> COMPLETED)"""
+    if not sheets_client or not sheet_id:
+        return False
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        ws = sheet.worksheet("user_needs")
+        rows = ws.get_all_records()
+        for i, row in enumerate(rows, start=2):
+            if row.get("Timestamp") == timestamp and row.get("UserID") == user_id:
+                ws.update_cell(i, 8, new_status)  # Column H = Status
+                return True
+        return False
+    except Exception as e:
+        print(f"[UserNeeds] Failed to update status: {e}")
+        return False
+
+
+# =============================================================================
 # ========== 8. ฟังก์ชันสร้างตาราง คอลัมน์ และกรอกข้อมูลตัวอย่างลง Google Sheets อัตโนมัติ (Auto-Setup) ==========
+# =============================================================================
+
 def setup_sheets_automatically(sheet):
     try:
         existing_sheets = [w.title for w in sheet.worksheets()]
@@ -622,11 +983,12 @@ def setup_sheets_automatically(sheet):
         # 2. แท็บ sos_requests
         if "sos_requests" not in existing_sheets:
             print("Creating sos_requests worksheet...")
-            sos_ws = sheet.add_worksheet(title="sos_requests", rows="3000", cols="20")
+            sos_ws = sheet.add_worksheet(title="sos_requests", rows="3000", cols="25")
             sos_ws.append_row([
                 "request_id", "user_id", "timestamp", "latitude", "longitude",
-                "people_count", "children", "elderly", "bedridden", "pets",
-                "water_level", "note", "priority", "status"
+                "people_count", "group_types", "urgency_level", "has_photo",
+                "water_level", "note", "priority", "status", "responder_name",
+                "responder_notes", "accepted_at", "completed_at"
             ])
 
         # 3. แท็บ Shelters
@@ -646,17 +1008,19 @@ def setup_sheets_automatically(sheet):
             for r in mock_rows:
                 shelters_ws.append_row(r)
 
-        # 4. แท็บ Water_Levels (ใช้เป็น Fallback เมื่อ ThaiWater API ล่ม)
+        # 4. แท็บ Water_Levels (โครงสร้างใหม่ 11 คอลัมน์)
         if "Water_Levels" not in existing_sheets:
             print("Creating Water_Levels worksheet...")
-            water_ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="10")
+            water_ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="12")
             water_ws.append_row([
-                "StationID", "Name", "Province", "Latitude", "Longitude", "WaterLevel_M", "Status"
+                "StationCode", "Name", "River", "Location", "Lat", "Lon",
+                "WaterLevel", "BankLevel", "Situation", "Trend", "Time"
             ])
+            # ข้อมูลตัวอย่าง
             water_rows = [
-                ["WT001", "สถานีลุ่มน้ำคลองอู่ตะเภา (หาดใหญ่)", "สงขลา", "7.0125", "100.4560", "4.2", "🟢 เฝ้าระวัง"],
-                ["WT002", "สถานีลุ่มน้ำเจ้าพระยา (สะพานพุทธ)", "กรุงเทพ", "13.7390", "100.4985", "1.8", "🟢 เฝ้าระวัง"],
-                ["WT003", "สถานีลุ่มน้ำกว๊านพะเยา", "พะเยา", "19.1620", "99.8940", "6.5", "🔴 อันตรายวิกฤต"]
+                ["WT001", "สถานีลุ่มน้ำคลองอู่ตะเภา (หาดใหญ่)", "คลองอู่ตะเภา", "สงขลา", "7.0125", "100.4560", "4.2", "5.0", "เฝ้าระวัง", "คงที่", "2025-01-01 10:00"],
+                ["WT002", "สถานีลุ่มน้ำเจ้าพระยา (สะพานพุทธ)", "เจ้าพระยา", "กรุงเทพ", "13.7390", "100.4985", "1.8", "3.5", "ปกติ", "ลดลง", "2025-01-01 10:00"],
+                ["WT003", "สถานีลุ่มน้ำกว๊านพะเยา", "กว๊านพะเยา", "พะเยา", "19.1620", "99.8940", "6.5", "5.5", "วิกฤต", "เพิ่มขึ้น", "2025-01-01 10:00"]
             ]
             for r in water_rows:
                 water_ws.append_row(r)
@@ -674,10 +1038,11 @@ def setup_sheets_automatically(sheet):
             for r in contact_rows:
                 contacts_ws.append_row(r)
 
-        # 6. แท็บ user_needs
+        # 6. แท็บ user_needs (โครงสร้างใหม่)
         if "user_needs" not in existing_sheets:
-            needs_ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="10")
-            needs_ws.append_row(["Timestamp", "UserID", "Need_Detail", "Status"])
+            needs_ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="12")
+            needs_ws.append_row(["Timestamp", "UserID", "Latitude", "Longitude",
+                                 "Category", "Details", "Urgency", "Status"])
 
         # 7. แท็บ AI Logs
         if "AI Logs" not in existing_sheets:
@@ -702,7 +1067,7 @@ SHEETS_INITIALIZED = False
 LAST_SHEETS_ERROR = "ยังไม่ได้เปิดใช้งานการเชื่อมต่อ"
 
 
-# ========== 9. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ (ไม่ต้องอิง oauth2client) ==========
+# ========== 9. ฟังก์ชันเชื่อมต่อ Google Sheets แบบ Native ยุคใหม่ ==========
 def get_sheets_client():
     global SHEETS_INITIALIZED, LAST_SHEETS_ERROR
     clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
