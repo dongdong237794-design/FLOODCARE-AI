@@ -585,53 +585,76 @@ def find_nearest_water_stations(user_lat, user_lon, max_stations=3, max_distance
 
 def assess_water_level_status(water_level_value, bank_level_value=None):
     """
-    ประเมินสถานะระดับน้ำแบบละเอียด พร้อมคำแนะนำ
+    ประเมินสถานะระดับน้ำเลียนแบบหน้าเว็บ ThaiWater
     """
     if water_level_value is None:
         return {
             "status": "⚪ ไม่มีข้อมูล",
-            "situation": "ไม่มีข้อมูล",
             "color": "#9CA3AF",
-            "advice": "ไม่สามารถประเมินได้ โปรดติดตามสถานการณ์",
-            "risk_level": 0
+            "diff_text": "-",
+            "advice": "ไม่สามารถประเมินได้"
         }
 
     try:
         wl = float(water_level_value)
+        bl = float(bank_level_value) if bank_level_value else 0
+        diff = bl - wl
+        diff_text = f"{abs(diff):.2f}"
     except (ValueError, TypeError):
         return {
             "status": "⚪ ข้อมูลไม่ถูกต้อง",
-            "situation": "ไม่มีข้อมูล",
             "color": "#9CA3AF",
-            "advice": "ไม่สามารถประเมินได้",
-            "risk_level": 0
+            "diff_text": "-",
+            "advice": "ไม่สามารถประเมินได้"
         }
 
-    situation = calculate_situation(wl, bank_level_value)
+    # จำลองการคำนวณสถานะตามหน้าเว็บ ThaiWater
+    if bl <= 0:
+        return {"status": "ปกติ", "color": "#10B981", "diff_text": "-", "advice": "ติดตามสถานการณ์"}
 
-    if situation == "วิกฤต":
+    ratio = wl / bl
+    
+    if wl >= bl:
         return {
-            "status": "🔴 วิกฤติ (ล้นตลิ่ง)",
-            "situation": "วิกฤต",
+            "status": "วิกฤต",
             "color": "#EF4444",
-            "advice": "⚠️ อพยพทันที! ระดับน้ำล้นตลิ่งแล้ว อย่าอยู่ชั้นล่าง ตัดกระแสไฟ ขึ้นที่สูง",
-            "risk_level": 4
+            "diff_text": f"ล้นตลิ่ง {abs(diff):.2f}",
+            "advice": "⚠️ อพยพทันที! ระดับน้ำล้นตลิ่ง"
         }
-    elif situation == "เฝ้าระวัง":
+    elif ratio >= 0.90:
         return {
-            "status": "🟠 เฝ้าระวัง (ใกล้ล้นตลิ่ง)",
-            "situation": "เฝ้าระวัง",
-            "color": "#F97316",
-            "advice": "🚨 เตรียมอพยพ! ระดับน้ำใกล้ล้นตลิ่ง เก็บข้าวของขึ้นที่สูง",
-            "risk_level": 3
+            "status": "มาก (เฝ้าระวัง)",
+            "color": "#2563EB", # สีน้ำเงิน
+            "diff_text": diff_text,
+            "advice": "🚨 ระวัง! น้ำใกล้ล้นตลิ่ง"
+        }
+    elif ratio >= 0.70:
+        return {
+            "status": "มาก",
+            "color": "#2563EB", # สีน้ำเงิน
+            "diff_text": diff_text,
+            "advice": "💧 ระดับน้ำค่อนข้างสูง"
+        }
+    elif ratio >= 0.30:
+        return {
+            "status": "ปกติ",
+            "color": "#10B981", # สีเขียว
+            "diff_text": diff_text,
+            "advice": "✅ ระดับน้ำปกติ"
+        }
+    elif ratio >= 0.10:
+        return {
+            "status": "น้อย",
+            "color": "#FBBF24", # สีเหลือง
+            "diff_text": diff_text,
+            "advice": "⚠️ ระดับน้ำน้อย"
         }
     else:
         return {
-            "status": "🟢 ปกติ",
-            "situation": "ปกติ",
-            "color": "#10B981",
-            "advice": "✅ ระดับน้ำอยู่ในเกณฑ์ปกติ แต่ควรติดตามสถานการณ์",
-            "risk_level": 1
+            "status": "น้อยวิกฤต",
+            "color": "#F97316", # สีส้ม
+            "diff_text": diff_text,
+            "advice": "⚠️ ระดับน้ำน้อยวิกฤต"
         }
 
 
@@ -1084,12 +1107,22 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                     BoxComponent(
                         layout="horizontal",
                         margin="xs",
+                        spacing="sm",
                         contents=[
-                            TextComponent(text=assessment["status"], size="xxs", color=risk_color, weight="bold"),
+                            BoxComponent(
+                                layout="vertical",
+                                background_color=risk_color,
+                                corner_radius="sm",
+                                padding_start="sm",
+                                padding_end="sm",
+                                contents=[
+                                    TextComponent(text=assessment["status"], size="xxs", color="#FFFFFF", weight="bold")
+                                ]
+                            ),
+                            TextComponent(text=f"ต่ำกว่าตลิ่ง: {assessment['diff_text']} ม.", size="xxs", color=risk_color, weight="bold")
                         ]
                     ),
-                    TextComponent(text=f"สถานการณ์: {situation} | แนวโน้ม: {trend}", size="xxs", color="#6B7280", margin="xs"),
-                    TextComponent(text=assessment["advice"], size="xxs", color="#6B7280", margin="xs", wrap=True)
+                    TextComponent(text=f"แนวโน้ม: {trend} | {assessment['advice']}", size="xxs", color="#6B7280", margin="xs")
                 ]
             )
             stations_box.contents.append(station_card)
