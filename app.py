@@ -18,6 +18,131 @@ app = Flask(__name__)
 # ลงทะเบียน Blueprint Dashboard
 app.register_blueprint(dashboard_bp)
 
+# =============================================================================
+# AUTO-SYNC: ตรวจสอบความสดของข้อมูล Water_Levels ก่อนใช้งาน
+# ถ้าข้อมูลเก่ากว่า WATER_DATA_MAX_AGE_MINUTES (หรือยังไม่เคย sync)
+# จะเรียก bot_config.sync_water_levels_to_sheets() ให้อัตโนมัติ
+# =============================================================================
+WATER_DATA_MAX_AGE_MINUTES = 12
+
+
+def _ensure_water_data_fresh(sheets_client, sheet_id):
+    """
+    เช็คเวลา LastSync ใน Water_Levels!L1
+    ถ้าไม่มี/อ่านไม่ได้/เก่าเกินกำหนด -> สั่ง sync ใหม่จาก ThaiWater ทันที
+    คืนค่า True ถ้า sync เกิดขึ้น (หรือพยายาม sync), False ถ้าข้อมูลยังสดอยู่เลยไม่ต้องทำอะไร
+    """
+    if not sheets_client or not sheet_id:
+        return False
+
+    needs_sync = True
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        ws = sheet.worksheet("Water_Levels")
+        last_sync_raw = ws.acell('L1').value  # รูปแบบ: "LastSync: YYYY-MM-DD HH:MM:SS"
+
+        if last_sync_raw and "LastSync:" in last_sync_raw:
+            ts_str = last_sync_raw.replace("LastSync:", "").strip()
+            last_sync_time = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            age_minutes = (datetime.datetime.now() - last_sync_time).total_seconds() / 60
+            print(f"[AutoSync] Water_Levels age: {age_minutes:.1f} min")
+            if age_minutes <= WATER_DATA_MAX_AGE_MINUTES:
+                needs_sync = False
+    except Exception as e:
+        # ไม่มีแท็บ/ไม่มีค่า L1/parse ไม่ได้ -> ถือว่าข้อมูลเก่า/ไม่มี ต้อง sync
+        print(f"[AutoSync] Could not read LastSync, will sync: {e}")
+
+    if needs_sync:
+        print("[AutoSync] Water_Levels stale or missing -> triggering sync now...")
+        try:
+            success = bot_config.sync_water_levels_to_sheets(sheets_client, sheet_id)
+            print(f"[AutoSync] Sync result: {success}")
+        except Exception as e:
+            print(f"[AutoSync] Sync attempt failed: {e}")
+        return True
+
+    return False
+
+
+# =============================================================================
+# DEBUG ROUTE: ตรวจสอบว่า ThaiWater API ยังเข้าถึงได้และ field ตรงกันหรือไม่
+# เรียกผ่านเบราว์เซอร์: https://<your-app>.onrender.com/debug/thaiwater
+# (แนะนำให้ลบ หรือใส่ password check ก่อน deploy ใช้งานจริงระยะยาว)
+# =============================================================================
+@app.route("/debug/thaiwater", methods=['GET'])
+def debug_thaiwater():
+    from flask import jsonify
+
+    result = {
+        "v3_api_reachable": False,
+        "v3_raw_sample": None,
+        "v3_parsed_sample": None,
+        "v3_total_count": 0,
+        "error": None
+    }
+    try:
+        raw_data = bot_config.fetch_waterlevel_v3()
+        if raw_data:
+            result["v3_api_reachable"] = True
+            result["v3_total_count"] = len(raw_data)
+            result["v3_raw_sample"] = raw_data[0] if len(raw_data) > 0 else None
+            result["v3_parsed_sample"] = bot_config.parse_v3_station(raw_data[0]) if len(raw_data) > 0 else None
+        else:
+            result["error"] = "fetch_waterlevel_v3() returned None or empty list"
+    except Exception as e:
+        result["error"] = str(e)
+
+    return jsonify(result)
+
+
+# =============================================================================
+# DEBUG ROUTE: ดูสถานะ Sheets (LastSync, จำนวน records) + บังคับ sync ทันที
+# เรียกผ่านเบราว์เซอร์: https://<your-app>.onrender.com/debug/sync-status
+# เรียก POST ไปที่ /debug/force-sync เพื่อบังคับ sync ทันที (ไม่ต้องรอผู้ใช้ถาม)
+# =============================================================================
+@app.route("/debug/sync-status", methods=['GET'])
+def debug_sync_status():
+    from flask import jsonify
+
+    sheets_client = bot_config.get_sheets_client()
+    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
+
+    result = {
+        "sheets_connected": sheets_client is not None,
+        "sheet_id_configured": bool(clean_sheet_id),
+        "last_sheets_error": bot_config.LAST_SHEETS_ERROR,
+        "last_sync": None,
+        "record_count": 0
+    }
+
+    if sheets_client and clean_sheet_id:
+        try:
+            sheet = sheets_client.open_by_key(clean_sheet_id)
+            ws = sheet.worksheet("Water_Levels")
+            result["last_sync"] = ws.acell('L1').value
+            result["record_count"] = len(ws.get_all_records())
+        except Exception as e:
+            result["error"] = str(e)
+
+    return jsonify(result)
+
+
+@app.route("/debug/force-sync", methods=['POST'])
+def debug_force_sync():
+    from flask import jsonify
+
+    sheets_client = bot_config.get_sheets_client()
+    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
+
+    if not sheets_client or not clean_sheet_id:
+        return jsonify({"success": False, "error": "Sheets client or sheet_id not configured"}), 400
+
+    try:
+        success = bot_config.sync_water_levels_to_sheets(sheets_client, clean_sheet_id)
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 # =============================================================================
 # WEBHOOK ROUTE สำหรับรับสัญญาณ LINE
@@ -711,6 +836,13 @@ def handle_location_message(event):
     # 12.2 ตรวจสอบระดับน้ำ (Lazy Sync from Sheets)
     # ===========================
     elif state == "waiting_water_location":
+        # Auto-sync: ถ้าข้อมูลใน Sheets เก่ากว่า WATER_DATA_MAX_AGE_MINUTES (หรือยังไม่มี)
+        # จะดึงจาก ThaiWater มาอัปเดต Sheets ก่อนใช้งานทันที
+        try:
+            _ensure_water_data_fresh(sheets_client, clean_sheet_id)
+        except Exception as e:
+            print(f"[WaterLevel] Auto-sync check failed: {e}")
+
         thaiwater_stations = []
         try:
             thaiwater_stations = bot_config.get_water_data_from_sheets(
