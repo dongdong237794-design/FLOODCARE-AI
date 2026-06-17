@@ -609,29 +609,21 @@ def assess_water_level_status(water_level_value, bank_level_value=None):
 
     situation = calculate_situation(wl, bank_level_value)
 
-    if wl >= 5.0 or situation == "วิกฤต":
+    if situation == "วิกฤต":
         return {
-            "status": "🔴 วิกฤติสูงสุด",
+            "status": "🔴 วิกฤติ (ล้นตลิ่ง)",
             "situation": "วิกฤต",
             "color": "#EF4444",
-            "advice": "⚠️ อพยพทันที! ระดับน้ำสูงเกณฑ์อันตราย อย่าอยู่ชั้นล่าง ตัดกระแสไฟ ขึ้นที่สูง",
+            "advice": "⚠️ อพยพทันที! ระดับน้ำล้นตลิ่งแล้ว อย่าอยู่ชั้นล่าง ตัดกระแสไฟ ขึ้นที่สูง",
             "risk_level": 4
         }
-    elif wl >= 3.0 or situation == "เฝ้าระวัง":
+    elif situation == "เฝ้าระวัง":
         return {
-            "status": "🟠 วิกฤติ",
+            "status": "🟠 เฝ้าระวัง (ใกล้ล้นตลิ่ง)",
             "situation": "เฝ้าระวัง",
             "color": "#F97316",
-            "advice": "🚨 เตรียมอพยพ! เก็บข้าวของขึ้นที่สูง เตรียมถุงยังชีพ",
+            "advice": "🚨 เตรียมอพยพ! ระดับน้ำใกล้ล้นตลิ่ง เก็บข้าวของขึ้นที่สูง",
             "risk_level": 3
-        }
-    elif wl >= 1.5:
-        return {
-            "status": "🟡 เฝ้าระวัง",
-            "situation": "เฝ้าระวัง",
-            "color": "#FBBF24",
-            "advice": "⚡ ระวังน้ำท่วมฉับพลัน หลีกเลี่ยงจุดลุ่มต่ำ ติดตามข่าว",
-            "risk_level": 2
         }
     else:
         return {
@@ -1050,15 +1042,6 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
         ]
     )
 
-    weather_box = BoxComponent(
-        layout="vertical",
-        margin="lg",
-        contents=[
-            TextComponent(text="🌦️ สภาพอากาศ", weight="bold", size="sm", color="#374151"),
-            TextComponent(text=weather_info, size="xs", color="#4B5563", margin="sm", wrap=True)
-        ]
-    )
-
     stations_box = BoxComponent(
         layout="vertical",
         margin="lg",
@@ -1097,7 +1080,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                 padding_all="sm",
                 contents=[
                     TextComponent(text=f"📍 {st['stationName']}", weight="bold", size="xs", color="#1F2937"),
-                    TextComponent(text=f"ห่าง {distance:.2f} กม. | ระดับ {wl_value} ม.", size="xxs", color="#4B5563", margin="xs"),
+                    TextComponent(text=f"ห่าง {distance:.2f} กม. | ระดับ {wl_value} ม. / ตลิ่ง {st.get('bank_level', '-')} ม.", size="xxs", color="#4B5563", margin="xs"),
                     BoxComponent(
                         layout="horizontal",
                         margin="xs",
@@ -1110,17 +1093,6 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                 ]
             )
             stations_box.contents.append(station_card)
-
-    flood_box = BoxComponent(
-        layout="vertical",
-        margin="lg",
-        contents=[
-            TextComponent(text="🌊 ประมาณการน้ำหลาก", weight="bold", size="sm", color="#374151"),
-            TextComponent(text=f"อัตราการไหล: {water_flow.get('flow', 'N/A')}", size="xs", color="#4B5563", margin="sm"),
-            TextComponent(text=f"ความสูงน้ำ: {water_flow.get('height', 'N/A')}", size="xs", color="#4B5563"),
-            TextComponent(text=f"สถานะ: {water_flow.get('status', 'N/A')}", size="xs", color="#4B5563")
-        ]
-    )
 
     footer_box = BoxComponent(
         layout="vertical",
@@ -1142,11 +1114,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
         body=BoxComponent(
             layout="vertical",
             contents=[
-                weather_box,
-                SeparatorComponent(margin="lg"),
                 stations_box,
-                SeparatorComponent(margin="lg"),
-                flood_box,
                 footer_box
             ]
         )
