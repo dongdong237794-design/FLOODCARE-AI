@@ -222,6 +222,14 @@ def fetch_waterlevel_v3():
     """
     ดึงข้อมูลระดับน้ำทั้งหมดจาก ThaiWater V3 API (waterlevel_load)
     Returns: list of dict หรือ None ถ้าล้มเหลว
+
+    โครงสร้าง JSON จริง (ยืนยันแล้ว 2026-06-17):
+    {
+      "waterlevel_data": {
+        "result": "OK",
+        "data": [ {...station record...}, ... ]
+      }
+    }
     """
     try:
         headers = {
@@ -232,14 +240,23 @@ def fetch_waterlevel_v3():
         response.raise_for_status()
         data = response.json()
 
-        # API V3 ส่งกลับเป็น list โดยตรง หรืออยู่ใน key "data"
-        stations = data if isinstance(data, list) else data.get("data", [])
-        if not stations and isinstance(data, dict):
-            # ลองหา key อื่น
-            for key in ["stations", "results", "items", "waterlevel"]:
-                if key in data:
-                    stations = data[key]
-                    break
+        stations = []
+
+        # รูปแบบจริงที่ยืนยันแล้ว: {"waterlevel_data": {"result": "OK", "data": [...]}}
+        if isinstance(data, dict) and "waterlevel_data" in data:
+            wl_data = data.get("waterlevel_data", {})
+            stations = wl_data.get("data", [])
+        elif isinstance(data, list):
+            # เผื่อกรณี API คืนเป็น list ตรงๆ ในอนาคต
+            stations = data
+        elif isinstance(data, dict):
+            # เผื่อกรณีโครงสร้างเปลี่ยนไปเป็น key อื่นที่ top-level
+            stations = data.get("data", [])
+            if not stations:
+                for key in ["stations", "results", "items", "waterlevel"]:
+                    if key in data:
+                        stations = data[key]
+                        break
 
         print(f"[ThaiWater V3] Fetched {len(stations)} stations")
         return stations
@@ -258,9 +275,29 @@ def fetch_waterlevel_v3():
 def parse_v3_station(v3_item):
     """
     แปลงข้อมูลจาก V3 API เป็นโครงสร้างมาตรฐาน 11 ฟิลด์
-    V3 อาจมี key ที่ชื่อต่างจาก V1 ต้องรองรับหลายรูปแบบ
+    โครงสร้างจริงที่ยืนยันแล้ว (2026-06-17):
+    {
+      "waterlevel_datetime": "2026-06-17 14:00",
+      "waterlevel_m": null,
+      "waterlevel_msl": "330.59",
+      "river_name": "ลำโดมน้อย",
+      "station": {
+        "tele_station_name": {"th": "...", "en": "..."},
+        "tele_station_oldcode": "M.199",
+        "tele_station_lat": 14.60611,
+        "tele_station_long": 101.472778,
+        "left_bank": 663.260988,
+        "right_bank": 663.583988,
+        "geocode": {
+          "province_name": {"th": "นครราชสีมา", "en": "..."}
+        }
+      }
+    }
+    หมายเหตุ: waterlevel_m มักเป็น null ในหลาย record ต้อง fallback ไปใช้ waterlevel_msl
     """
-    # พยายามอ่านค่าจากหลายชื่อ key ที่เป็นไปได้
+    station = v3_item.get("station") or {}
+    geocode = station.get("geocode") or {}
+
     def get_val(*keys, default="-"):
         for k in keys:
             if k in v3_item and v3_item[k] is not None:
@@ -269,42 +306,64 @@ def parse_v3_station(v3_item):
                     return val
         return default
 
-    # ดึงพิกัด
+    # ดึงพิกัดจาก station
     lat = 0.0
     lon = 0.0
     try:
-        lat = float(get_val("lat", "latitude", "Lat", "station_lat", default=0))
-        lon = float(get_val("long", "lon", "longitude", "Lng", "station_long", default=0))
+        lat = float(station.get("tele_station_lat", 0) or 0)
+        lon = float(station.get("tele_station_long", 0) or 0)
     except (ValueError, TypeError):
         pass
 
-    # ดึงระดับน้ำและระดับตลิ่ง
+    # ดึงระดับน้ำ: waterlevel_m ก่อน ถ้า null ใช้ waterlevel_msl แทน
     wl = None
+    for key in ["waterlevel_m", "waterlevel_msl"]:
+        val = v3_item.get(key)
+        if val is not None and val != "" and val != "null":
+            try:
+                wl = float(val)
+                break
+            except (ValueError, TypeError):
+                continue
+
+    # ดึงระดับตลิ่ง: ใช้ right_bank เป็นค่าเริ่มต้น (ฝั่งขวามักเป็นค่าอ้างอิงหลัก)
     bl = None
     try:
-        wl_val = get_val("waterlevel", "water_level", "wl", " WaterLevel", "value", default=None)
-        if wl_val is not None and wl_val != "-":
-            wl = float(wl_val)
-    except (ValueError, TypeError):
-        wl = None
-
-    try:
-        bl_val = get_val("banklevel", "bank_level", "bl", "BankLevel", "bank", default=None)
-        if bl_val is not None and bl_val != "-":
-            bl = float(bl_val)
+        bank_val = station.get("right_bank")
+        if bank_val is None:
+            bank_val = station.get("left_bank")
+        if bank_val is not None:
+            bl = float(bank_val)
     except (ValueError, TypeError):
         bl = None
 
+    # ชื่อสถานี (รองรับทั้งแบบ dict {"th":..,"en":..} และแบบ string ตรง)
+    station_name_raw = station.get("tele_station_name", "ไม่ระบุชื่อ")
+    if isinstance(station_name_raw, dict):
+        station_name = station_name_raw.get("th") or station_name_raw.get("en") or "ไม่ระบุชื่อ"
+    else:
+        station_name = station_name_raw
+
+    # ชื่อจังหวัด (ซ้อนอยู่ใน station.geocode.province_name)
+    province_raw = geocode.get("province_name", "-")
+    if isinstance(province_raw, dict):
+        province_name = province_raw.get("th") or province_raw.get("en") or "-"
+    else:
+        province_name = province_raw
+
+    # รหัสสถานี: ใช้ oldcode ก่อน (อ่านง่ายกว่า) ถ้าไม่มีใช้ id
+    station_code = station.get("tele_station_oldcode") or station.get("id") or "-"
+
     return {
-        "StationCode": str(get_val("station_code", "stationCode", "code", "id", "station_id", default="-")),
-        "Name": str(get_val("station_name", "stationName", "name", "location", default="ไม่ระบุชื่อ")),
-        "River": str(get_val("river_name", "riverName", "river", "basin", default="-")),
-        "Location": str(get_val("province", "province_name", "provinceName", "location", " amphur ", default="-")),
+        "StationCode": str(station_code),
+        "Name": str(station_name),
+        "River": str(get_val("river_name", default="-")),
+        "Location": str(province_name),
         "Lat": lat,
         "Lon": lon,
         "WaterLevel": wl,
         "BankLevel": bl,
-        "Time": str(get_val("datetime", "timestamp", "time", "measure_time", "date", default="-")),
+        "Time": str(get_val("waterlevel_datetime", default="-")),
     }
 
 
