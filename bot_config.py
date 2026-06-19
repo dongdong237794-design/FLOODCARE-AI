@@ -952,14 +952,11 @@ def sync_water_levels_to_sheets(sheets_client, sheet_id):
         ws.clear()
         ws.update('A1', rows, value_input_option='RAW')
 
-        # อัปเดต timestamp ใน Cell L1 (ปัดเศษนาทีให้ลงตัวที่ 00, 15, 30, 45 เพื่อความสวยงาม)
-        now_dt = datetime.datetime.now()
-        rounded_minute = (now_dt.minute // 15) * 15
-        rounded_now = now_dt.replace(minute=rounded_minute, second=0, microsecond=0)
-        now_str = rounded_now.strftime("%Y-%m-%d %H:%M:%S")
-        ws.update_acell('L1', f"LastSync: {now_str}")
+        # อัปเดต timestamp ใน Cell L1
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ws.update_acell('L1', f"LastSync: {now}")
 
-        print(f"[LazySync] Successfully synced {len(data)} stations at {now_str}")
+        print(f"[LazySync] Successfully synced {len(data)} stations at {now}")
         return True
 
     except Exception as e:
@@ -988,15 +985,9 @@ def get_water_data_lazy(sheets_client, sheet_id):
                 last_sync_dt = datetime.datetime.strptime(last_sync_str, "%Y-%m-%d %H:%M:%S")
                 diff = datetime.datetime.now() - last_sync_dt
                 
-                # ตรวจสอบว่าตอนนี้ถึงรอบ 15 นาทีถัดไปหรือยัง (00, 15, 30, 45)
-                now_dt = datetime.datetime.now()
-                # คำนวณหาเวลา "รอบปัจจุบัน" ที่ควรจะเป็น
-                current_slot_minute = (now_dt.minute // 15) * 15
-                current_slot_dt = now_dt.replace(minute=current_slot_minute, second=0, microsecond=0)
-                
-                # ถ้าเวลา LastSync ในชีท เก่ากว่า "รอบปัจจุบัน" แสดงว่าต้องอัปเดต
-                if last_sync_dt < current_slot_dt:
-                    print(f"[LazySync] Data is from previous slot ({last_sync_str}). Triggering auto-refresh for current slot...")
+                # ถ้าข้อมูลเก่าเกิน 15 นาที (900 วินาที) ให้สั่ง Sync ใหม่
+                if diff.total_seconds() > 900:
+                    print(f"[LazySync] Data is old ({diff.total_seconds():.0f}s). Triggering auto-refresh...")
                     should_sync = True
             else:
                 should_sync = True # ไม่มีข้อมูลเวลา ให้ Sync เลย
@@ -1306,16 +1297,12 @@ def get_greeting_message(user_name="คุณ"):
     text = (
         f"สวัสดี คุณ {user_name}\n"
         "ผมคือ FLOODCARE AI\n"
-        "แชทบอทอัจฉริยะสำหรับ ติดตามและพยากรณ์ระดับน้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยน้ำท่วม\n"
-        "🔍 ผมช่วยคุณได้\n"
-        "1. เบอร์โทรฉุกเฉิน\n"
-        "2. SOS แจ้งเหตุฉุกเฉิน\n"
-        "3. ค้นหาศูนย์อพยพ\n"
-        "4. ตรวจสอบระดับน้ำตรวจสอบข้อมูลระดับน้ำ\n"
-        "5. แจ้งความต้องการหรือขอความช่วยเหลือด้านต่าง ๆ\n"
-        "6. สอบถามข้อมูลจาก AI\n\n"
+        "แชทบอทอัจฉริยะสำหรับ ติดตามและพยากรณ์ระดับน้ำ\n"
+        "🔍 ผมช่วยคุณได้\n\n"
+        "🌐 แสดงฟีเจอร์ที่เรามี\n\n"
+        "📊 แสดงระดับน้ำแบบเรียลไทม์\n\n"
         "🤝 ติดต่อและช่วยเหลือผู้ประสบภัยน้ำท่วม\n"
-        "ผมพร้อมตอบทุกคำถามเกี่ยวกับสถานการณ์น้ำได้ตลอดเวลาครับ 💧😊"
+        "ผมพร้อมตอบทุกคำถามเกี่ยวกับสถานการณ์น้ำในแม่น้ำได้ตลอดเวลาครับ 💧😊"
     )
     return TextSendMessage(text=text)
 
