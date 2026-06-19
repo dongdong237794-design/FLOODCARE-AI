@@ -46,11 +46,6 @@ _WATER_STATIONS_CACHE_TTL = 3600  # 1 ชั่วโมง (วินาที)
 _WEATHER_CACHE = {}  # { "lat,lon": {"data": "...", "time": timestamp} }
 _WEATHER_CACHE_TTL = 1800  # 30 นาที (วินาที)
 
-# Cache สำหรับ ThaiWater V3 (RAM Cache)
-_V3_WATER_CACHE = []
-_V3_WATER_CACHE_TIME = 0
-_V3_WATER_CACHE_TTL = 3600  # 1 ชั่วโมง (วินาที)
-
 # เริ่มใช้งาน LINE API แบบปลอดภัย
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
 handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
@@ -62,7 +57,7 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 gemini_model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash",
+    model_name="gemini-2.0-flash",
     system_instruction=(
         "คุณคือ FLOODCARE AI ผู้ช่วยกู้ภัยมืออาชีพประจำศูนย์ประสานงานภัยน้ำท่วมระดับชาติ\n"
         "บทบาท: ผู้นำในวิกฤตที่ใจดีแต่เด็ดขาด (Calm and Firm)\n"
@@ -101,7 +96,11 @@ gemini_model = genai.GenerativeModel(
         "- ห้ามเดาข้อมูลหรือจินตนาการสิ่งที่ไม่เป็นความจริง\n"
         "- หากข้อมูลไม่แน่ชิด ให้แสดงความห่วงใจ + แนะนำเบอร์สายด่วน\n"
         "- ให้คำตอบเป็นภาษาไทยเสมอ"
-    )
+    ),
+    generation_config={
+        "max_output_tokens": 600,
+        "temperature": 0.7,
+    }
 )
 
 
@@ -166,13 +165,9 @@ def get_weather_from_sheet(lat, lon):
     try:
         if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
             return None
-
-        sheets_client = get_sheets_client()
-        if not sheets_client:
-            return None
-
-        clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
-        sh = sheets_client.open_by_key(clean_sheet_id)
+            
+        gc = gspread.service_account(filename=GOOGLE_SERVICE_ACCOUNT_JSON)
+        sh = gc.open_by_key(GOOGLE_SHEET_ID)
         
         # ลองหาแผ่นงาน WeatherCache ถ้าไม่มีให้สร้างใหม่
         try:
@@ -186,13 +181,10 @@ def get_weather_from_sheet(lat, lon):
         key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
         
         for row in records:
-            if row.get("lat_lon") == key:
-                try:
-                    cache_time = float(row.get("timestamp", 0))
-                    if time.time() - cache_time < _WEATHER_CACHE_TTL:
-                        return row.get("weather_text")
-                except (ValueError, TypeError):
-                    continue
+            if row["lat_lon"] == key:
+                cache_time = float(row["timestamp"])
+                if time.time() - cache_time < _WEATHER_CACHE_TTL:
+                    return row["weather_text"]
         return None
     except Exception as e:
         print(f"Sheet Cache Read Error: {e}")
@@ -203,34 +195,20 @@ def save_weather_to_sheet(lat, lon, text):
     try:
         if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
             return
-
-        sheets_client = get_sheets_client()
-        if not sheets_client:
-            return
-
-        clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
-        sh = sheets_client.open_by_key(clean_sheet_id)
-        
-        # สร้าง worksheet ถ้ายังไม่มี
-        try:
-            ws = sh.worksheet("WeatherCache")
-        except gspread.exceptions.WorksheetNotFound:
-            ws = sh.add_worksheet(title="WeatherCache", rows="1000", cols="5")
-            ws.append_row(["lat_lon", "weather_text", "timestamp"])
+            
+        gc = gspread.service_account(filename=GOOGLE_SERVICE_ACCOUNT_JSON)
+        sh = gc.open_by_key(GOOGLE_SHEET_ID)
+        ws = sh.worksheet("WeatherCache")
         
         key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
         now = time.time()
         
         # หาว่ามีแถวเดิมไหม ถ้ามีให้แก้ ถ้าไม่มีให้เพิ่ม
-        try:
-            cell = ws.find(key)
-            if cell:
-                ws.update_cell(cell.row, 2, text)
-                ws.update_cell(cell.row, 3, now)
-            else:
-                ws.append_row([key, text, now])
-        except Exception as find_err:
-            # ถ้า find ล้มเหลว (เช่น sheet ใหม่) ให้ append เลย
+        cell = ws.find(key)
+        if cell:
+            ws.update_cell(cell.row, 2, text)
+            ws.update_cell(cell.row, 3, now)
+        else:
             ws.append_row([key, text, now])
     except Exception as e:
         print(f"Sheet Cache Write Error: {e}")
@@ -1122,7 +1100,7 @@ def is_user_registered(sheets_client, sheet_id, user_id):
                     USER_DATA[user_id] = {}
                 USER_DATA[user_id]["first_name"] = fn
                 USER_DATA[user_id]["last_name"] = ln
-                USER_DATA[user_id]["phone"] = ph
+                USER_DATA[user_name] = ph
                 return True, fn, ln, ph
     except Exception as e:
         print(f"[UserReg] Failed to check sheets: {e}")
@@ -1586,6 +1564,23 @@ def setup_sheets_automatically(sheet):
 # =============================================================================
 SHEETS_INITIALIZED = False
 LAST_SHEETS_ERROR = "ยังไม่ได้เปิดใช้งาน"
+
+
+def show_typing_indicator(user_id, duration=8):
+    """แสดงจุดสามจุด (Loading Animation) ขณะ AI กำลังตอบ"""
+    url = "https://api.line.me/v2/bot/chat/loading/start"
+    headers = {
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "chatId": user_id,
+        "loadingSeconds": duration
+    }
+    try:
+        requests.post(url, headers=headers, json=payload, timeout=5)
+    except Exception as e:
+        print(f"[Typing Indicator] Error: {e}")
 
 
 def get_sheets_client():
