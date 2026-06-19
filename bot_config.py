@@ -236,7 +236,7 @@ def get_live_weather_scraper(lat, lon):
 
     # 3. เรียก TMD API (ถ้าไม่มีใน Cache)
     if not TMD_ACCESS_TOKEN:
-        return "🌡️ อุณหภูมิ: ~28 °C\n🌧️ สภาพอากาศ: ข้อมูลพยากรณ์ทั่วไป"
+        return "🌡️ ไม่สามารถดึงข้อมูลสภาพอากาศได้ในขณะนี้"
 
     try:
         url = "https://data.tmd.go.th/nwpapi/v1/forecast/location/hourly/at"
@@ -274,7 +274,7 @@ def get_live_weather_scraper(lat, lon):
 
     except Exception as e:
         print(f"TMD API Error: {e}")
-        return "🌡️ อุณหภูมิ: ~28 °C\n🌧️ สภาพอากาศ: ท้องฟ้าครึ้ม"
+        return "🌡️ ไม่สามารถดึงข้อมูลสภาพอากาศได้ในขณะนี้"
 
 
 def get_live_water_scraper(lat, lon):
@@ -1313,23 +1313,49 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
 # =============================================================================
 def get_greeting_message(user_name="คุณ"):
     """
-    สร้างข้อความทักทายแบบ Text ตามรูปแบบที่ผู้ใช้ต้องการ (เน้นความเร็วสูงสุด)
+    สร้างข้อความทักทายแบบมินิมอล + รองรับทักทายตามเวลา
     """
+    import datetime
+    hour = datetime.datetime.now().hour
+
+    if 5 <= hour < 12:
+        time_greeting = "สวัสดีตอนเช้า"
+    elif 12 <= hour < 17:
+        time_greeting = "สวัสดีตอนบ่าย"
+    elif 17 <= hour < 22:
+        time_greeting = "สวัสดีตอนเย็น"
+    else:
+        time_greeting = "สวัสดี"
+
     text = (
-        f"สวัสดี คุณ {user_name}\n"
+        f"{time_greeting} คุณ {user_name}\n"
         "ผมคือ FLOODCARE AI\n"
-        "แชทบอทอัจฉริยะสำหรับ ติดตามและพยากรณ์ระดับน้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยน้ำท่วม\n"
+        "แชทบอทอัจฉริยะสำหรับติดตามระดับน้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยน้ำท่วม\n\n"
         "🔍 ผมช่วยคุณได้\n"
-        "1. เบอร์โทรฉุกเฉิน\n"
-        "2. SOS แจ้งเหตุฉุกเฉิน\n"
-        "3. ค้นหาศูนย์อพยพ\n"
-        "4. ตรวจสอบระดับน้ำตรวจสอบข้อมูลระดับน้ำ\n"
-        "5. แจ้งความต้องการหรือขอความช่วยเหลือด้านต่าง ๆ\n"
-        "6. สอบถามข้อมูลจาก AI\n\n"
-        "🤝 ติดต่อและช่วยเหลือผู้ประสบภัยน้ำท่วม\n"
-        "ผมพร้อมตอบทุกคำถามเกี่ยวกับสถานการณ์น้ำได้ตลอดเวลาครับ 💧😊"
+        "1. เบอร์โทรศัพท์ฉุกเฉิน\n"
+        "2. SOS ขอความช่วยเหลือ\n"
+        "3. ศูนย์พักพิง\n"
+        "4. ตรวจสอบระดับน้ำ\n"
+        "5. แจ้งความต้องการเพิ่มเติม\n"
+        "6. ถาม AI เรื่องน้ำท่วม\n\n"
+        "🤝 พร้อมช่วยเหลือผู้ประสบภัยน้ำท่วมตลอด 24 ชม.\n"
+        "มีอะไรให้ช่วยไหมครับ 💧"
     )
     return TextSendMessage(text=text)
+
+
+def is_greeting_message(text):
+    """
+    ตรวจจับข้อความทักทายแบบเร็ว (ไม่เรียก AI)
+    """
+    if not text:
+        return False
+    t = text.strip().lower()
+    greeting_keywords = [
+        "สวัสดี", "หวัดดี", "hello", "hi", "hey", "ไง", "ดีจ้า", "ดีครับ", "ดีค่ะ",
+        "สวัสดีครับ", "สวัสดีค่ะ", "สวัสดีจ้า", "morning", "good morning", "สวัสดีตอนเช้า"
+    ]
+    return any(kw in t for kw in greeting_keywords)
 
 
 def handle_greeting_logic(event):
