@@ -749,8 +749,15 @@ def handle_text_message(event):
             return
 
         # ============================================================
-        # AI PATH: คำถามทั่วไป
+        # AI PATH: คำถามทั่วไป (มี Typing Indicator แบบ workaround)
         # ============================================================
+        # ส่ง "..." เพื่อกระตุ้นให้ LINE แสดง typing indicator (จุดสามจุดแบบมีอนิเมชั่น)
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="...")
+        )
+
+        # ประมวลผล AI
         ai_response = ""
         try:
             response = bot_config.gemini_model.generate_content(user_text)
@@ -759,6 +766,7 @@ def handle_text_message(event):
             print(f"Gemini Error: {e}")
             ai_response = "⚠️ AI ขัดข้องชั่วคราว หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
 
+        # บันทึก log (ถ้ามี)
         sheets_client = bot_config.get_sheets_client()
         if sheets_client:
             try:
@@ -768,7 +776,11 @@ def handle_text_message(event):
             except Exception as se:
                 print(f"Sheets Log Error: {se}")
 
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
+        # ส่งคำตอบจริงด้วย push_message (จะมี 2 ข้อความ)
+        bot_config.line_bot_api.push_message(
+            user_id,
+            TextSendMessage(text=ai_response)
+        )
 
 
 # =============================================================================
