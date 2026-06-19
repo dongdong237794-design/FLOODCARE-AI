@@ -617,7 +617,8 @@ def get_thaiwater_runoff_latest(station_code):
 # =============================================================================
 def calculate_situation(water_level, bank_level):
     """
-    คำนวณสถานการณ์น้ำ: ปกติ | เฝ้าระวัง | วิกฤต
+    คำนวณสถานการณ์น้ำตามเงื่อนไขใหม่:
+    ล้นตลิ่ง (แดง) | มาก (น้ำเงิน) | ปกติ (เขียว) | น้อย (เหลือง) | น้อยวิกฤต (ส้ม)
     """
     try:
         wl = float(water_level) if water_level is not None else 0
@@ -626,15 +627,24 @@ def calculate_situation(water_level, bank_level):
         return "ไม่มีข้อมูล"
 
     if bl <= 0:
-        return "ปกติ" if wl < 1.5 else "เฝ้าระวัง" if wl < 3.0 else "วิกฤต"
+        # กรณีไม่มีระดับตลิ่ง ใช้ค่าสมมติ
+        if wl >= 3.0: return "ล้นตลิ่ง"
+        if wl >= 2.0: return "มาก"
+        if wl >= 1.0: return "ปกติ"
+        if wl >= 0.5: return "น้อย"
+        return "น้อยวิกฤต"
 
     ratio = wl / bl
-    if ratio >= 0.95 or wl >= bl:
-        return "วิกฤต"
+    if wl >= bl:
+        return "ล้นตลิ่ง"
     elif ratio >= 0.70:
-        return "เฝ้าระวัง"
-    else:
+        return "มาก"
+    elif ratio >= 0.30:
         return "ปกติ"
+    elif ratio >= 0.10:
+        return "น้อย"
+    else:
+        return "น้อยวิกฤต"
 
 
 def determine_trend(current_wl, previous_wl, tolerance=0.01):
@@ -695,7 +705,8 @@ def find_nearest_water_stations(user_lat, user_lon, max_stations=3, max_distance
 
 def assess_water_level_status(water_level_value, bank_level_value=None):
     """
-    ประเมินสถานะระดับน้ำเลียนแบบหน้าเว็บ ThaiWater
+    ประเมินสถานะระดับน้ำและกำหนดสีตามเงื่อนไขใหม่
+    แดง = ล้นตลิ่ง, เขียว = ปกติ, น้ำเงิน = มาก, เหลือง = น้อย, ส้ม = น้อยวิกฤต
     """
     if water_level_value is None:
         return {
@@ -718,53 +729,47 @@ def assess_water_level_status(water_level_value, bank_level_value=None):
             "advice": "ไม่สามารถประเมินได้"
         }
 
-    # จำลองการคำนวณสถานะตามหน้าเว็บ ThaiWater
     if bl <= 0:
+        # กรณีไม่มีระดับตลิ่ง ใช้ค่าสมมติ
+        if wl >= 3.0: return {"status": "ล้นตลิ่ง", "color": "#EF4444", "diff_text": "-", "advice": "⚠️ อพยพทันที!"}
         return {"status": "ปกติ", "color": "#10B981", "diff_text": "-", "advice": "ติดตามสถานการณ์"}
 
     ratio = wl / bl
     
     if wl >= bl:
         return {
-            "status": "วิกฤต",
-            "color": "#EF4444",
+            "status": "ล้นตลิ่ง",
+            "color": "#FF0000", # สีแดงสดตามมาตรฐานรูปภาพ
             "diff_text": f"ล้นตลิ่ง {abs(diff):.2f}",
             "advice": "⚠️ อพยพทันที! ระดับน้ำล้นตลิ่ง"
-        }
-    elif ratio >= 0.90:
-        return {
-            "status": "มาก (เฝ้าระวัง)",
-            "color": "#2563EB", # สีน้ำเงิน
-            "diff_text": diff_text,
-            "advice": "🚨 ระวัง! น้ำใกล้ล้นตลิ่ง"
         }
     elif ratio >= 0.70:
         return {
             "status": "มาก",
-            "color": "#2563EB", # สีน้ำเงิน
+            "color": "#0000FF", # สีน้ำเงินสดตามมาตรฐานรูปภาพ
             "diff_text": diff_text,
             "advice": "💧 ระดับน้ำค่อนข้างสูง"
         }
     elif ratio >= 0.30:
         return {
             "status": "ปกติ",
-            "color": "#10B981", # สีเขียว
+            "color": "#008000", # สีเขียวสดตามมาตรฐานรูปภาพ
             "diff_text": diff_text,
             "advice": "✅ ระดับน้ำปกติ"
         }
     elif ratio >= 0.10:
         return {
             "status": "น้อย",
-            "color": "#FBBF24", # สีเหลือง
+            "color": "#FFCC00", # สีเหลืองตามมาตรฐานรูปภาพ
             "diff_text": diff_text,
             "advice": "⚠️ ระดับน้ำน้อย"
         }
     else:
         return {
             "status": "น้อยวิกฤต",
-            "color": "#F97316", # สีส้ม
+            "color": "#E67E22", # สีส้มตามมาตรฐานรูปภาพ
             "diff_text": diff_text,
-            "advice": "⚠️ ระดับน้ำน้อยวิกฤต"
+            "advice": "🚨 ระดับน้ำน้อยวิกฤต"
         }
 
 
