@@ -167,7 +167,8 @@ def get_weather_from_sheet(lat, lon):
         if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
             return None
             
-        gc = gspread.service_account(filename=GOOGLE_SERVICE_ACCOUNT_JSON)
+        gc = get_sheets_client()
+        if not gc: return None
         sh = gc.open_by_key(GOOGLE_SHEET_ID)
         
         # ลองหาแผ่นงาน WeatherCache ถ้าไม่มีให้สร้างใหม่
@@ -197,7 +198,8 @@ def save_weather_to_sheet(lat, lon, text):
         if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
             return
             
-        gc = gspread.service_account(filename=GOOGLE_SERVICE_ACCOUNT_JSON)
+        gc = get_sheets_client()
+        if not gc: return
         sh = gc.open_by_key(GOOGLE_SHEET_ID)
         ws = sh.worksheet("WeatherCache")
         
