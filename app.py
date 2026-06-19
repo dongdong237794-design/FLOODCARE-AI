@@ -734,7 +734,23 @@ def handle_text_message(event):
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     else:
-        # ระบบคุยตอบโต้อิสระด้วย AI
+        # ============================================================
+        # FAST PATH: ตรวจจับคำทักทายก่อน (ตอบเร็ว ไม่เรียก AI)
+        # ============================================================
+        if bot_config.is_greeting_message(user_text):
+            profile = None
+            try:
+                profile = bot_config.line_bot_api.get_profile(user_id)
+            except Exception:
+                pass
+            user_name = profile.display_name if profile else "คุณ"
+            greeting_msg = bot_config.get_greeting_message(user_name)
+            bot_config.line_bot_api.reply_message(event.reply_token, greeting_msg)
+            return
+
+        # ============================================================
+        # AI PATH: คำถามทั่วไป
+        # ============================================================
         ai_response = ""
         try:
             response = bot_config.gemini_model.generate_content(user_text)
