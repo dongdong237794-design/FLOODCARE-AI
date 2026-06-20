@@ -1,1062 +1,1936 @@
 import os
+import json
+import math
 import datetime
-from flask import Flask, request, abort
-import bot_config
-from dashboard import dashboard_bp
-
-# LINE SDK
+import time
+import urllib.request
+import requests
+import google.generativeai as genai
+import gspread
+try:
+    from supabase import create_client, Client
+except ImportError:
+    create_client = None
+    Client = None
 from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, LocationMessage, ImageMessage,
-    TextSendMessage, QuickReply, QuickReplyButton, LocationAction,
-    MessageAction
+    FlexSendMessage, BubbleContainer, BoxComponent, TextComponent,
+    SeparatorComponent, ButtonComponent, URIAction, TextSendMessage
 )
 
-app = Flask(__name__)
-
-# ลงทะเบียน Blueprint Dashboard
-app.register_blueprint(dashboard_bp)
+# =============================================================================
+# 1. โหลดข้อมูลกำหนดค่าจาก Environment Variables
+# =============================================================================
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
+GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+TMD_ACCESS_TOKEN = os.environ.get("TMD_ACCESS_TOKEN")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 # =============================================================================
-# AUTO-SYNC: ตรวจสอบความสดของข้อมูล Water_Levels ก่อนใช้งาน
-# ถ้าข้อมูลเก่ากว่า WATER_DATA_MAX_AGE_MINUTES (หรือยังไม่เคย sync)
-# จะเรียก bot_config.sync_water_levels_to_sheets() ให้อัตโนมัติ
+# ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง
 # =============================================================================
-WATER_DATA_MAX_AGE_MINUTES = 12
+USER_STATES = {}
+USER_DATA = {}
+
+# =============================================================================
+# SUPABASE CLIENT (เชื่อมต่อ Supabase แทน/คู่กับ Google Sheets)
+# =============================================================================
+_supabase_client = None
+
+def get_supabase_client():
+    """เชื่อมต่อ Supabase Client (ใช้ Service Role Key สำหรับ backend)"""
+    global _supabase_client
+    if _supabase_client is not None:
+        return _supabase_client
+    if not SUPABASE_URL or not SUPABASE_KEY or create_client is None:
+        print("[Supabase] SUPABASE_URL / SUPABASE_KEY not configured or library missing")
+        return None
+    try:
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("[Supabase] Client initialized successfully")
+        return _supabase_client
+    except Exception as e:
+        print(f"[Supabase] Initialization error: {e}")
+        return None
+
+# =============================================================================
+# SUPABASE TABLE SCHEMAS (แนะนำ - สร้างใน SQL Editor)
+# =============================================================================
+"""
+-- ตารางระดับน้ำ (สำคัญที่สุดสำหรับคำขอนี้)
+CREATE TABLE IF NOT EXISTS water_levels (
+    station_code TEXT PRIMARY KEY,
+    name TEXT,
+    river TEXT,
+    location TEXT,
+    lat DOUBLE PRECISION,
+    lon DOUBLE PRECISION,
+    water_level DOUBLE PRECISION,
+    bank_level DOUBLE PRECISION,
+    situation TEXT,
+    trend TEXT,
+    measure_time TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ตารางศูนย์พักพิง (สำหรับแดชบอร์ด)
+CREATE TABLE IF NOT EXISTS shelters (
+    shelter_id TEXT PRIMARY KEY,
+    name TEXT,
+    province TEXT,
+    district TEXT,
+    lat DOUBLE PRECISION,
+    lon DOUBLE PRECISION,
+    capacity INT,
+    occupancy INT,
+    status TEXT,
+    beds INT,
+    toilets INT,
+    parking INT,
+    facilities TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- (ตาราง users, sos_requests, user_needs ตามที่ส่งไปก่อนหน้า)
+"""
+
+# =============================================================================
+# 2. THAIWATER API CONFIGURATION (V3 + V1 Legacy)
+# =============================================================================
+THAIWATER_V3_API = "https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load"
+THAIWATER_API_BASE = "https://api.thaiwater.net/twsapi/v1.0"
+THAIWATER_WEB_URL = "https://www.thaiwater.net/water/wl"
+
+# Cache สำหรับสถานี ThaiWater (cache 1 ชั่วโมง)
+_WATER_STATIONS_CACHE = []
+_WATER_STATIONS_CACHE_TIME = 0
+_WATER_STATIONS_CACHE_TTL = 3600  # 1 ชั่วโมง (วินาที)
+
+# Cache สำหรับสภาพอากาศ TMD (RAM Cache)
+_WEATHER_CACHE = {}  # { "lat,lon": {"data": "...", "time": timestamp} }
+_WEATHER_CACHE_TTL = 1800  # 30 นาที (วินาที)
+
+# Cache สำหรับ ThaiWater V3 (RAM Cache)
+_V3_WATER_CACHE = []
+_V3_WATER_CACHE_TIME = 0
+_V3_WATER_CACHE_TTL = 3600  # 1 ชั่วโมง (วินาที)
+
+# เริ่มใช้งาน LINE API แบบปลอดภัย
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN) if LINE_CHANNEL_ACCESS_TOKEN else None
+handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
+
+# =============================================================================
+# 3. Gemini AI Configuration (System Instruction ฉบับปรับปรุง 5 ด้าน)
+# =============================================================================
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+gemini_model = genai.GenerativeModel(
+    model_name="gemini-2.5-flash",
+    system_instruction=(
+        "คุณคือ FLOODCARE AI ผู้ช่วยกู้ภัยมืออาชีพประจำศูนย์ประสานงานภัยน้ำท่วมระดับชาติ\n"
+        "บทบาท: ผู้นำในวิกฤตที่ใจดีแต่เด็ดขาด (Calm and Firm)\n"
+        "เป้าหมาย: ให้ข้อมูลที่แม่นยำ กระชับ และช่วยผู้ประสบภัยเอาตัวรอดได้จริง\n\n"
+
+        "[1] Data-Driven Response (ให้ความสำคัญกับข้อมูลระบบก่อนเสมอ):\n"
+        "- ข้อมูลระดับน้ำจาก ThaiWater, รายชื่อศูนย์พักพิง, เบอร์โทรในฐานข้อมูล คือข้อมูลหลัก\n"
+        "- หากผู้ใช้ถามสถานที่ที่ไม่มีในฐานข้อมูล ให้กล้ายอมรับว่า 'ไม่มีข้อมูลในระบบ'\n"
+        "- แนะนำให้ดูลิงก์แผนที่รวมแทนการเดาพิกัดเอง\n"
+        "- ห้ามแนะนำเส้นทางที่ไม่แน่ใจ หรือยืนยันว่าปลอดภัย 100%\n\n"
+
+        "[2] Emergency Detection (ตรวจจับความเร่งด่วน):\n"
+        "- หากพบคำสำคัญบ่งบอกอันตรายถึงชีวิต เช่น 'ช่วยด้วย' 'จะจมแล้ว' 'ไฟดูด' 'หายใจไม่ออก' 'จมน้ำ' 'ไฟฟ้าดูด'\n"
+        "- หยุดการเกริ่นนำทันที ส่ง 'ขั้นตอนเอาตัวรอดทันที' พร้อมเบอร์ 1784 หรือ 1669 เป็นอันดับแรก\n"
+        "- จากนั้นค่อยถามรายละเอียดเพิ่มเติม\n\n"
+
+        "[3] Tone of Voice (Calm and Authoritative):\n"
+        "- ใช้โทน 'ใจดีแต่เด็ดขาด' ไม่ผวา ไม่เยิ่นเย้อ\n"
+        "- เน้นการสั่งการเป็นขั้นตอน (1, 2, 3) แทนการพูดคลุมเครือ\n"
+        "- เช่น '1. ยกเบรกเกอร์ 2. ขึ้นที่สูง 3. เตรียมไฟฉาย' แทน 'แนะนำให้ลองทำแบบนี้ดูนะครับ'\n"
+        "- ใช้คำลงท้าย 'ครับ' หรือ 'นะครับ' เป็นหลัก\n\n"
+
+        "[4] Shelter and Route Safety Rules:\n"
+        "- ห้ามยืนยันว่าเส้นทางปลอดภัย 100% เพราะระดับน้ำเปลี่ยนตลอดเวลา\n"
+        "- ต้องมีประโยคเตือนเสมอ: 'โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน'\n"
+        "- แนะนำให้โทรศูนย์พักพิงก่อนออกเดินทางทุกครั้ง\n\n"
+
+        "[5] Formatting for Crisis (อ่านง่ายบนมือถือ):\n"
+        "- กฎ 3 บรรทัดแรก: ข้อมูลสำคัญสุดต้องอยู่ใน 3 บรรทัดแรกเสมอ\n"
+        "- ห้ามใช้ตัวหนาเยอะ ให้ใช้การเว้นบรรทัดแยกหัวข้อแทน\n"
+        "- ห้ามใช้เครื่องหมายดอกจัน (*) ในการทำสัญลักษณ์\n"
+        "- ใช้อิโมจิที่จำเป็นเท่านั้น (เช่น ⚠️ 📞 🏃 🩹)\n"
+        "- ความยาวข้อความไม่เกิน 10 บรรทัดต่อกลุ่ม\n\n"
+
+        "[6] General Safety:\n"
+        "- ห้ามเดาข้อมูลหรือจินตนาการสิ่งที่ไม่เป็นความจริง\n"
+        "- หากข้อมูลไม่แน่ชิด ให้แสดงความห่วงใจ + แนะนำเบอร์สายด่วน\n"
+        "- ให้คำตอบเป็นภาษาไทยเสมอ"
+    )
+)
 
 
-def _ensure_water_data_fresh(sheets_client, sheet_id):
+# =============================================================================
+# 4. UTILITY FUNCTIONS
+# =============================================================================
+def clean_text_for_line(text):
+    """กรองลบเครื่องหมายดอกจัน (*) สำหรับ LINE"""
+    if not text:
+        return ""
+    return text.replace("**", "").replace("*", "")
+
+
+def extract_number(text):
+    """ดึงตัวเลขจากข้อความ"""
+    if not text:
+        return "1"
+    cleaned = "".join(filter(lambda x: x.isdigit(), text))
+    return cleaned if cleaned else "1"
+
+
+def parse_yes_no(text):
+    """แปลงข้อความเป็น YES/NO"""
+    if not text:
+        return "NO"
+    text_clean = text.strip().lower()
+    if any(word in text_clean for word in ["มี", "ใช่", "yes", "y", "เอส", "ตกลง"]):
+        if "ไม่มี" in text_clean:
+            return "NO"
+        return "YES"
+    return "NO"
+
+
+def extract_sheet_id(sheet_var):
+    """คัดกรองรหัส Google Sheet ID จาก URL"""
+    if not sheet_var:
+        return ""
+    if "/d/" in sheet_var:
+        parts = sheet_var.split("/d/")
+        if len(parts) > 1:
+            sub_parts = parts[1].split("/")
+            if len(sub_parts) > 0:
+                return sub_parts[0].strip()
+    return sheet_var.strip()
+
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """คำนวณระยะทาง Haversine (หน่วย: กิโลเมตร)"""
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+
+# =============================================================================
+# 5. WEATHER & FLOOD SCRAPERS (TMD NWPAPI + Hybrid Cache)
+# =============================================================================
+def get_weather_from_sheet(lat, lon):
+    """ค้นหาข้อมูลสภาพอากาศจาก Google Sheets (Sheet: 'WeatherCache')"""
+    try:
+        if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
+            return None
+            
+        gc = get_sheets_client()
+        if not gc: return None
+        sh = gc.open_by_key(GOOGLE_SHEET_ID)
+        
+        # ลองหาแผ่นงาน WeatherCache ถ้าไม่มีให้สร้างใหม่
+        try:
+            ws = sh.worksheet("WeatherCache")
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title="WeatherCache", rows="1000", cols="5")
+            ws.append_row(["lat_lon", "weather_text", "timestamp"])
+            return None
+
+        records = ws.get_all_records()
+        key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
+        
+        for row in records:
+            if row["lat_lon"] == key:
+                cache_time = float(row["timestamp"])
+                if time.time() - cache_time < _WEATHER_CACHE_TTL:
+                    return row["weather_text"]
+        return None
+    except Exception as e:
+        print(f"Sheet Cache Read Error: {e}")
+        return None
+
+def save_weather_to_sheet(lat, lon, text):
+    """บันทึกข้อมูลสภาพอากาศลง Google Sheets"""
+    try:
+        if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
+            return
+            
+        gc = get_sheets_client()
+        if not gc: return
+        sh = gc.open_by_key(GOOGLE_SHEET_ID)
+        ws = sh.worksheet("WeatherCache")
+        
+        key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
+        now = time.time()
+        
+        # หาว่ามีแถวเดิมไหม ถ้ามีให้แก้ ถ้าไม่มีให้เพิ่ม
+        cell = ws.find(key)
+        if cell:
+            ws.update_cell(cell.row, 2, text)
+            ws.update_cell(cell.row, 3, now)
+        else:
+            ws.append_row([key, text, now])
+    except Exception as e:
+        print(f"Sheet Cache Write Error: {e}")
+
+def get_live_weather_scraper(lat, lon):
+    """ดึงข้อมูลสภาพอากาศพร้อมระบบ Hybrid Cache (RAM -> Sheet -> API)"""
+    cache_key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
+    
+    # 1. เช็ค RAM Cache
+    if cache_key in _WEATHER_CACHE:
+        entry = _WEATHER_CACHE[cache_key]
+        if time.time() - entry["time"] < _WEATHER_CACHE_TTL:
+            print(f"[Cache] RAM Hit for {cache_key}")
+            return entry["data"]
+
+    # 2. เช็ค Google Sheet Cache
+    sheet_data = get_weather_from_sheet(lat, lon)
+    if sheet_data:
+        print(f"[Cache] Sheet Hit for {cache_key}")
+        _WEATHER_CACHE[cache_key] = {"data": sheet_data, "time": time.time()}
+        return sheet_data
+
+    # 3. เรียก TMD API (ถ้าไม่มีใน Cache)
+    if not TMD_ACCESS_TOKEN:
+        return "🌡️ อุณหภูมิ: ~28 °C\n🌧️ สภาพอากาศ: ข้อมูลพยากรณ์ทั่วไป"
+
+    try:
+        url = "https://data.tmd.go.th/nwpapi/v1/forecast/location/hourly/at"
+        params = {"lat": lat, "lon": lon, "duration": 1, "fields": "tc,rh,cond,ws10m"}
+        headers = {"accept": "application/json", "authorization": f"Bearer {TMD_ACCESS_TOKEN}"}
+        
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        
+        if response.status_code == 429:
+            return "⚠️ ระบบหนาแน่น กรุณาลองใหม่ในอีก 1 นาที"
+            
+        response.raise_for_status()
+        res_data = response.json()
+        
+        forecasts = res_data.get("WeatherForecasts", [])
+        if not forecasts:
+            return "🌡️ อุณหภูมิ: - °C\n🌧️ สภาพอากาศ: ไม่พบข้อมูลในพื้นที่"
+            
+        latest = forecasts[0].get("forecasts", [])[0]
+        data = latest.get("data", {})
+        
+        temp, rh, wind, weather_code = data.get("tc", "-"), data.get("rh", "-"), data.get("ws10m", "-"), data.get("cond", 0)
+
+        weather_map = {1: "แจ่มใส", 2: "เมฆบางส่วน", 3: "เมฆมาก", 4: "ครึ้ม", 5: "ฝนเล็กน้อย", 
+                       6: "ฝนปานกลาง", 7: "ฝนหนัก", 8: "ฝนฟ้าคะนอง", 9: "หนาวจัด", 10: "หนาว", 11: "เย็น", 12: "ร้อนจัด"}
+        weather_desc = weather_map.get(weather_code, "ไม่ระบุ")
+
+        result_text = f"🌡️ {temp} °C | 🌧️ {weather_desc}\n💧 ชื้น {rh}% | 🍃 ลม {wind} m/s"
+        
+        # บันทึกลง Cache ทั้งสองส่วน
+        _WEATHER_CACHE[cache_key] = {"data": result_text, "time": time.time()}
+        save_weather_to_sheet(lat, lon, result_text)
+        
+        return result_text
+
+    except Exception as e:
+        print(f"TMD API Error: {e}")
+        return "🌡️ อุณหภูมิ: ~28 °C\n🌧️ สภาพอากาศ: ท้องฟ้าครึ้ม"
+
+
+def get_live_water_scraper(lat, lon):
+    """ดึงข้อมูลน้ำหลากประมาณการจาก Open-Meteo Flood API"""
+    try:
+        url = f"https://flood-api.open-meteo.com/v1/flood?latitude={lat}&longitude={lon}&daily=river_discharge"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            daily = data.get("daily", {})
+            discharges = daily.get("river_discharge", [])
+            current_flow = discharges[-1] if discharges else 0.0
+
+            status = "🟢 สถานการณ์ปกติ"
+            icon = "🟢"
+            simulated_height = 1.20 + (current_flow * 0.05)
+
+            if current_flow >= 50.0:
+                status = "🔴 อันตรายวิกฤตน้ำท่วม"
+                icon = "🔴"
+            elif current_flow >= 15.0:
+                status = "🟡 เฝ้าระวังน้ำหลาก"
+                icon = "🟡"
+
+            return {
+                "flow": f"{current_flow:.2f} ลบ.ม./วินาที",
+                "height": f"{simulated_height:.2f} เมตร",
+                "status": status,
+                "icon": icon
+            }
+    except Exception as e:
+        print(f"Water Scraper Error: {e}")
+        return {
+            "flow": "ไม่สามารถตรวจสอบได้",
+            "height": "~1.5 เมตร",
+            "status": "🟢 รอข้อมูลอัปเดต",
+            "icon": "🟢"
+        }
+
+
+# =============================================================================
+# 6. THAIWATER API V3 (NEW PRIMARY) + V1 LEGACY
+# =============================================================================
+def fetch_waterlevel_v3(use_cache=True):
     """
-    เช็คเวลา LastSync ใน Water_Levels!L1
-    ถ้าไม่มี/อ่านไม่ได้/เก่าเกินกำหนด -> สั่ง sync ใหม่จาก ThaiWater ทันที
-    คืนค่า True ถ้า sync เกิดขึ้น (หรือพยายาม sync), False ถ้าข้อมูลยังสดอยู่เลยไม่ต้องทำอะไร
+    ดึงข้อมูลระดับน้ำทั้งหมดจาก ThaiWater V3 API (waterlevel_load)
+    Returns: list of dict หรือ None ถ้าล้มเหลว
     """
+    global _V3_WATER_CACHE, _V3_WATER_CACHE_TIME
+    
+    if use_cache and _V3_WATER_CACHE and (time.time() - _V3_WATER_CACHE_TIME < _V3_WATER_CACHE_TTL):
+        print(f"[ThaiWater V3] Using RAM Cache (age: {int(time.time() - _V3_WATER_CACHE_TIME)}s)")
+        return _V3_WATER_CACHE
+
+    try:
+        headers = {
+            'User-Agent': 'FLOODCARE-Bot/1.0',
+            'Accept': 'application/json'
+        }
+        response = requests.get(THAIWATER_V3_API, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        stations = []
+
+        # รูปแบบจริงที่ยืนยันแล้ว: {"waterlevel_data": {"result": "OK", "data": [...]}}
+        if isinstance(data, dict) and "waterlevel_data" in data:
+            wl_data = data.get("waterlevel_data", {})
+            stations = wl_data.get("data", [])
+        elif isinstance(data, list):
+            # เผื่อกรณี API คืนเป็น list ตรงๆ ในอนาคต
+            stations = data
+        elif isinstance(data, dict):
+            # เผื่อกรณีโครงสร้างเปลี่ยนไปเป็น key อื่นที่ top-level
+            stations = data.get("data", [])
+            if not stations:
+                for key in ["stations", "results", "items", "waterlevel"]:
+                    if key in data:
+                        stations = data[key]
+                        break
+
+        print(f"[ThaiWater V3] Fetched {len(stations)} stations")
+        
+        # บันทึกลง Cache
+        _V3_WATER_CACHE = stations
+        _V3_WATER_CACHE_TIME = time.time()
+        
+        return stations
+
+    except requests.exceptions.Timeout:
+        print("[ThaiWater V3] API Timeout")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"[ThaiWater V3] API Error: {e}")
+        return None
+    except Exception as e:
+        print(f"[ThaiWater V3] Unexpected Error: {e}")
+        return None
+
+
+def parse_v3_station(v3_item):
+    """
+    แปลงข้อมูลจาก V3 API เป็นโครงสร้างมาตรฐาน 11 ฟิลด์
+    โครงสร้างจริงที่ยืนยันแล้ว (2026-06-17):
+    {
+      "waterlevel_datetime": "2026-06-17 14:00",
+      "waterlevel_m": null,
+      "waterlevel_msl": "330.59",
+      "river_name": "ลำโดมน้อย",
+      "station": {
+        "tele_station_name": {"th": "...", "en": "..."},
+        "tele_station_oldcode": "M.199",
+        "tele_station_lat": 14.60611,
+        "tele_station_long": 101.472778,
+        "left_bank": 663.260988,
+        "right_bank": 663.583988,
+        "geocode": {
+          "province_name": {"th": "นครราชสีมา", "en": "..."}
+        }
+      }
+    }
+    หมายเหตุ: waterlevel_m มักเป็น null ในหลาย record ต้อง fallback ไปใช้ waterlevel_msl
+    """
+    station = v3_item.get("station") or {}
+    geocode = station.get("geocode") or {}
+
+    def get_val(*keys, default="-"):
+        for k in keys:
+            if k in v3_item and v3_item[k] is not None:
+                val = v3_item[k]
+                if val != "" and val != "null":
+                    return val
+        return default
+
+    # ดึงพิกัดจาก station
+    lat = 0.0
+    lon = 0.0
+    try:
+        lat = float(station.get("tele_station_lat", 0) or 0)
+        lon = float(station.get("tele_station_long", 0) or 0)
+    except (ValueError, TypeError):
+        pass
+
+    # ดึงระดับน้ำ: waterlevel_m ก่อน ถ้า null ใช้ waterlevel_msl แทน
+    wl = None
+    for key in ["waterlevel_m", "waterlevel_msl"]:
+        val = v3_item.get(key)
+        if val is not None and val != "" and val != "null":
+            try:
+                wl = float(val)
+                break
+            except (ValueError, TypeError):
+                continue
+
+    # ดึงระดับตลิ่ง: เปรียบเทียบทั้งซ้ายและขวา แล้วเลือกค่าที่ "ต่ำที่สุด" (Min Bank Level)
+    # เพื่อให้ตรงกับเกณฑ์การเตือนภัยที่ใช้ตลิ่งฝั่งที่ต่ำกว่าเป็นเกณฑ์ล้นตลิ่ง
+    bl = None
+    try:
+        left_b = station.get("left_bank")
+        right_b = station.get("right_bank")
+        
+        banks = []
+        if left_b is not None:
+            try: banks.append(float(left_b))
+            except: pass
+        if right_b is not None:
+            try: banks.append(float(right_b))
+            except: pass
+            
+        if banks:
+            bl = min(banks)  # เลือกค่าที่ต่ำที่สุด เช่น 16.5 แทนที่จะเป็น 19.5
+    except Exception:
+        bl = None
+
+    # ชื่อสถานี (รองรับทั้งแบบ dict {"th":..,"en":..} และแบบ string ตรง)
+    station_name_raw = station.get("tele_station_name", "ไม่ระบุชื่อ")
+    if isinstance(station_name_raw, dict):
+        station_name = station_name_raw.get("th") or station_name_raw.get("en") or "ไม่ระบุชื่อ"
+    else:
+        station_name = station_name_raw
+
+    # ชื่อจังหวัด (ซ้อนอยู่ใน station.geocode.province_name)
+    province_raw = geocode.get("province_name", "-")
+    if isinstance(province_raw, dict):
+        province_name = province_raw.get("th") or province_raw.get("en") or "-"
+    else:
+        province_name = province_raw
+
+    # รหัสสถานี: ใช้ oldcode ก่อน (อ่านง่ายกว่า) ถ้าไม่มีใช้ id
+    station_code = station.get("tele_station_oldcode") or station.get("id") or "-"
+
+    return {
+        "StationCode": str(station_code),
+        "Name": str(station_name),
+        "River": str(get_val("river_name", default="-")),
+        "Location": str(province_name),
+        "Lat": lat,
+        "Lon": lon,
+        "WaterLevel": wl,
+        "BankLevel": bl,
+        "Time": str(get_val("waterlevel_datetime", default="-")),
+    }
+
+
+def get_thaiwater_stations(use_cache=True):
+    """
+    ดึงรายชื่อสถานีตรวจวัดน้ำทั้งหมดจาก ThaiWater V1 API (สำรอง)
+    """
+    global _WATER_STATIONS_CACHE, _WATER_STATIONS_CACHE_TIME
+
+    if use_cache and _WATER_STATIONS_CACHE:
+        elapsed = time.time() - _WATER_STATIONS_CACHE_TIME
+        if elapsed < _WATER_STATIONS_CACHE_TTL:
+            print(f"[ThaiWater V1] Using cached stations ({len(_WATER_STATIONS_CACHE)} stations)")
+            return _WATER_STATIONS_CACHE
+
+    try:
+        url = f"{THAIWATER_API_BASE}/StationInfo"
+        headers = {'User-Agent': 'FLOODCARE-Bot/1.0', 'Accept': 'application/json'}
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+        stations = []
+        raw_stations = data.get("station", [])
+        print(f"[ThaiWater V1] Fetched {len(raw_stations)} total stations from API")
+
+        for st in raw_stations:
+            meta = st.get("stationMetadata", {})
+            st_type = meta.get("stationType", "")
+
+            if any(kw in st_type for kw in ["ระดับน้ำ", "น้ำท่า", "Runoff", "WaterLevel", "ดิน", "อุทก"]):
+                try:
+                    lat = float(meta.get("latitude", 0))
+                    lon = float(meta.get("longitude", 0))
+                    if lat == 0 and lon == 0:
+                        continue
+
+                    stations.append({
+                        "stationCode": meta.get("stationCode", ""),
+                        "stationName": meta.get("stationName", "ไม่ระบุชื่อ"),
+                        "stationType": st_type,
+                        "provinceCode": meta.get("locationCode", ""),
+                        "provinceName": meta.get("provinceName", ""),
+                        "districtName": meta.get("districtName", ""),
+                        "riverName": meta.get("riverName", ""),
+                        "latitude": lat,
+                        "longitude": lon,
+                        "status": meta.get("stationOperatingStatus", 1)
+                    })
+                except (ValueError, TypeError):
+                    continue
+
+        _WATER_STATIONS_CACHE = stations
+        _WATER_STATIONS_CACHE_TIME = time.time()
+        print(f"[ThaiWater V1] Filtered {len(stations)} water monitoring stations")
+        return stations
+
+    except requests.exceptions.Timeout:
+        print("[ThaiWater V1] API Timeout - returning cached data if available")
+        return _WATER_STATIONS_CACHE
+    except requests.exceptions.RequestException as e:
+        print(f"[ThaiWater V1] API Error: {e}")
+        return _WATER_STATIONS_CACHE
+    except Exception as e:
+        print(f"[ThaiWater V1] Unexpected Error: {e}")
+        return _WATER_STATIONS_CACHE
+
+
+def get_thaiwater_runoff_latest(station_code):
+    """
+    ดึงข้อมูลระดับน้ำล่าสุดของสถานีจาก ThaiWater V1 API
+    (ใช้เป็น Fallback เมื่อ V3 ไม่มีข้อมูลบางสถานี)
+    """
+    if not station_code:
+        return None
+
+    try:
+        url = (f"{THAIWATER_API_BASE}/Runoff?"
+               f"stationCode={station_code}"
+               f"&latest=true"
+               f"&interval=C-60")
+        headers = {'User-Agent': 'FLOODCARE-Bot/1.0', 'Accept': 'application/json'}
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+        observations = data.get("timeSeriesObservation", [])
+        if not observations:
+            return None
+
+        obs = observations[0]
+        results = obs.get("measurementResults", [])
+
+        water_level = None
+        discharge = None
+        bank_level = None
+
+        for r in results:
+            var_type = r.get("variable", "")
+            if var_type == "WaterLevel":
+                water_level = {
+                    "value": r.get("value"),
+                    "uom": r.get("uom", "m"),
+                    "time": r.get("measureTime"),
+                    "quality": r.get("qualityControlLevel", "1")
+                }
+            elif var_type == "Discharge":
+                discharge = {
+                    "value": r.get("value"),
+                    "uom": r.get("uom", "CMS"),
+                    "time": r.get("measureTime")
+                }
+            elif var_type == "BankLevel":
+                bank_level = {
+                    "value": r.get("value"),
+                    "uom": r.get("uom", "m")
+                }
+
+        return {
+            "stationCode": station_code,
+            "stationName": obs.get("station", {}).get("stationReference", ""),
+            "water_level": water_level,
+            "bank_level": bank_level,
+            "discharge": discharge,
+            "resultTime": obs.get("resultTime")
+        }
+
+    except requests.exceptions.Timeout:
+        print(f"[ThaiWater V1] Runoff Timeout for station {station_code}")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"[ThaiWater V1] Runoff Error for station {station_code}: {e}")
+        return None
+    except Exception as e:
+        print(f"[ThaiWater V1] Runoff Unexpected Error: {e}")
+        return None
+
+
+# =============================================================================
+# 7. WATER LEVEL CALCULATION (Situation + Trend)
+# =============================================================================
+def calculate_situation(water_level, bank_level):
+    """
+    คำนวณสถานการณ์น้ำตามเงื่อนไขใหม่:
+    ล้นตลิ่ง (แดง) | มาก (น้ำเงิน) | ปกติ (เขียว) | น้อย (เหลือง) | น้อยวิกฤต (ส้ม)
+    """
+    try:
+        wl = float(water_level) if water_level is not None else 0
+        bl = float(bank_level) if bank_level is not None else 0
+    except (ValueError, TypeError):
+        return "ไม่มีข้อมูล"
+
+    if bl <= 0:
+        # กรณีไม่มีระดับตลิ่ง ใช้ค่าสมมติ
+        if wl >= 3.0: return "ล้นตลิ่ง"
+        if wl >= 2.0: return "มาก"
+        if wl >= 1.0: return "ปกติ"
+        if wl >= 0.5: return "น้อย"
+        return "น้อยวิกฤต"
+
+    ratio = wl / bl
+    if wl >= bl:
+        return "ล้นตลิ่ง"
+    elif ratio >= 0.70:
+        return "มาก"
+    elif ratio >= 0.30:
+        return "ปกติ"
+    elif ratio >= 0.10:
+        return "น้อย"
+    else:
+        return "น้อยวิกฤต"
+
+
+def determine_trend(current_wl, previous_wl, tolerance=0.01):
+    """
+    คำนวณแนวโน้ม: เพิ่มขึ้น | ลดลง | คงที่
+    current_wl: ค่าระดับน้ำล่าสุด
+    previous_wl: ค่าระดับน้ำครั้งก่อน (อ่านจาก Sheets)
+    """
+    try:
+        cwl = float(current_wl) if current_wl is not None else None
+        pwl = float(previous_wl) if previous_wl is not None else None
+    except (ValueError, TypeError):
+        return "คงที่"
+
+    if cwl is None or pwl is None:
+        return "คงที่"
+
+    diff = cwl - pwl
+    if abs(diff) <= tolerance:
+        return "คงที่"
+    elif diff > 0:
+        return "เพิ่มขึ้น"
+    else:
+        return "ลดลง"
+
+
+
+# =============================================================================
+# 8. FIND NEAREST WATER STATIONS (WITH API FALLBACK CHAIN)
+# =============================================================================
+def find_nearest_water_stations(user_lat, user_lon, max_stations=3, max_distance_km=50):
+    """
+    หาสถานีตรวจวัดน้ำที่ใกล้ผู้ใช้ที่สุด พร้อมดึงข้อมูลระดับน้ำล่าสุด
+    Fallback chain: V1 API Stations + V1 API Runoff
+    """
+    stations = get_thaiwater_stations(use_cache=True)
+    if not stations:
+        return []
+
+    for st in stations:
+        st["distance_km"] = calculate_distance(user_lat, user_lon, st["latitude"], st["longitude"])
+
+    nearby = [s for s in stations if s["distance_km"] <= max_distance_km]
+    nearby.sort(key=lambda x: x["distance_km"])
+
+    result = []
+    for st in nearby[:max_stations]:
+        runoff_data = get_thaiwater_runoff_latest(st["stationCode"])
+        if runoff_data:
+            st["water_level"] = runoff_data.get("water_level")
+            st["bank_level"] = runoff_data.get("bank_level")
+            st["discharge"] = runoff_data.get("discharge")
+            st["measure_time"] = runoff_data.get("resultTime")
+        result.append(st)
+
+    return result
+
+
+def assess_water_level_status(water_level_value, bank_level_value=None):
+    """
+    ประเมินสถานะระดับน้ำและกำหนดสีตามเงื่อนไขใหม่
+    แดง = ล้นตลิ่ง, เขียว = ปกติ, น้ำเงิน = มาก, เหลือง = น้อย, ส้ม = น้อยวิกฤต
+    """
+    if water_level_value is None:
+        return {
+            "status": "⚪ ไม่มีข้อมูล",
+            "color": "#9CA3AF",
+            "diff_text": "-",
+            "advice": "ไม่สามารถประเมินได้"
+        }
+
+    try:
+        wl = float(water_level_value)
+        bl = float(bank_level_value) if bank_level_value else 0
+        diff = bl - wl
+        diff_text = f"{abs(diff):.2f}"
+    except (ValueError, TypeError):
+        return {
+            "status": "⚪ ข้อมูลไม่ถูกต้อง",
+            "color": "#9CA3AF",
+            "diff_text": "-",
+            "advice": "ไม่สามารถประเมินได้"
+        }
+
+    if bl <= 0:
+        # กรณีไม่มีระดับตลิ่ง ใช้ค่าสมมติ
+        if wl >= 3.0: return {"status": "ล้นตลิ่ง", "color": "#EF4444", "diff_text": "-", "advice": "⚠️ อพยพทันที!"}
+        return {"status": "ปกติ", "color": "#10B981", "diff_text": "-", "advice": "ติดตามสถานการณ์"}
+
+    ratio = wl / bl
+    
+    if wl >= bl:
+        return {
+            "status": "ล้นตลิ่ง",
+            "color": "#FF0000", # สีแดงสดตามมาตรฐานรูปภาพ
+            "diff_text": f"ล้นตลิ่ง {abs(diff):.2f}",
+            "advice": "⚠️ อพยพทันที! ระดับน้ำล้นตลิ่ง"
+        }
+    elif ratio >= 0.70:
+        return {
+            "status": "มาก",
+            "color": "#0000FF", # สีน้ำเงินสดตามมาตรฐานรูปภาพ
+            "diff_text": diff_text,
+            "advice": "💧 ระดับน้ำค่อนข้างสูง"
+        }
+    elif ratio >= 0.30:
+        return {
+            "status": "ปกติ",
+            "color": "#008000", # สีเขียวสดตามมาตรฐานรูปภาพ
+            "diff_text": diff_text,
+            "advice": "✅ ระดับน้ำปกติ"
+        }
+    elif ratio >= 0.10:
+        return {
+            "status": "น้อย",
+            "color": "#FFCC00", # สีเหลืองตามมาตรฐานรูปภาพ
+            "diff_text": diff_text,
+            "advice": "⚠️ ระดับน้ำน้อย"
+        }
+    else:
+        return {
+            "status": "น้อยวิกฤต",
+            "color": "#E67E22", # สีส้มตามมาตรฐานรูปภาพ
+            "diff_text": diff_text,
+            "advice": "🚨 ระดับน้ำน้อยวิกฤต"
+        }
+
+
+# =============================================================================
+# 9. LAZY SYNC SYSTEM (V3 API Primary → V1 Fallback → Sheets)
+# =============================================================================
+def _load_previous_water_levels(sheets_client, sheet_id):
+    """
+    อ่านค่า WaterLevel เดิมจาก Sheets เพื่อใช้คำนวณ Trend
+    Returns: dict {StationCode: WaterLevel}
+    """
+    previous = {}
     if not sheets_client or not sheet_id:
-        return False
-
-    needs_sync = True
+        return previous
     try:
         sheet = sheets_client.open_by_key(sheet_id)
         ws = sheet.worksheet("Water_Levels")
-        last_sync_raw = ws.acell('L1').value  # รูปแบบ: "LastSync: YYYY-MM-DD HH:MM:SS"
-
-        if last_sync_raw and "LastSync:" in last_sync_raw:
-            ts_str = last_sync_raw.replace("LastSync:", "").strip()
-            last_sync_time = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-            age_minutes = (datetime.datetime.now() - last_sync_time).total_seconds() / 60
-            print(f"[AutoSync] Water_Levels age: {age_minutes:.1f} min")
-            if age_minutes <= WATER_DATA_MAX_AGE_MINUTES:
-                needs_sync = False
+        records = ws.get_all_records()
+        for row in records:
+            code = str(row.get("StationCode", "")).strip()
+            wl = row.get("WaterLevel", "-")
+            if code and wl not in ["-", "", None]:
+                try:
+                    previous[code] = float(wl)
+                except (ValueError, TypeError):
+                    pass
+        print(f"[LazySync] Loaded {len(previous)} previous water levels for trend calculation")
     except Exception as e:
-        # ไม่มีแท็บ/ไม่มีค่า L1/parse ไม่ได้ -> ถือว่าข้อมูลเก่า/ไม่มี ต้อง sync
-        print(f"[AutoSync] Could not read LastSync, will sync: {e}")
+        print(f"[LazySync] Could not load previous levels: {e}")
+    return previous
 
-    if needs_sync:
-        print("[AutoSync] Water_Levels stale or missing -> triggering sync now...")
+
+def get_water_data_from_api(sheets_client=None, sheet_id=None):
+    """
+    ดึงข้อมูลระดับน้ำทั้งหมด 738 สถานี
+    API Chain: V3 API → V1 Stations+Runoff
+    พร้อมคำนวณ Situation และ Trend (อ่านค่าเดิมจาก Sheets)
+    """
+    # 1. อ่านค่า WaterLevel เดิมจาก Sheets เพื่อคำนวณ Trend
+    previous_data = {}
+    if sheets_client and sheet_id:
+        previous_data = _load_previous_water_levels(sheets_client, sheet_id)
+
+    results = []
+
+    # ==== STRATEGY 1: ThaiWater V3 API (Primary) ====
+    print("[LazySync] Trying ThaiWater V3 API...")
+    v3_data = fetch_waterlevel_v3()
+
+    if v3_data and len(v3_data) > 0:
+        print(f"[LazySync] V3 API success with {len(v3_data)} records")
+        for item in v3_data:
+            try:
+                parsed = parse_v3_station(item)
+                code = parsed["StationCode"]
+                wl = parsed["WaterLevel"]
+                bl = parsed["BankLevel"]
+
+                situation = calculate_situation(wl, bl)
+                trend = determine_trend(wl, previous_data.get(code))
+
+                results.append({
+                    "StationCode": code,
+                    "Name": parsed["Name"],
+                    "River": parsed["River"],
+                    "Location": parsed["Location"],
+                    "Lat": parsed["Lat"],
+                    "Lon": parsed["Lon"],
+                    "WaterLevel": wl if wl is not None else "-",
+                    "BankLevel": bl if bl is not None else "-",
+                    "Situation": situation,
+                    "Trend": trend,
+                    "Time": parsed["Time"]
+                })
+            except Exception as e:
+                print(f"[LazySync V3] Parse error: {e}")
+                continue
+
+        print(f"[LazySync] V3 parsed: {len(results)} stations")
+        if len(results) > 50:  # ถ้าได้มากพอ ใช้ V3 เลย
+            return results
+
+    # ==== STRATEGY 2: ThaiWater V1 API (Fallback) ====
+    print("[LazySync] V3 insufficient, falling back to V1 API...")
+    stations = get_thaiwater_stations(use_cache=True)
+    if not stations:
+        print("[LazySync] No stations available from V1 cache")
+        return results  # คืนค่าที่ได้จาก V3 ถ้ามี
+
+    print(f"[LazySync] Fetching latest water levels for {len(stations)} stations via V1...")
+
+    for i, st in enumerate(stations):
+        runoff = get_thaiwater_runoff_latest(st["stationCode"])
+        time.sleep(0.05)  # Rate limiting
+
+        wl_value = None
+        bl_value = None
+        measure_time = "-"
+        code = st["stationCode"]
+
+        if runoff:
+            wl = runoff.get("water_level")
+            bl = runoff.get("bank_level")
+            if wl:
+                wl_value = wl.get("value")
+                measure_time = wl.get("time", "-")
+            if bl:
+                bl_value = bl.get("value")
+
+        situation = calculate_situation(wl_value, bl_value)
+        trend = determine_trend(wl_value, previous_data.get(code))
+
+        results.append({
+            "StationCode": code,
+            "Name": st["stationName"],
+            "River": st.get("riverName", "-"),
+            "Location": st.get("provinceName", "-"),
+            "Lat": st["latitude"],
+            "Lon": st["longitude"],
+            "WaterLevel": wl_value if wl_value is not None else "-",
+            "BankLevel": bl_value if bl_value is not None else "-",
+            "Situation": situation,
+            "Trend": trend,
+            "Time": measure_time
+        })
+
+        if (i + 1) % 100 == 0:
+            print(f"[LazySync V1] Processed {i + 1}/{len(stations)} stations")
+
+    print(f"[LazySync] Total processed: {len(results)} stations")
+    return results
+
+
+def sync_water_levels_to_sheets(sheets_client, sheet_id):
+    """
+    Initial Sync + Lazy Sync:
+    - อ่านค่าเดิมจาก Sheets → คำนวณ Trend
+    - ดึงข้อมูล V3 → V1 Fallback
+    - Bulk Update: clear + update (1 API call)
+    - อัปเดต timestamp ใน L1
+    """
+    if not sheets_client or not sheet_id:
+        print("[LazySync] Sheets client not available")
+        return False
+
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+
+        # เปิดหรือสร้างแท็บ Water_Levels
         try:
-            success = bot_config.sync_water_levels_to_sheets(sheets_client, sheet_id)
-            print(f"[AutoSync] Sync result: {success}")
-        except Exception as e:
-            print(f"[AutoSync] Sync attempt failed: {e}")
+            ws = sheet.worksheet("Water_Levels")
+        except gspread.WorksheetNotFound:
+            print("[LazySync] Creating Water_Levels worksheet...")
+            ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="12")
+
+        # ดึงข้อมูลจาก API พร้อมค่าเดิมสำหรับคำนวณ Trend
+        data = get_water_data_from_api(sheets_client, sheet_id)
+        if not data:
+            print("[LazySync] No data fetched from API")
+            return False
+
+        # เตรียม header
+        header = ["StationCode", "Name", "River", "Location", "Lat", "Lon",
+                  "WaterLevel", "BankLevel", "Situation", "Trend", "Time"]
+
+        # เตรียมข้อมูลเป็น 2D array
+        rows = [header]
+        for st in data:
+            # ดึงเฉพาะข้อความสถานะภาษาไทย (เช่น "ปกติ", "มาก") จากออบเจกต์สถานะ
+            situation_text = st["Situation"]
+            if isinstance(situation_text, dict):
+                situation_text = situation_text.get("status", "ปกติ").replace("🔴 ", "").replace("🟠 ", "").replace("🟢 ", "").replace("🔵 ", "").replace("🟡 ", "").split(" (")[0]
+
+            rows.append([
+                st["StationCode"],
+                st["Name"],
+                st["River"],
+                st["Location"],
+                st["Lat"],
+                st["Lon"],
+                st["WaterLevel"],
+                st["BankLevel"],
+                situation_text,
+                st["Trend"],
+                st["Time"]
+            ])
+
+        # Bulk Update: clear แล้วเขียนทั้งหมดในครั้งเดียว (ระบบเขียนทับข้อมูลเดิมเพื่อประหยัดพื้นที่)
+        print(f"[LazySync] Overwriting {len(rows)} rows to manage sheet limits...")
+        ws.clear()
+        ws.update('A1', rows, value_input_option='RAW')
+
+        # อัปเดต timestamp ใน Cell L1 (ปัดเศษนาทีให้ลงตัวที่ 00, 15, 30, 45 เพื่อความสวยงาม)
+        now_dt = datetime.datetime.now()
+        rounded_minute = (now_dt.minute // 15) * 15
+        rounded_now = now_dt.replace(minute=rounded_minute, second=0, microsecond=0)
+        now_str = rounded_now.strftime("%Y-%m-%d %H:%M:%S")
+        ws.update_acell('L1', f"LastSync: {now_str}")
+
+        print(f"[LazySync] Successfully synced {len(data)} stations at {now_str}")
         return True
+
+    except Exception as e:
+        print(f"[LazySync] Error syncing to sheets: {e}")
+        return False
+
+
+# =============================================================================
+# SUPABASE WATER LEVELS SYNC (ใหม่ - แนะนำใช้แทน/คู่กับ Sheets)
+# =============================================================================
+def sync_water_levels_to_supabase():
+    """
+    Sync ข้อมูลระดับน้ำจาก ThaiWater ไปยัง Supabase (ตาราง water_levels)
+    ใช้ bulk upsert เพื่อประสิทธิภาพสูง
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        print("[Supabase Water] Client not available")
+        return False
+
+    try:
+        # ดึงข้อมูลจาก API (ใช้ฟังก์ชันที่มีอยู่)
+        data = get_water_data_from_api(None, None)  # ไม่ต้อง sheets
+        if not data:
+            print("[Supabase Water] No data from API")
+            return False
+
+        # เตรียมข้อมูลสำหรับ Supabase
+        rows_to_upsert = []
+        for st in data:
+            situation_text = st.get("Situation", "ปกติ")
+            if isinstance(situation_text, dict):
+                situation_text = situation_text.get("status", "ปกติ")
+
+            rows_to_upsert.append({
+                "station_code": st.get("StationCode"),
+                "name": st.get("Name"),
+                "river": st.get("River"),
+                "location": st.get("Location"),
+                "lat": st.get("Lat"),
+                "lon": st.get("Lon"),
+                "water_level": st.get("WaterLevel") if st.get("WaterLevel") not in [None, "-"] else None,
+                "bank_level": st.get("BankLevel") if st.get("BankLevel") not in [None, "-"] else None,
+                "situation": situation_text,
+                "trend": st.get("Trend", "คงที่"),
+                "measure_time": st.get("Time"),
+                "updated_at": datetime.datetime.now().isoformat()
+            })
+
+        # Bulk upsert (ต้องมี unique constraint บน station_code)
+        if rows_to_upsert:
+            # ใช้ upsert แบบ chunk เพื่อความปลอดภัย
+            chunk_size = 200
+            for i in range(0, len(rows_to_upsert), chunk_size):
+                chunk = rows_to_upsert[i:i + chunk_size]
+                supabase.table("water_levels").upsert(chunk, on_conflict="station_code").execute()
+            
+            print(f"[Supabase Water] Synced {len(rows_to_upsert)} stations successfully")
+            return True
+        return False
+
+    except Exception as e:
+        print(f"[Supabase Water] Sync error: {e}")
+        return False
+
+
+def get_water_data_from_supabase(user_lat=None, user_lon=None, limit=100):
+    """
+    ดึงข้อมูลระดับน้ำจาก Supabase
+    ถ้ามี lat/lon จะคำนวณระยะทางและเรียงใกล้สุด
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        return []
+
+    try:
+        response = supabase.table("water_levels").select("*").order("updated_at", desc=True).limit(limit).execute()
+        records = response.data or []
+
+        if user_lat is not None and user_lon is not None:
+            for rec in records:
+                try:
+                    rec["distance_km"] = calculate_distance(
+                        user_lat, user_lon,
+                        float(rec.get("lat", 0) or 0),
+                        float(rec.get("lon", 0) or 0)
+                    )
+                except:
+                    rec["distance_km"] = 9999
+            records.sort(key=lambda x: x.get("distance_km", 9999))
+
+        return records[:3] if user_lat else records  # คืน 3 ที่ใกล้สุดถ้ามีพิกัด
+    except Exception as e:
+        print(f"[Supabase Water] Query error: {e}")
+        return []
+
+
+def get_water_data_lazy(sheets_client, sheet_id):
+    """
+    อ่านข้อมูลระดับน้ำจาก Google Sheets พร้อมระบบ Auto-Refresh (15 นาที)
+    Returns: list of dicts
+    """
+    if not sheets_client or not sheet_id:
+        return []
+
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        ws = sheet.worksheet("Water_Levels")
+
+        # 1. ตรวจสอบเวลา LastSync ในช่อง L1
+        should_sync = False
+        try:
+            last_sync_raw = ws.acell('L1').value # รูปแบบ "LastSync: 2024-06-18 10:00:00"
+            if last_sync_raw and "LastSync:" in last_sync_raw:
+                last_sync_str = last_sync_raw.replace("LastSync:", "").strip()
+                last_sync_dt = datetime.datetime.strptime(last_sync_str, "%Y-%m-%d %H:%M:%S")
+                diff = datetime.datetime.now() - last_sync_dt
+                
+                # ตรวจสอบว่าตอนนี้ถึงรอบ 15 นาทีถัดไปหรือยัง (00, 15, 30, 45)
+                now_dt = datetime.datetime.now()
+                # คำนวณหาเวลา "รอบปัจจุบัน" ที่ควรจะเป็น
+                current_slot_minute = (now_dt.minute // 15) * 15
+                current_slot_dt = now_dt.replace(minute=current_slot_minute, second=0, microsecond=0)
+                
+                # ถ้าเวลา LastSync ในชีท เก่ากว่า "รอบปัจจุบัน" แสดงว่าต้องอัปเดต
+                if last_sync_dt < current_slot_dt:
+                    print(f"[LazySync] Data is from previous slot ({last_sync_str}). Triggering auto-refresh for current slot...")
+                    should_sync = True
+            else:
+                should_sync = True # ไม่มีข้อมูลเวลา ให้ Sync เลย
+        except Exception as te:
+            print(f"[LazySync] Time check error: {te}")
+            should_sync = True
+
+        # 2. ถ้าข้อมูลเก่า ให้ดึงจาก API และบันทึกลงชีทใหม่ทันที
+        if should_sync:
+            sync_success = sync_water_levels_to_sheets(sheets_client, sheet_id)
+            if not sync_success:
+                print("[LazySync] Auto-refresh failed, using existing data.")
+
+        # 3. อ่านข้อมูลจากชีทมาใช้งาน (ไม่ว่าจะเป็นของเดิมหรือที่เพิ่งอัปเดต)
+        records = ws.get_all_records()
+        print(f"[LazySync] Returning {len(records)} records from Water_Levels")
+        return records
+
+    except Exception as e:
+        print(f"[LazySync] Error in lazy data management: {e}")
+        return []
+
+
+def get_water_data_from_sheets(sheets_client, sheet_id, user_lat, user_lon):
+    """
+    ดึงข้อมูลระดับน้ำจาก Google Sheets พร้อมคำนวณระยะทาง
+    เลือก 3 สถานีที่ใกล้ที่สุด
+    """
+    water_stations = []
+    try:
+        records = get_water_data_lazy(sheets_client, sheet_id)
+        for row in records:
+            try:
+                st_lat = float(row.get('Lat', 0))
+                st_lon = float(row.get('Lon', 0))
+                if st_lat == 0 and st_lon == 0:
+                    continue
+                distance = calculate_distance(user_lat, user_lon, st_lat, st_lon)
+
+                wl_value = row.get('WaterLevel', '-')
+                bl_value = row.get('BankLevel', '-')
+                situation = row.get('Situation', 'ปกติ')
+                trend = row.get('Trend', 'คงที่')
+
+                water_stations.append({
+                    "stationName": row.get('Name', 'ไม่ระบุชื่อ'),
+                    "provinceName": row.get('Location', ''),
+                    "riverName": row.get('River', ''),
+                    "latitude": st_lat,
+                    "longitude": st_lon,
+                    "distance_km": distance,
+                    "water_level": {"value": wl_value, "uom": "m"},
+                    "bank_level": bl_value,
+                    "situation": situation,
+                    "trend": trend,
+                    "measure_time": row.get('Time', '-'),
+                    "source": "sheets"
+                })
+            except (ValueError, TypeError):
+                continue
+
+        water_stations.sort(key=lambda x: x["distance_km"])
+        return water_stations[:3]
+    except Exception as e:
+        print(f"[Fallback Sheets] Error: {e}")
+        return []
+
+
+# =============================================================================
+# 10. USER REGISTRATION (CHECK FROM SHEETS - PERSISTENT)
+# =============================================================================
+def is_user_registered(sheets_client, sheet_id, user_id):
+    """
+    ตรวจสอบว่าผู้ใช้ลงทะเบียนแล้วหรือยัง
+    ลำดับความสำคัญ: Supabase (ถ้าตั้งค่า) > Google Sheets > หน่วยความจำชั่วคราว
+    Returns: (is_registered: bool, first_name, last_name, phone)
+    """
+    # 1. ลอง Supabase ก่อน (แนะนำสำหรับ production)
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            response = supabase.table("users").select("first_name, last_name, phone").eq("user_id", str(user_id)).limit(1).execute()
+            if response.data and len(response.data) > 0:
+                row = response.data[0]
+                fn = row.get("first_name", "ผู้แจ้ง")
+                ln = row.get("last_name", "")
+                ph = row.get("phone", "-")
+                if user_id not in USER_DATA:
+                    USER_DATA[user_id] = {}
+                USER_DATA[user_id]["first_name"] = fn
+                USER_DATA[user_id]["last_name"] = ln
+                USER_DATA[user_id]["phone"] = ph
+                return True, fn, ln, ph
+        except Exception as e:
+            print(f"[Supabase UserReg] Check error: {e}")
+
+    # 2. Fallback to Google Sheets
+    if not sheets_client or not sheet_id:
+        if user_id in USER_DATA:
+            d = USER_DATA[user_id]
+            if "first_name" in d:
+                return True, d.get("first_name", ""), d.get("last_name", ""), d.get("phone", "-")
+        return False, "", "", "-"
+
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        users_ws = sheet.worksheet("users")
+        rows = users_ws.get_all_records()
+        for r in rows:
+            if str(r.get("user_id")) == user_id:
+                fn = r.get("first_name", "ผู้แจ้ง")
+                ln = r.get("last_name", "")
+                ph = r.get("phone", "-")
+                if user_id not in USER_DATA:
+                    USER_DATA[user_id] = {}
+                USER_DATA[user_id]["first_name"] = fn
+                USER_DATA[user_id]["last_name"] = ln
+                USER_DATA[user_id]["phone"] = ph
+                return True, fn, ln, ph
+    except Exception as e:
+        print(f"[UserReg] Failed to check sheets: {e}")
+
+    if user_id in USER_DATA:
+        d = USER_DATA[user_id]
+        if "first_name" in d:
+            return True, d.get("first_name", ""), d.get("last_name", ""), d.get("phone", "-")
+
+    return False, "", "", "-"
+
+
+def register_user_to_sheets(sheets_client=None, sheet_id=None, user_id=None, first_name=None, last_name=None, phone=None):
+    """
+    ลงทะเบียนผู้ใช้ใหม่ (Supabase เป็นหลัก)
+    Google Sheets ถูกเลิกใช้เป็นหลักแล้ว (legacy)
+    """
+    supabase = get_supabase_client()
+    if supabase and user_id:
+        try:
+            register_date = datetime.datetime.now().strftime("%Y-%m-%d")
+            supabase.table("users").upsert({
+                "user_id": str(user_id),
+                "first_name": first_name,
+                "last_name": last_name,
+                "phone": phone,
+                "register_date": register_date,
+                "status": "ACTIVE"
+            }, on_conflict="user_id").execute()
+            print("[Supabase] User registered/updated successfully")
+            if user_id not in USER_DATA:
+                USER_DATA[user_id] = {}
+            USER_DATA[user_id]["first_name"] = first_name
+            USER_DATA[user_id]["last_name"] = last_name
+            USER_DATA[user_id]["phone"] = phone
+            return True
+        except Exception as e:
+            print(f"[Supabase UserReg] Error: {e}")
+
+    # Legacy fallback (ถ้ายังคงต้องการใช้ Sheets)
+    if sheets_client and sheet_id and user_id:
+        try:
+            sheet = sheets_client.open_by_key(sheet_id)
+            users_ws = sheet.worksheet("users")
+            register_date = datetime.datetime.now().strftime("%Y-%m-%d")
+            users_ws.append_row([user_id, first_name, last_name, phone, register_date, "ACTIVE"])
+            if user_id not in USER_DATA:
+                USER_DATA[user_id] = {}
+            USER_DATA[user_id]["first_name"] = first_name
+            USER_DATA[user_id]["last_name"] = last_name
+            USER_DATA[user_id]["phone"] = phone
+            return True
+        except Exception as e:
+            print(f"[Legacy Sheets] Register error: {e}")
+
+    # อย่างน้อยก็เก็บในหน่วยความจำ
+    if user_id:
+        if user_id not in USER_DATA:
+            USER_DATA[user_id] = {}
+        USER_DATA[user_id]["first_name"] = first_name or ""
+        USER_DATA[user_id]["last_name"] = last_name or ""
+        USER_DATA[user_id]["phone"] = phone or "-"
+    return supabase is not None
+
+
+# =============================================================================
+# 11. WATER LEVEL REPORT BUILDERS
+# =============================================================================
+def build_water_level_text_report(user_lat, user_lon, timestamp, stations, weather_info, water_flow):
+    """สร้างรายงานข้อความระดับน้ำ"""
+    lines = [
+        "🌊 รายงานสถานการณ์น้ำรายพิกัด",
+        f"📍 พิกัด: {user_lat:.4f}, {user_lon:.4f}",
+        f"⏰ อัปเดตล่าสุด: {timestamp}",
+        ""
+    ]
+
+    lines.append("🌦️ สภาพอากาศ:")
+    lines.append(weather_info)
+    lines.append("")
+
+    lines.append("📡 ข้อมูลจากสถานี ThaiWater ใกล้คุณ:")
+    lines.append("")
+
+    if not stations:
+        lines.append("⚠️ ไม่พบสถานีในรัศมี 50 กม.")
+    else:
+        for i, st in enumerate(stations, 1):
+            wl = st.get("water_level")
+            distance = st.get("distance_km", 0)
+            situation = st.get("situation", "ไม่มีข้อมูล")
+            trend = st.get("trend", "คงที่")
+
+            if wl and wl.get("value") not in [None, "-", ""]:
+                try:
+                    wl_value = float(wl["value"])
+                    bl = st.get("bank_level")
+                    assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None)
+                    lines.append(f"{i}. 📍 {st['stationName']}")
+                    lines.append(f"   ห่าง: {distance:.2f} กม.")
+                    lines.append(f"   ระดับน้ำ: {wl_value:.2f} ม.")
+                    lines.append(f"   สถานะ: {assessment['status']}")
+                    lines.append(f"   สถานการณ์: {situation} | แนวโน้ม: {trend}")
+                    lines.append(f"   {assessment['advice']}")
+                    if st.get('measure_time') and st['measure_time'] != '-':
+                        lines.append(f"   วัดล่าสุด: {st['measure_time']}")
+                except (ValueError, TypeError):
+                    lines.append(f"{i}. 📍 {st['stationName']}")
+                    lines.append(f"   ห่าง: {distance:.2f} กม.")
+            else:
+                lines.append(f"{i}. 📍 {st['stationName']}")
+                lines.append(f"   ห่าง: {distance:.2f} กม.")
+                lines.append(f"   ไม่มีข้อมูลระดับน้ำ")
+            lines.append("")
+
+    lines.append("🌊 ประมาณการน้ำหลาก:")
+    lines.append(f"   อัตราการไหล: {water_flow.get('flow', 'N/A')}")
+    lines.append(f"   ความสูงน้ำ: {water_flow.get('height', 'N/A')}")
+    lines.append(f"   สถานะ: {water_flow.get('status', 'N/A')}")
+    lines.append("")
+    lines.append(f"📌 แหล่งข้อมูล: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)")
+    lines.append(f"🔗 ดูเพิ่มเติม: {THAIWATER_WEB_URL}")
+
+    return "\n".join(lines)
+
+
+def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weather_info, water_flow):
+    """สร้าง Flex Message รายงานระดับน้ำ"""
+    header_box = BoxComponent(
+        layout="vertical",
+        contents=[
+            TextComponent(text="🌊 รายงานระดับน้ำรายพิกัด", weight="bold", size="lg", color="#1E3A8A"),
+            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f} | {timestamp}", size="xs", color="#6B7280", margin="sm")
+        ]
+    )
+
+    stations_box = BoxComponent(
+        layout="vertical",
+        margin="lg",
+        contents=[TextComponent(text="📡 สถานีตรวจวัดใกล้คุณ", weight="bold", size="sm", color="#374151")]
+    )
+
+    if not stations:
+        stations_box.contents.append(
+            TextComponent(text="⚠️ ไม่พบสถานีในรัศมี 50 กม.", size="xs", color="#EF4444", margin="sm")
+        )
+    else:
+        for st in stations:
+            wl = st.get("water_level")
+            distance = st.get("distance_km", 0)
+            situation = st.get("situation", "ไม่มีข้อมูล")
+            trend = st.get("trend", "คงที่")
+
+            wl_value = "-"
+            risk_color = "#9CA3AF"
+            assessment = assess_water_level_status(None)
+
+            if wl and wl.get("value") not in [None, "-", ""]:
+                try:
+                    wl_value = float(wl["value"])
+                    bl = st.get("bank_level")
+                    assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None)
+                    risk_color = assessment["color"]
+                except (ValueError, TypeError):
+                    pass
+
+            station_card = BoxComponent(
+                layout="vertical",
+                margin="sm",
+                background_color="#F9FAFB",
+                corner_radius="md",
+                padding_all="sm",
+                contents=[
+                    TextComponent(text=f"📍 {st['stationName']}", weight="bold", size="xs", color="#1F2937"),
+                    TextComponent(text=f"ห่าง {distance:.2f} กม. | ระดับ {wl_value} ม. / ตลิ่ง {st.get('bank_level', '-')} ม.", size="xxs", color="#4B5563", margin="xs"),
+                    BoxComponent(
+                        layout="horizontal",
+                        margin="xs",
+                        spacing="sm",
+                        contents=[
+                            BoxComponent(
+                                layout="vertical",
+                                background_color=risk_color,
+                                corner_radius="sm",
+                                padding_start="sm",
+                                padding_end="sm",
+                                contents=[
+                                    TextComponent(text=assessment["status"], size="xxs", color="#FFFFFF", weight="bold")
+                                ]
+                            ),
+                            TextComponent(text=f"ต่ำกว่าตลิ่ง: {assessment['diff_text']} ม.", size="xxs", color=risk_color, weight="bold")
+                        ]
+                    ),
+                    TextComponent(text=f"แนวโน้ม: {trend} | {assessment['advice']}", size="xxs", color="#6B7280", margin="xs")
+                ]
+            )
+            stations_box.contents.append(station_card)
+
+    footer_box = BoxComponent(
+        layout="vertical",
+        margin="lg",
+        contents=[
+            SeparatorComponent(margin="sm"),
+            TextComponent(text="📌 แหล่งข้อมูล: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)", size="xxs", color="#9CA3AF", margin="sm"),
+            ButtonComponent(
+                style="link",
+                height="sm",
+                action=URIAction(label="ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=THAIWATER_WEB_URL),
+                color="#2563EB"
+            )
+        ]
+    )
+
+    bubble = BubbleContainer(
+        header=header_box,
+        body=BoxComponent(
+            layout="vertical",
+            contents=[
+                stations_box,
+                footer_box
+            ]
+        )
+    )
+
+    return FlexSendMessage(alt_text="รายงานระดับน้ำรายพิกัด", contents=bubble)
+
+
+
+# =============================================================================
+# 12. GREETING & QUICK INFO FLEX MESSAGE
+# =============================================================================
+
+# รายการคำทักทายที่ระบบจะตอบทันทีโดย "ไม่เรียก" Gemini AI
+# เพื่อลดเวลาตอบสนองให้เหลือน้อยที่สุด (ไม่ต้องรอ AI ประมวลผล)
+GREETING_KEYWORDS = [
+    "สวัสดี", "สวัสดีครับ", "สวัสดีค่ะ", "สวัสดีคับ", "สวัสดีคะ",
+    "หวัดดี", "หวัดดีครับ", "หวัดดีค่ะ",
+    "ดีครับ", "ดีค่ะ", "หวัดดีจ้า",
+    "hello", "hi", "hey",
+    "good morning", "good afternoon", "good evening",
+    "เริ่ม", "start", "menu", "เมนู"
+]
+
+
+def is_greeting(text):
+    """
+    ตรวจสอบว่าข้อความที่ผู้ใช้พิมพ์มา 'มีความหมายเป็นการทักทาย' หรือไม่
+    ใช้การเทียบแบบ exact-match (lowercase) ก่อน แล้วค่อย fallback ไปเช็ค
+    คำทักทายที่ปรากฏเป็นคำแรกของข้อความ เพื่อกันการ false-positive กับ
+    ข้อความยาวที่บังเอิญมีคำว่า 'hi' ฝังอยู่ตรงกลางประโยค (เช่นคำถามจริงจัง)
+    """
+    if not text:
+        return False
+
+    clean = text.strip().lower()
+    # ตัดเครื่องหมายวรรคตอน/อิโมจิที่มักพ่วงมากับคำทักทายออกก่อนเทียบ
+    clean = clean.strip("!.,😊🙏👋 ")
+
+    if not clean:
+        return False
+
+    # 1) ตรงทั้งข้อความ (กรณีพิมพ์สั้น ๆ แบบ "สวัสดีครับ", "hi")
+    if clean in [kw.lower() for kw in GREETING_KEYWORDS]:
+        return True
+
+    # 2) ข้อความสั้น (<= 4 คำ) และคำแรกเป็นคำทักทาย เช่น "สวัสดีครับ floodcare"
+    words = clean.split()
+    if len(words) <= 4 and words:
+        first_word = words[0]
+        for kw in GREETING_KEYWORDS:
+            if first_word.startswith(kw.lower()) or kw.lower().startswith(first_word):
+                return True
 
     return False
 
 
-# =============================================================================
-# DEBUG ROUTE: ตรวจสอบว่า ThaiWater API ยังเข้าถึงได้และ field ตรงกันหรือไม่
-# เรียกผ่านเบราว์เซอร์: https://<your-app>.onrender.com/debug/thaiwater
-# (แนะนำให้ลบ หรือใส่ password check ก่อน deploy ใช้งานจริงระยะยาว)
-# =============================================================================
-@app.route("/debug/thaiwater", methods=['GET'])
-def debug_thaiwater():
-    from flask import jsonify
+def get_greeting_message(user_name="คุณ"):
+    """
+    สร้างข้อความทักทายแบบ Text ตามรูปแบบที่ผู้ใช้ต้องการ (เน้นความเร็วสูงสุด)
+    """
+    text = (
+        f"สวัสดี คุณ {user_name}\n"
+        "ผมคือ FLOODCARE AI\n"
+        "แชทบอทอัจฉริยะสำหรับ ติดตามและพยากรณ์ระดับน้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยน้ำท่วม\n"
+        "🔍 ผมช่วยคุณได้\n"
+        "1. เบอร์โทรฉุกเฉิน\n"
+        "2. SOS แจ้งเหตุฉุกเฉิน\n"
+        "3. ค้นหาศูนย์อพยพ\n"
+        "4. ตรวจสอบระดับน้ำตรวจสอบข้อมูลระดับน้ำ\n"
+        "5. แจ้งความต้องการหรือขอความช่วยเหลือด้านต่าง ๆ\n"
+        "6. สอบถามข้อมูลจาก AI\n\n"
+        "🤝 ติดต่อและช่วยเหลือผู้ประสบภัยน้ำท่วม\n"
+        "ผมพร้อมตอบทุกคำถามเกี่ยวกับสถานการณ์น้ำได้ตลอดเวลาครับ 💧😊"
+    )
+    return TextSendMessage(text=text)
 
-    result = {
-        "v3_api_reachable": False,
-        "v3_raw_sample": None,
-        "v3_parsed_sample": None,
-        "v3_total_count": 0,
-        "error": None
-    }
+
+def handle_greeting_logic(event):
+    """
+    ตรรกะการตอบกลับคำทักทาย "สวัสดี"
+    """
+    user_id = event.source.user_id
+    profile = None
     try:
-        raw_data = bot_config.fetch_waterlevel_v3()
-        if raw_data:
-            result["v3_api_reachable"] = True
-            result["v3_total_count"] = len(raw_data)
-            result["v3_raw_sample"] = raw_data[0] if len(raw_data) > 0 else None
-            result["v3_parsed_sample"] = bot_config.parse_v3_station(raw_data[0]) if len(raw_data) > 0 else None
-        else:
-            result["error"] = "fetch_waterlevel_v3() returned None or empty list"
+        profile = line_bot_api.get_profile(user_id)
+    except:
+        pass
+    
+    user_name = profile.display_name if profile else "คุณ"
+    greeting_msg = get_greeting_message(user_name)
+    
+    line_bot_api.reply_message(event.reply_token, greeting_msg)
+
+# =============================================================================
+# 13. SOS PRIORITY CALCULATION
+# =============================================================================
+def calculate_sos_priority(group_types, urgency_level):
+    """
+    คำนวณ Priority จากกลุ่มผู้ประสบภัยและระดับความเร่งด่วน
+    group_types: list (เช่น ["เด็กเล็ก/คนชรา", "ผู้ป่วยติดเตียง"])
+    urgency_level: str ("วิกฤต" | "สูง" | "ปานกลาง" | "ต่ำ" | "ขาดแคลนยา")
+    Returns: (priority_label, priority_code)
+    """
+    gt = [g.lower() for g in group_types] if group_types else []
+    ul = urgency_level.lower() if urgency_level else ""
+
+    # CRITICAL: มีผู้บาดเจ็บ OR ผู้ป่วยติดเตียง OR น้ำระดับวิกฤต OR ขาดแคลนยาหนัก
+    if any(k in g for g in gt for k in ["บาดเจ็บ", "ผู้ป่วย", "พิการ"]):
+        return ("🔴 CRITICAL (เร่งด่วนวิกฤตสูงสุด)", "CRITICAL")
+    if "วิกฤต" in ul:
+        return ("🔴 CRITICAL (เร่งด่วนวิกฤตสูงสุด)", "CRITICAL")
+    if "ขาดแคลน" in ul:
+        return ("🔴 CRITICAL (เร่งด่วนวิกฤตสูงสุด)", "CRITICAL")
+
+    # HIGH: มีเด็ก/คนชรา OR น้ำระดับสูง
+    if any(k in g for g in gt for k in ["เด็ก", "ชรา", "เด็กเล็ก"]):
+        return ("🟠 HIGH (ความเสี่ยงสูง)", "HIGH")
+    if "สูง" in ul:
+        return ("🟠 HIGH (ความเสี่ยงสูง)", "HIGH")
+
+    # NORMAL
+    return ("🟢 NORMAL (สถานการณ์ปกติ)", "NORMAL")
+
+
+def generate_case_id():
+    """สร้างเลขเคส SOS"""
+    today_str = datetime.datetime.now().strftime("%Y%m%d")
+    random_suffix = datetime.datetime.now().strftime("%f")[:4]
+    return f"SOS-{today_str}-{random_suffix}"
+
+
+def send_line_notification(user_id, message):
+    """ส่ง Push Message กลับไปหาผู้ใช้ผ่าน LINE"""
+    if not line_bot_api:
+        print("[LINE] line_bot_api not initialized")
+        return False
+    try:
+        line_bot_api.push_message(user_id, TextSendMessage(text=message))
+        print(f"[LINE] Notification sent to {user_id}")
+        return True
     except Exception as e:
-        result["error"] = str(e)
-
-    return jsonify(result)
+        print(f"[LINE] Failed to send notification: {e}")
+        return False
 
 
 # =============================================================================
-# DEBUG ROUTE: ดูสถานะ Sheets (LastSync, จำนวน records) + บังคับ sync ทันที
-# เรียกผ่านเบราว์เซอร์: https://<your-app>.onrender.com/debug/sync-status
-# เรียก POST ไปที่ /debug/force-sync เพื่อบังคับ sync ทันที (ไม่ต้องรอผู้ใช้ถาม)
+# 13B. TYPING INDICATOR (LINE Chat Loading Animation API)
 # =============================================================================
-@app.route("/debug/sync-status", methods=['GET'])
-def debug_sync_status():
-    from flask import jsonify
-
-    sheets_client = bot_config.get_sheets_client()
-    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
-
-    result = {
-        "sheets_connected": sheets_client is not None,
-        "sheet_id_configured": bool(clean_sheet_id),
-        "last_sheets_error": bot_config.LAST_SHEETS_ERROR,
-        "last_sync": None,
-        "record_count": 0
-    }
-
-    if sheets_client and clean_sheet_id:
-        try:
-            sheet = sheets_client.open_by_key(clean_sheet_id)
-            ws = sheet.worksheet("Water_Levels")
-            result["last_sync"] = ws.acell('L1').value
-            result["record_count"] = len(ws.get_all_records())
-        except Exception as e:
-            result["error"] = str(e)
-
-    return jsonify(result)
+# LINE รองรับการแสดง "กำลังพิมพ์..." (จุดสามจุด) ผ่าน REST endpoint นี้โดยตรง
+# SDK เวอร์ชันเก่า (linebot v2) ยังไม่มี wrapper ให้ จึงเรียกผ่าน requests ตรง ๆ
+# เอกสารอ้างอิง: https://developers.line.biz/en/reference/messaging-api/#display-a-loading-indicator
+LINE_LOADING_ANIMATION_URL = "https://api.line.me/v2/bot/chat/loading/start"
 
 
-@app.route("/debug/force-sync", methods=['POST'])
-def debug_force_sync():
-    from flask import jsonify
+def show_loading_animation(user_id, loading_seconds=10):
+    """
+    แสดง Typing Indicator (กำลังพิมพ์...) ให้ผู้ใช้เห็นระหว่างที่ระบบกำลัง
+    ประมวลผลกับ Gemini AI เพื่อให้ผู้ใช้รู้ว่าระบบยังทำงานอยู่ ไม่ได้ค้าง
 
-    sheets_client = bot_config.get_sheets_client()
-    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
-
-    if not sheets_client or not clean_sheet_id:
-        return jsonify({"success": False, "error": "Sheets client or sheet_id not configured"}), 400
-
+    loading_seconds: ระยะเวลาแสดง animation (5-60 วินาที ตาม spec ของ LINE)
+                      ถ้า AI ตอบเร็วกว่านี้ animation จะหายไปเองทันทีที่ reply ถูกส่ง
+    """
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        return False
     try:
-        success = bot_config.sync_water_levels_to_sheets(sheets_client, clean_sheet_id)
-        return jsonify({"success": success})
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
+        }
+        payload = {
+            "chatId": user_id,
+            "loadingSeconds": max(5, min(loading_seconds, 60))
+        }
+        resp = requests.post(LINE_LOADING_ANIMATION_URL, headers=headers, json=payload, timeout=5)
+        if resp.status_code != 202:
+            print(f"[TypingIndicator] Unexpected status {resp.status_code}: {resp.text}")
+            return False
+        return True
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        # ไม่ critical พอที่จะทำให้ระบบล้ม ถ้า indicator ล้มเหลวให้ปล่อยผ่านเงียบ ๆ
+        print(f"[TypingIndicator] Failed to show loading animation: {e}")
+        return False
 
 
 # =============================================================================
-# WEBHOOK ROUTE สำหรับรับสัญญาณ LINE
+# 13. USER NEEDS MANAGEMENT
 # =============================================================================
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers.get('X-Line-Signature')
-    body = request.get_data(as_text=True)
+def save_user_need(sheets_client=None, sheet_id=None, user_id=None, timestamp=None, lat=None, lon=None, category=None, details=None, urgency=None):
+    """
+    บันทึกความต้องการสิ่งของลง Supabase (หลัก)
+    Google Sheets ถูกเลิกใช้แล้ว
+    """
+    supabase = get_supabase_client()
+    if supabase and user_id:
+        try:
+            supabase.table("user_needs").insert({
+                "timestamp": timestamp or datetime.datetime.now().isoformat(),
+                "user_id": str(user_id),
+                "latitude": float(lat) if lat else 0,
+                "longitude": float(lon) if lon else 0,
+                "category": category,
+                "details": details,
+                "urgency": urgency,
+                "status": "PENDING"
+            }).execute()
+            print("[Supabase] User need saved successfully")
+            return True
+        except Exception as e:
+            print(f"[Supabase UserNeeds] Error: {e}")
+
+    # Legacy Sheets (optional)
+    if sheets_client and sheet_id:
+        try:
+            sheet = sheets_client.open_by_key(sheet_id)
+            try:
+                ws = sheet.worksheet("user_needs")
+            except:
+                ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="12")
+                ws.append_row(["Timestamp", "UserID", "Latitude", "Longitude", "Category", "Details", "Urgency", "Status"])
+            ws.append_row([timestamp, user_id, lat, lon, category, details, urgency, "PENDING"])
+            return True
+        except Exception as e:
+            print(f"[Legacy Sheets] save_user_need error: {e}")
+
+    return False
+
+
+def get_all_user_needs(sheets_client, sheet_id):
+    """ดึงรายการความต้องการสิ่งของทั้งหมด (Supabase ก่อน)"""
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            response = supabase.table("user_needs").select("*").order("timestamp", desc=True).limit(500).execute()
+            if response.data:
+                return response.data
+        except Exception as e:
+            print(f"[Supabase UserNeeds] Select error: {e}")
+
+    if not sheets_client or not sheet_id:
+        return []
     try:
-        bot_config.handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return 'OK'
+        sheet = sheets_client.open_by_key(sheet_id)
+        ws = sheet.worksheet("user_needs")
+        return ws.get_all_records()
+    except Exception as e:
+        print(f"[UserNeeds] Failed to load: {e}")
+        return []
+
+
+def update_need_status(sheets_client, sheet_id, timestamp, user_id, new_status):
+    """อัปเดตสถานะความต้องการ (PENDING -> COMPLETED) - Supabase ก่อน"""
+    supabase = get_supabase_client()
+    if supabase:
+        try:
+            # ใช้ timestamp + user_id เป็น key (สมมติไม่มี PK)
+            response = supabase.table("user_needs").update({"status": new_status}).eq("timestamp", timestamp).eq("user_id", str(user_id)).execute()
+            if response.data:
+                print("[Supabase] Need status updated")
+                return True
+        except Exception as e:
+            print(f"[Supabase UserNeeds] Update error: {e}")
+
+    if not sheets_client or not sheet_id:
+        return False
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        ws = sheet.worksheet("user_needs")
+        rows = ws.get_all_records()
+        for i, row in enumerate(rows, start=2):
+            if row.get("Timestamp") == timestamp and row.get("UserID") == user_id:
+                ws.update_cell(i, 8, new_status)
+                return True
+        return False
+    except Exception as e:
+        print(f"[UserNeeds] Failed to update status: {e}")
+        return False
 
 
 # =============================================================================
-# รับข้อความตัวอักษรและประมวลผลกระบวนการคัดกรองแบบโต้ตอบ
+# 14. SHELTER VACANCY CHECK
 # =============================================================================
-@bot_config.handler.add(MessageEvent, message=TextMessage)
-def handle_text_message(event):
-    user_text = event.message.text.strip()
-    user_id = event.source.user_id
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    state = bot_config.USER_STATES.get(user_id)
-    sheets_client = bot_config.get_sheets_client()
-    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
-
-    # ===========================
-    # FEATURE: พิมพ์ "ยกเลิก"
-    # ===========================
-    if user_text == "ยกเลิก":
-        bot_config.USER_STATES.pop(user_id, None)
-        bot_config.USER_DATA.pop(user_id, None)
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ คุณสามารถกดใช้งานเมนูหลักใหม่ได้ทันทีครับ")
-        )
-        return
-
-    # ===========================
-    # FEATURE: ดักจับ SOS location state
-    # ===========================
-    if state == "sos_location":
-        location_quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=LocationAction(label="📍 ส่งพิกัดตำแหน่งแจ้งเหตุ"))
-            ]
-        )
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="🚨 ระบบกำลังรอพิกัดของคุณครับ โปรดกดปุ่ม '📍 ส่งพิกัดตำแหน่งแจ้งเหตุ' ด้านล่าง หรือพิมพ์ 'ยกเลิก' เพื่อเริ่มต้นใหม่ครับ",
-                quick_reply=location_quick_reply
-            )
-        )
-        return
-
-    # ===========================
-    # FEATURE: ดักจับ Needs location state
-    # ===========================
-    if state == "needs_location":
-        location_quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเพื่อรับสิ่งของ"))
-            ]
-        )
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="📌 ระบบกำลังรอพิกัดของคุณครับ โปรดกดปุ่ม '📍 แชร์พิกัดเพื่อรับสิ่งของ' ด้านล่าง หรือพิมพ์ 'ยกเลิก' เพื่อยกเลิกครับ",
-                quick_reply=location_quick_reply
-            )
-        )
-        return
-
-    # ===========================
-    # สถานะลงทะเบียนผู้ใช้รายใหม่ (3 Steps)
-    # ===========================
-    if state == "register_first_name":
-        if user_id not in bot_config.USER_DATA:
-            bot_config.USER_DATA[user_id] = {}
-        bot_config.USER_DATA[user_id]["temp_first_name"] = user_text
-        bot_config.USER_STATES[user_id] = "register_last_name"
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ 'นามสกุล' ของคุณครับ")
-        )
-        return
-
-    elif state == "register_last_name":
-        if user_id not in bot_config.USER_DATA:
-            bot_config.USER_DATA[user_id] = {}
-        bot_config.USER_DATA[user_id]["temp_last_name"] = user_text
-        bot_config.USER_STATES[user_id] = "register_phone"
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ 'เบอร์โทรศัพท์' 9-10 หลักครับ (เช่น 0812345678)")
-        )
-        return
-
-    elif state == "register_phone":
-        if user_id not in bot_config.USER_DATA:
-            bot_config.USER_DATA[user_id] = {}
-        clean_phone = bot_config.extract_number(user_text)
-        if len(clean_phone) < 9 or len(clean_phone) > 10:
-            bot_config.line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="⚠️ เบอร์โทรไม่ถูกต้องครับ! โปรดพิมพ์ตัวเลข 9-10 หลักใหม่อีกครับ")
-            )
-            return
-
-        first_name = bot_config.USER_DATA[user_id].get("temp_first_name", "ผู้แจ้ง")
-        last_name = bot_config.USER_DATA[user_id].get("temp_last_name", "ทั่วไป")
-
-        # บันทึกลง Google Sheets ผ่านฟังก์ชันใหม่
-        success = False
-        if sheets_client:
-            success = bot_config.register_user_to_sheets(
-                sheets_client, clean_sheet_id, user_id, first_name, last_name, clean_phone
-            )
-
-        bot_config.USER_STATES.pop(user_id, None)
-
-        if success:
-            reply_text = (
-                f"🎉 ยินดีต้อนรับครับ คุณ {first_name} {last_name}!\n"
-                f"ระบบลงทะเบียนเรียบร้อยแล้วครับ\n\n"
-                f"🛡️ กดปุ่มเมนูด้านล่างเพื่อใช้งานได้ทันทีครับ"
-            )
-        else:
-            reply_text = (
-                f"🎉 ลงทะเบียนสำเร็จ (ระบบชั่วคราว) คุณ {first_name} {last_name}!\n"
-                f"⚠️ บันทึกลง Sheets ไม่สำเร็จ แต่ใช้งานได้ตามปกติครับ"
-            )
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        return
-
-    # ===========================
-    # SOS FLOW ใหม่ (5 Steps)
-    # ===========================
-    if state and state.startswith("sos_"):
-        if user_id not in bot_config.USER_DATA:
-            bot_config.USER_DATA[user_id] = {}
-
-        # ---- Step 2: เลือกกลุ่มผู้ประสบภัย ----
-        if state == "sos_step2":
-            if "group_types" not in bot_config.USER_DATA[user_id]:
-                bot_config.USER_DATA[user_id]["group_types"] = []
-
-            # ถ้าผู้ใช้เลือกตัวเลือกจาก Quick Reply
-            valid_options = {
-                "👶 มีเด็กเล็ก/คนชรา": "เด็กเล็ก/คนชรา",
-                "🚑 มีผู้ป่วยติดเตียง/พิการ": "ผู้ป่วยติดเตียง/พิการ",
-                "🩸 มีผู้บาดเจ็บฉุกเฉิน": "ผู้บาดเจ็บฉุกเฉิน",
-                "👨‍👩‍👧 ผู้ใหญ่ทั่วไป": "ผู้ใหญ่ทั่วไป",
-                "🐶 มีสัตว์เลี้ยง": "สัตว์เลี้ยง"
-            }
-
-            if user_text in valid_options:
-                selected = valid_options[user_text]
-                if selected not in bot_config.USER_DATA[user_id]["group_types"]:
-                    bot_config.USER_DATA[user_id]["group_types"].append(selected)
-
-                quick_reply = QuickReply(
-                    items=[
-                        QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา")),
-                        QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วย/พิการ", text="🚑 มีผู้ป่วยติดเตียง/พิการ")),
-                        QuickReplyButton(action=MessageAction(label="🩸 ผู้บาดเจ็บ", text="🩸 มีผู้บาดเจ็บฉุกเฉิน")),
-                        QuickReplyButton(action=MessageAction(label="👨‍👩‍👧 ผู้ใหญ่", text="👨‍👩‍👧 ผู้ใหญ่ทั่วไป")),
-                        QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง")),
-                        QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
-                    ]
-                )
-                selected_text = ", ".join(bot_config.USER_DATA[user_id]["group_types"]) if bot_config.USER_DATA[user_id]["group_types"] else "ยังไม่ได้เลือก"
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text=f"👥 กลุ่มที่เลือก: {selected_text}\n\nเลือกเพิ่มหรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
-                        quick_reply=quick_reply
-                    )
-                )
-                return
-            elif user_text in ["เสร็จสิ้น", "➡️ เสร็จสิ้น"]:
-                if not bot_config.USER_DATA[user_id].get("group_types"):
-                    bot_config.USER_DATA[user_id]["group_types"] = ["ผู้ใหญ่ทั่วไป"]
-                bot_config.USER_STATES[user_id] = "sos_step3"
-                quick_reply = QuickReply(
-                    items=[
-                        QuickReplyButton(action=MessageAction(label="🔴 วิกฤต (มิดหัว/ติดหลังคา)", text="🔴 วิกฤต (มิดหัว/ติดบนหลังคา)")),
-                        QuickReplyButton(action=MessageAction(label="🟠 สูง (ระดับอก/เกิน 1 เมตร)", text="🟠 สูง (ระดับอก/เกิน 1 เมตร)")),
-                        QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง (ระดับเอว)", text="🟡 ปานกลาง (ระดับเอว)")),
-                        QuickReplyButton(action=MessageAction(label="🟢 ต่ำ (ระดับหน้าแข้ง)", text="🟢 ต่ำ (ระดับหน้าแข้ง)")),
-                        QuickReplyButton(action=MessageAction(label="💊 ขาดแคลนยา/อาหาร", text="💊 ขาดแคลนยา/อาหารหนัก"))
-                    ]
-                )
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="🌊 ระดับน้ำและสถานการณ์ปัจจุบัน\n\nโปรดเลือกระดับความรุนแรง:",
-                        quick_reply=quick_reply
-                    )
-                )
-                return
-            else:
-                # ถ้าพิมพ์ค่าอื่นมา ให้ถือว่าระบุเอง
-                if user_text:
-                    bot_config.USER_DATA[user_id]["group_types"].append(user_text)
-                quick_reply = QuickReply(
-                    items=[
-                        QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา")),
-                        QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วย/พิการ", text="🚑 มีผู้ป่วยติดเตียง/พิการ")),
-                        QuickReplyButton(action=MessageAction(label="🩸 ผู้บาดเจ็บ", text="🩸 มีผู้บาดเจ็บฉุกเฉิน")),
-                        QuickReplyButton(action=MessageAction(label="👨‍👩‍👧 ผู้ใหญ่", text="👨‍👩‍👧 ผู้ใหญ่ทั่วไป")),
-                        QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง")),
-                        QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
-                    ]
-                )
-                selected_text = ", ".join(bot_config.USER_DATA[user_id]["group_types"])
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text=f"👥 กลุ่มที่เลือก: {selected_text}\n\nเลือกเพิ่มหรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
-                        quick_reply=quick_reply
-                    )
-                )
-                return
-
-        # ---- Step 3: ประเมินความรุนแรง ----
-        elif state == "sos_step3":
-            urgency_map = {
-                "🔴 วิกฤต (มิดหัว/ติดบนหลังคา)": "วิกฤต",
-                "🟠 สูง (ระดับอก/เกิน 1 เมตร)": "สูง",
-                "🟡 ปานกลาง (ระดับเอว)": "ปานกลาง",
-                "🟢 ต่ำ (ระดับหน้าแข้ง)": "ต่ำ",
-                "💊 ขาดแคลนยา/อาหารหนัก": "ขาดแคลนยา"
-            }
-            bot_config.USER_DATA[user_id]["urgency_level"] = urgency_map.get(user_text, user_text)
-            bot_config.USER_STATES[user_id] = "sos_step4"
-
-            quick_reply = QuickReply(
-                items=[
-                    QuickReplyButton(action=MessageAction(label="⏩ ข้ามขั้นตอนนี้", text="ข้ามขั้นตอนนี้"))
-                ]
-            )
-            bot_config.line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(
-                    text="📸 ส่งรูปถ่ายสภาพหน้างาน (ถ้าทำได้)\n\nถ่ายรูประดับน้ำหรือสภาพในบ้าน 1 รูป เพื่อให้ทีมกู้ภัยเตรียมอุปกรณ์ได้ถูกต้องครับ\n\nหรือกด 'ข้ามขั้นตอนนี้'",
-                    quick_reply=quick_reply
-                )
-            )
-            return
-
-        # ---- Step 4: รอรูปภาพหรือข้าม ----
-        elif state == "sos_step4":
-            if user_text == "ข้ามขั้นตอนนี้":
-                bot_config.USER_DATA[user_id]["photo_url"] = "-"
-            else:
-                bot_config.USER_DATA[user_id]["photo_url"] = "-"
-                if user_text and user_text != "ข้ามขั้นตอนนี้":
-                    bot_config.USER_DATA[user_id]["note"] = user_text
-
-            bot_config.USER_STATES[user_id] = "sos_confirm"
-            _send_sos_summary(event, user_id)
-            return
-
-        # ---- Step 5: ยืนยันการส่งข้อมูล ----
-        elif state == "sos_confirm":
-            if "ยืนยัน" in user_text:
-                data = bot_config.USER_DATA.pop(user_id, {})
-                bot_config.USER_STATES.pop(user_id, None)
-
-                case_id = bot_config.generate_case_id()
-                group_types = data.get("group_types", ["ผู้ใหญ่ทั่วไป"])
-                urgency = data.get("urgency_level", "ต่ำ")
-                priority_code = data.get("priority", "NORMAL")
-
-                success = False
-                if sheets_client:
-                    try:
-                        sheet = sheets_client.open_by_key(clean_sheet_id)
-                        sos_ws = sheet.worksheet("sos_requests")
-                        sos_ws.append_row([
-                            case_id,
-                            user_id,
-                            timestamp,
-                            data.get("latitude", "0"),
-                            data.get("longitude", "0"),
-                            len(group_types),
-                            ", ".join(group_types),
-                            urgency,
-                            data.get("photo_url", "-"),
-                            "-",
-                            data.get("note", "-"),
-                            priority_code,
-                            "OPEN",
-                            "-",
-                            "-",
-                            "-",
-                            "-"
-                        ])
-                        success = True
-                    except Exception as e:
-                        print(f"Failed to save SOS: {e}")
-
-                if success:
-                    reply_text = (
-                        f"🚀 ส่งข้อมูลสำเร็จ! เลขเคส: {case_id}\n"
-                        f"ทีมกู้ภัยกำลังจัดลำดับความสำคัญ\n\n"
-                        f"🛡️ ระหว่างรอ:\n"
-                        f"1. ตัดสะพานไฟในบ้านทันที\n"
-                        f"2. พยายามอยู่บนที่สูง\n"
-                        f"3. เตรียมไฟฉายหรือนกหวีด\n"
-                        f"4. ประหยัดแบตเตอรี่มือถือ\n"
-                        f"5. หากอันตรายถึงชีวิต โทร 1784"
-                    )
-                else:
-                    reply_text = (
-                        f"🚀 ส่งข้อมูลสำเร็จ! เลขเคส: {case_id}\n"
-                        f"⚠️ บันทึก Sheets ไม่สำเร็จ แต่ข้อมูลถูกบันทึกบนเซิร์ฟเวอร์แล้ว\n\n"
-                        f"🛡️ ระหว่างรอโปรดปฏิบัติดังนี้:\n"
-                        f"1. ตัดสะพานไฟในบ้านทันที\n"
-                        f"2. พยายามอยู่บนที่สูง\n"
-                        f"3. เตรียมไฟฉายหรือนกหวีด\n"
-                        f"4. ประหยัดแบตเตอรี่มือถือ\n"
-                        f"5. หากอันตรายถึงชีวิต โทร 1784"
-                    )
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-                return
-            else:
-                bot_config.USER_STATES.pop(user_id, None)
-                bot_config.USER_DATA.pop(user_id, None)
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text="❌ ยกเลิกเคสเรียบร้อยครับ กดปุ่ม SOS ใหม่ได้ทันทีครับ")
-                )
-                return
-
-    # ===========================
-    # USER NEEDS FLOW ใหม่ (5 Steps)
-    # ===========================
-    if state and state.startswith("needs_"):
-        if user_id not in bot_config.USER_DATA:
-            bot_config.USER_DATA[user_id] = {}
-
-        # ---- Step 2: เลือกหมวดหมู่ ----
-        if state == "needs_step2":
-            categories = {
-                "🍲 อาหาร/น้ำดื่ม": "อาหาร/น้ำดื่ม",
-                "💊 ยารักษาโรค/เวชภัณฑ์": "ยารักษาโรค/เวชภัณฑ์",
-                "👶 ของใช้เด็กอ่อน": "ของใช้เด็กอ่อน",
-                "🧼 ของใช้ส่วนตัว": "ของใช้ส่วนตัว",
-                "🔦 อุปกรณ์ส่องสว่าง": "อุปกรณ์ส่องสว่าง",
-                "📝 อื่นๆ (ระบุเอง)": "อื่นๆ"
-            }
-
-            if user_text in categories:
-                if "need_categories" not in bot_config.USER_DATA[user_id]:
-                    bot_config.USER_DATA[user_id]["need_categories"] = []
-                bot_config.USER_DATA[user_id]["need_categories"].append(categories[user_text])
-
-                quick_reply = QuickReply(
-                    items=[
-                        QuickReplyButton(action=MessageAction(label="🍲 อาหาร/น้ำดื่ม", text="🍲 อาหาร/น้ำดื่ม")),
-                        QuickReplyButton(action=MessageAction(label="💊 ยา/เวชภัณฑ์", text="💊 ยารักษาโรค/เวชภัณฑ์")),
-                        QuickReplyButton(action=MessageAction(label="👶 ของใช้เด็ก", text="👶 ของใช้เด็กอ่อน")),
-                        QuickReplyButton(action=MessageAction(label="🧼 ของใช้ส่วนตัว", text="🧼 ของใช้ส่วนตัว")),
-                        QuickReplyButton(action=MessageAction(label="🔦 ส่องสว่าง", text="🔦 อุปกรณ์ส่องสว่าง")),
-                        QuickReplyButton(action=MessageAction(label="📝 อื่นๆ", text="📝 อื่นๆ (ระบุเอง)")),
-                        QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
-                    ]
-                )
-                selected = ", ".join(bot_config.USER_DATA[user_id]["need_categories"])
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text=f"📦 หมวดหมู่ที่เลือก: {selected}\n\nเลือกเพิ่มหรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
-                        quick_reply=quick_reply
-                    )
-                )
-                return
-            elif user_text == "เสร็จสิ้น":
-                if not bot_config.USER_DATA[user_id].get("need_categories"):
-                    bot_config.line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text="⚠️ กรุณาเลือกหมวดหมู่อย่างน้อย 1 รายการครับ")
-                    )
-                    return
-                bot_config.USER_STATES[user_id] = "needs_step3"
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="📝 โปรดระบุรายละเอียดสั้นๆ\n\nเช่น จำนวนที่ต้องการ หรือยี่ห้อเฉพาะ\n(เช่น 'ขอน้ำดื่ม 2 แพ็ค และผ้าอนามัยครับ')"
-                    )
-                )
-                return
-            else:
-                if "need_categories" not in bot_config.USER_DATA[user_id]:
-                    bot_config.USER_DATA[user_id]["need_categories"] = []
-                bot_config.USER_DATA[user_id]["need_categories"].append(f"อื่นๆ: {user_text}")
-                bot_config.USER_STATES[user_id] = "needs_step3"
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="📝 โปรดระบุรายละเอียดสั้นๆ\n\nเช่น จำนวนที่ต้องการ หรือยี่หือเฉพาะ\n(เช่น 'ขอน้ำดื่ม 2 แพ็ค และผ้าอนามัยครับ')"
-                    )
-                )
-                return
-
-        # ---- Step 3: รายละเอียด ----
-        elif state == "needs_step3":
-            bot_config.USER_DATA[user_id]["need_details"] = user_text
-            bot_config.USER_STATES[user_id] = "needs_step4"
-            quick_reply = QuickReply(
-                items=[
-                    QuickReplyButton(action=MessageAction(label="🔴 ด่วนมาก (หมดแล้ว)", text="🔴 ด่วนมาก (หมดแล้ว)")),
-                    QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง (รอได้ 24 ชม.)", text="🟡 ปานกลาง (รอได้ 24 ชม.)")),
-                    QuickReplyButton(action=MessageAction(label="🟢 ไม่ด่วน", text="🟢 ไม่ด่วน (แจ้งไว้ล่วงหน้า)"))
-                ]
-            )
-            bot_config.line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(
-                    text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:",
-                    quick_reply=quick_reply
-                )
-            )
-            return
-
-        # ---- Step 4: ความเร่งด่วน ----
-        elif state == "needs_step4":
-            bot_config.USER_DATA[user_id]["need_urgency"] = user_text
-            bot_config.USER_STATES[user_id] = "needs_confirm"
-            _send_needs_summary(event, user_id)
-            return
-
-        # ---- Step 5: ยืนยัน ----
-        elif state == "needs_confirm":
-            if "ยืนยัน" in user_text:
-                data = bot_config.USER_DATA.pop(user_id, {})
-                bot_config.USER_STATES.pop(user_id, None)
-
-                success = bot_config.save_user_need(
-                    sheets_client, clean_sheet_id, user_id, timestamp,
-                    data.get("need_latitude", "0"),
-                    data.get("need_longitude", "0"),
-                    ", ".join(data.get("need_categories", [])),
-                    data.get("need_details", "-"),
-                    data.get("need_urgency", "ไม่ด่วน")
-                )
-
-                if success:
-                    reply_text = (
-                        f"🟢 บันทึกความต้องการเรียบร้อยครับ!\n\n"
-                        f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
-                        f"📝 รายละเอียด: {data.get('need_details', '-')}\n\n"
-                        f"ทีมอาสาสมัครจะดำเนินการจัดส่งให้ครับ"
-                    )
-                else:
-                    reply_text = (
-                        f"🟢 บันทึกความต้องการสำเร็จ (ระบบชั่วคราว)\n\n"
-                        f"⚠️ Sheets ขัดข้อง แต่ข้อมูลถูกเก็บบนเซิร์ฟเวอร์แล้ว\n\n"
-                        f"ทีมอาสาสมัครจะดำเนินการจัดส่งให้ครับ"
-                    )
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-                return
-            else:
-                bot_config.USER_STATES.pop(user_id, None)
-                bot_config.USER_DATA.pop(user_id, None)
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกรายการเรียบร้อยครับ"))
-                return
-
-    # ===========================
-    # เมนูหลัก 6 ปุ่ม
-    # ===========================
-    if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
-        db_connected = False
-        contact_list = []
-        if sheets_client:
-            try:
-                sheet = sheets_client.open_by_key(clean_sheet_id)
-                contacts_ws = sheet.worksheet("Contacts")
-                rows = contacts_ws.get_all_records()
-                for r in rows:
-                    contact_list.append(f"🚨 {r.get('Name')} ({r.get('Role')})\n📞 โทร: {r.get('Phone')}")
-                db_connected = True
-            except Exception as e:
-                print(f"Failed to load contacts: {e}")
-
-        if db_connected and contact_list:
-            reply_text = "📞 เบอร์โทรฉุกเฉิน:\n\n" + "\n\n".join(contact_list)
-        else:
-            reply_text = (
-                "📞 เบอร์โทรฉุกเฉิน:\n\n"
-                "🚨 ปภ. 1784\n"
-                "🚨 สพฉ. 1669\n"
-                "🚨 กู้ภัยทางน้ำ 1196\n"
-                "🚨 ตำรวจทางหลวง 1193"
-            )
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-
-    elif user_text == "ศูนย์พักพิง":
-        bot_config.USER_STATES[user_id] = "waiting_shelter_location"
-        location_quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดหาศูนย์พักพิง"))
-            ]
-        )
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="📍 โปรดกดแชร์พิกัด 'Location' ด้านล่าง หรือพิมพ์ชื่ออำเภอ/จังหวัดครับ",
-                quick_reply=location_quick_reply
-            )
-        )
-
-    elif user_text == "ตรวจสอบระดับน้ำ":
-        bot_config.USER_STATES[user_id] = "waiting_water_location"
-        location_quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเช็กระดับน้ำ"))
-            ]
-        )
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="🌊 โปรดกดแชร์พิกัด 'Location' เพื่อตรวจสอบระดับน้ำจากสถานี ThaiWater ใกล้คุณครับ",
-                quick_reply=location_quick_reply
-            )
-        )
-
-    elif user_text == "SOS ขอความช่วยเหลือ":
-        # ใช้ฟังก์ชัน is_user_registered() ที่เช็คจาก Sheets
-        is_reg, first_name, last_name, phone = False, "", "", "-"
-        if sheets_client:
-            is_reg, first_name, last_name, phone = bot_config.is_user_registered(
-                sheets_client, clean_sheet_id, user_id
-            )
-
-        if not is_reg:
-            bot_config.USER_STATES[user_id] = "register_first_name"
-            bot_config.USER_DATA[user_id] = {}
-            reply_text = (
-                "📝 คุณเข้าใช้งานเป็นครั้งแรก\n\n"
-                "เพื่อประสานงานกู้ภัยได้อย่างมีประสิทธิภาพ\n"
-                "โปรดพิมพ์ 'ชื่อจริง' ของคุณครับ (เช่น สมชาย)"
-            )
-            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        else:
-            bot_config.USER_STATES[user_id] = "sos_location"
-            bot_config.USER_DATA[user_id] = {
-                "first_name": first_name,
-                "last_name": last_name,
-                "phone": phone
-            }
-            location_quick_reply = QuickReply(
-                items=[
-                    QuickReplyButton(action=LocationAction(label="📍 ส่งพิกัดตำแหน่งแจ้งเหตุ"))
-                ]
-            )
-            reply_text = (
-                f"🚨 เริ่มขั้นตอนแจ้งเหตุฉุกเฉิน\n\n"
-                f"สวัสดีครับคุณ {first_name}!\n"
-                f"โปรดกดปุ่มด้านล่างเพื่อส่งพิกัดให้ทีมกู้ภัยครับ"
-            )
-            bot_config.line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=reply_text, quick_reply=location_quick_reply)
-            )
-
-    elif user_text == "แจ้งความต้องการเพิ่มเติม" or user_text == "ความต้องการ":
-        bot_config.USER_STATES[user_id] = "needs_location"
-        location_quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเพื่อรับสิ่งของ"))
-            ]
-        )
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="📌 แจ้งความต้องการสิ่งของบรรเทาทุกข์\n\nโปรดกดปุ่มด้านล่างเพื่อแชร์พิกัดครับ",
-                quick_reply=location_quick_reply
-            )
-        )
-
-    elif user_text == "ถาม AI เรื่องน้ำท่วม" or "ถาม-ตอบด้วย AI" in user_text or "ถาม–ตอบด้วย AI" in user_text:
-        reply_text = "🤖 พิมพ์คำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมได้ทันทีครับ"
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-
+def check_shelter_vacancy(capacity, occupancy):
+    """ตรวจสอบสถานะความจุศูนย์พักพิง"""
+    try:
+        cap = int(capacity)
+        occ = int(occupancy)
+    except (ValueError, TypeError):
+        cap = 100
+        occ = 0
+    remaining = cap - occ
+    if remaining <= 0:
+        return "🔴 เต็มแล้ว - โปรดเลี่ยงไปจุดอื่น"
+    elif occ >= (cap * 0.8):
+        return f"🟡 ใกล้เต็ม (ว่าง {remaining} ที่)"
     else:
-        # ============================================================
-        # FAST PATH: ตรวจจับคำทักทายก่อน (ตอบเร็ว ไม่เรียก AI)
-        # ============================================================
-        if bot_config.is_greeting_message(user_text):
-            profile = None
-            try:
-                profile = bot_config.line_bot_api.get_profile(user_id)
-            except Exception:
-                pass
-            user_name = profile.display_name if profile else "คุณ"
-            greeting_msg = bot_config.get_greeting_message(user_name)
-            bot_config.line_bot_api.reply_message(event.reply_token, greeting_msg)
-            return
-
-        # ============================================================
-        # AI PATH: คำถามทั่วไป (มี Typing Indicator แบบ workaround)
-        # ============================================================
-        # ส่ง "..." เพื่อกระตุ้นให้ LINE แสดง typing indicator (จุดสามจุดแบบมีอนิเมชั่น)
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="...")
-        )
-
-        # ประมวลผล AI
-        ai_response = ""
-        try:
-            response = bot_config.gemini_model.generate_content(user_text)
-            ai_response = bot_config.clean_text_for_line(response.text.strip())
-        except Exception as e:
-            print(f"Gemini Error: {e}")
-            ai_response = "⚠️ AI ขัดข้องชั่วคราว หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
-
-        # บันทึก log (ถ้ามี)
-        sheets_client = bot_config.get_sheets_client()
-        if sheets_client:
-            try:
-                sheet = sheets_client.open_by_key(clean_sheet_id)
-                log_ws = sheet.worksheet("AI Logs")
-                log_ws.append_row([timestamp, user_id, user_text, ai_response])
-            except Exception as se:
-                print(f"Sheets Log Error: {se}")
-
-        # ส่งคำตอบจริงด้วย push_message (จะมี 2 ข้อความ)
-        bot_config.line_bot_api.push_message(
-            user_id,
-            TextSendMessage(text=ai_response)
-        )
+        return f"🟢 มีที่ว่าง (ว่าง {remaining} ที่)"
 
 
 # =============================================================================
-# รับข้อมูลพิกัด (Location Message)
+# 15. GOOGLE SHEETS AUTO-SETUP
 # =============================================================================
-@bot_config.handler.add(MessageEvent, message=LocationMessage)
-def handle_location_message(event):
-    user_id = event.source.user_id
-    latitude = event.message.latitude
-    longitude = event.message.longitude
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def setup_sheets_automatically(sheet):
+    """สร้างโครงสร้าง Sheets อัตโนมัติถ้ายังไม่มี"""
+    try:
+        existing_sheets = [w.title for w in sheet.worksheets()]
 
-    state = bot_config.USER_STATES.pop(user_id, "default")
-    sheets_client = bot_config.get_sheets_client()
-    clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
+        # 1. แท็บ users
+        if "users" not in existing_sheets:
+            print("Creating users worksheet...")
+            users_ws = sheet.add_worksheet(title="users", rows="3000", cols="10")
+            users_ws.append_row(["user_id", "first_name", "last_name", "phone", "register_date", "status"])
 
-    # ===========================
-    # 12.1 ค้นหาศูนย์อพยพใกล้ที่สุด
-    # ===========================
-    if state == "waiting_shelter_location":
-        shelter_list = []
-        db_connected = False
+        # 2. แท็บ sos_requests
+        if "sos_requests" not in existing_sheets:
+            print("Creating sos_requests worksheet...")
+            sos_ws = sheet.add_worksheet(title="sos_requests", rows="3000", cols="25")
+            sos_ws.append_row([
+                "request_id", "user_id", "timestamp", "latitude", "longitude",
+                "group_count", "group_types", "urgency_level", "photo_url",
+                "water_level", "note", "priority", "status", "responder_name",
+                "responder_notes", "accepted_at", "completed_at"
+            ])
 
-        if sheets_client:
-            try:
-                sheet = sheets_client.open_by_key(clean_sheet_id)
-                shelters_ws = sheet.worksheet("Shelters")
-                rows = shelters_ws.get_all_records()
-                for row in rows:
-                    if str(row.get("Status")).strip() == "ปิดทำการ":
-                        continue
-                    shelter_list.append({
-                        "name": row.get("Name", "ไม่ระบุชื่อ"),
-                        "lat": float(row.get("Latitude", 0)),
-                        "lon": float(row.get("Longitude", 0)),
-                        "capacity": row.get("Capacity", 100),
-                        "occupancy": row.get("Occupancy", 0),
-                        "status": row.get("Status", "ว่าง")
-                    })
-                db_connected = True
-            except Exception as e:
-                print(f"Failed to fetch shelters: {e}")
-
-        if not db_connected:
-            reply_text = "⚠️ ระบบขัดข้อง โปรดโทร ปภ. 1784 ทันทีครับ"
-            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            return
-
-        nearest_shelters = []
-        for sh in shelter_list:
-            distance = bot_config.calculate_distance(latitude, longitude, sh["lat"], sh["lon"])
-            if distance <= 20.0:
-                vacancy_status = bot_config.check_shelter_vacancy(sh["capacity"], sh["occupancy"])
-                nearest_shelters.append({
-                    "name": sh["name"],
-                    "distance": distance,
-                    "vacancy": vacancy_status,
-                    "lat": sh["lat"],
-                    "lon": sh["lon"]
-                })
-
-        nearest_shelters.sort(key=lambda x: x["distance"])
-        top_shelters = nearest_shelters[:3]
-
-        if not top_shelters:
-            reply_text = "📍 ไม่พบศูนย์พักพิงในรัศมี 20 กม. โปรดติดต่อ ปภ. 1784 ครับ"
-        else:
-            reply_text = "📍 ศูนย์พักพิงใกล้คุณ (รัศมี 20 กม.):\n\n"
-            for index, sh in enumerate(top_shelters, 1):
-                reply_text += (
-                    f"{index}. {sh['name']}\n"
-                    f"   ห่าง: {sh['distance']:.2f} กม.\n"
-                    f"   สถานะ: {sh['vacancy']}\n"
-                    f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
-                )
-            reply_text += "⚠️ โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน"
-
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-
-    # ===========================
-    # 12.2 ตรวจสอบระดับน้ำ (Lazy Sync from Sheets)
-    # ===========================
-    elif state == "waiting_water_location":
-        # Auto-sync: ถ้าข้อมูลใน Sheets เก่ากว่า WATER_DATA_MAX_AGE_MINUTES (หรือยังไม่มี)
-        # จะดึงจาก ThaiWater มาอัปเดต Sheets ก่อนใช้งานทันที
-        try:
-            _ensure_water_data_fresh(sheets_client, clean_sheet_id)
-        except Exception as e:
-            print(f"[WaterLevel] Auto-sync check failed: {e}")
-
-        thaiwater_stations = []
-        try:
-            thaiwater_stations = bot_config.get_water_data_from_sheets(
-                sheets_client, clean_sheet_id, latitude, longitude
-            )
-            if thaiwater_stations:
-                print(f"[WaterLevel] Loaded {len(thaiwater_stations)} stations from Sheets")
-        except Exception as e:
-            print(f"[WaterLevel] Sheets load failed: {e}")
-
-        # Fallback: ดึงจาก ThaiWater API ตรงๆ ถ้า Sheets ไม่มี
-        if not thaiwater_stations:
-            try:
-                thaiwater_stations = bot_config.find_nearest_water_stations(
-                    latitude, longitude, max_stations=3, max_distance_km=50
-                )
-                print(f"[WaterLevel] Fallback to API: {len(thaiwater_stations)} stations")
-            except Exception as e:
-                print(f"[WaterLevel] API fallback failed: {e}")
-
-        weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
-        water_flow = bot_config.get_live_water_scraper(latitude, longitude)
-
-        try:
-            flex_msg = bot_config.build_water_level_flex_message(
-                latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
-            )
-            bot_config.line_bot_api.reply_message(event.reply_token, flex_msg)
-            print("[WaterLevel] Sent Flex Message")
-        except Exception as e:
-            print(f"[WaterLevel] Flex failed: {e}, using text")
-            text_report = bot_config.build_water_level_text_report(
-                latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
-            )
-            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=text_report))
-
-    # ===========================
-    # 12.3 SOS Step 1: รับพิกัด GPS
-    # ===========================
-    elif state == "sos_location":
-        if user_id not in bot_config.USER_DATA:
-            bot_config.USER_DATA[user_id] = {}
-        bot_config.USER_DATA[user_id]["latitude"] = latitude
-        bot_config.USER_DATA[user_id]["longitude"] = longitude
-
-        bot_config.USER_STATES[user_id] = "sos_step2"
-
-        quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา")),
-                QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วย/พิการ", text="🚑 มีผู้ป่วยติดเตียง/พิการ")),
-                QuickReplyButton(action=MessageAction(label="🩸 ผู้บาดเจ็บ", text="🩸 มีผู้บาดเจ็บฉุกเฉิน")),
-                QuickReplyButton(action=MessageAction(label="👨‍👩‍👧 ผู้ใหญ่", text="👨‍👩‍👧 ผู้ใหญ่ทั่วไป")),
-                QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง"))
+        # 3. แท็บ Shelters
+        if "Shelters" not in existing_sheets:
+            print("Creating Shelters worksheet...")
+            shelters_ws = sheet.add_worksheet(title="Shelters", rows="1000", cols="15")
+            shelters_ws.append_row([
+                "ShelterID", "Name", "Province", "District", "Latitude",
+                "Longitude", "Capacity", "Occupancy", "Status",
+                "Beds", "Toilets", "Parking", "Facilities"
+            ])
+            mock_rows = [
+                ["SH001", "ศูนย์อพยพโรงเรียนโคกสมานคุณ (หาดใหญ่)", "สงขลา", "หาดใหญ่", "7.0095", "100.4682", "500", "120", "ว่าง", "300", "40", "100", "ไฟฟ้า, น้ำสะอาด, มีแพทย์ประจำ"],
+                ["SH002", "ศูนย์อพยพโรงเรียนวัดสุทัศน์ (กทม)", "กรุงเทพ", "พระนคร", "13.7511", "100.5002", "150", "45", "ว่าง", "100", "15", "20", "ไฟฟ้า, อินเทอร์เน็ต"],
+                ["SH003", "ศูนย์เยาวชนกรุงเทพมหานคร (กทม)", "กรุงเทพ", "ดินแดง", "13.7654", "100.5231", "300", "300", "เต็ม", "200", "30", "50", "ไฟฟ้า, น้ำสะอาด, รองรับผู้พิการ"]
             ]
-        )
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="👥 ระบุกลุ่มผู้ประสบภัย (เลือกได้หลายกลุ่ม กด 'เสร็จสิ้น' เมื่อเลือกครบ):",
-                quick_reply=quick_reply
-            )
-        )
+            for r in mock_rows:
+                shelters_ws.append_row(r)
 
-    # ===========================
-    # 12.4 User Needs Step 1: รับพิกัด GPS
-    # ===========================
-    elif state == "needs_location":
-        if user_id not in bot_config.USER_DATA:
-            bot_config.USER_DATA[user_id] = {}
-        bot_config.USER_DATA[user_id]["need_latitude"] = latitude
-        bot_config.USER_DATA[user_id]["need_longitude"] = longitude
+        # 4. แท็บ Water_Levels (11 คอลัมน์)
+        if "Water_Levels" not in existing_sheets:
+            print("Creating Water_Levels worksheet...")
+            water_ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="12")
+            water_ws.append_row([
+                "StationCode", "Name", "River", "Location", "Lat", "Lon",
+                "WaterLevel", "BankLevel", "Situation", "Trend", "Time"
+            ])
 
-        bot_config.USER_STATES[user_id] = "needs_step2"
-        quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=MessageAction(label="🍲 อาหาร/น้ำดื่ม", text="🍲 อาหาร/น้ำดื่ม")),
-                QuickReplyButton(action=MessageAction(label="💊 ยา/เวชภัณฑ์", text="💊 ยารักษาโรค/เวชภัณฑ์")),
-                QuickReplyButton(action=MessageAction(label="👶 ของใช้เด็ก", text="👶 ของใช้เด็กอ่อน")),
-                QuickReplyButton(action=MessageAction(label="🧼 ของใช้ส่วนตัว", text="🧼 ของใช้ส่วนตัว")),
-                QuickReplyButton(action=MessageAction(label="🔦 ส่องสว่าง", text="🔦 อุปกรณ์ส่องสว่าง")),
-                QuickReplyButton(action=MessageAction(label="📝 อื่นๆ", text="📝 อื่นๆ (ระบุเอง)"))
+        # 5. แท็บ Contacts
+        if "Contacts" not in existing_sheets:
+            print("Creating Contacts worksheet...")
+            contacts_ws = sheet.add_worksheet(title="Contacts", rows="1000", cols="10")
+            contacts_ws.append_row(["ContactID", "Name", "Role", "Phone"])
+            contact_rows = [
+                ["CT001", "ปภ. (กรมป้องกันและบรรเทาสาธารณภัย)", "รับแจ้งเหตุเตือนภัยและช่วยเหลืออุทกภัยสายด่วน", "1784"],
+                ["CT002", "สพฉ. (สถาบันการแพทย์ฉุกเฉินแห่งชาติ)", "รับส่งต่อผู้ป่วยและเจ็บป่วยฉุกเฉินทางการแพทย์", "1669"],
+                ["CT003", "ตำรวจทางหลวง", "ประสานงานความช่วยเหลือเส้นทางน้ำท่วมและดินถล่ม", "1193"]
             ]
-        )
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="📦 เลือกหมวดหมู่สิ่งของที่ต้องการ (เลือกได้หลายหมวด กด 'เสร็จสิ้น' เมื่อเลือกครบ):",
-                quick_reply=quick_reply
-            )
-        )
+            for r in contact_rows:
+                contacts_ws.append_row(r)
 
-    else:
-        confirm_text = "📍 ได้รับพิกัดแล้วครับ หากต้องการแจ้ง SOS กรุณากดเมนู 'SOS ขอความช่วยเหลือ' ก่อนครับ"
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
+        # 6. แท็บ user_needs
+        if "user_needs" not in existing_sheets:
+            print("Creating user_needs worksheet...")
+            needs_ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="12")
+            needs_ws.append_row(["Timestamp", "UserID", "Latitude", "Longitude",
+                                 "Category", "Details", "Urgency", "Status"])
 
+        # 7. แท็บ AI Logs
+        if "AI Logs" not in existing_sheets:
+            print("Creating AI Logs worksheet...")
+            logs_ws = sheet.add_worksheet(title="AI Logs", rows="5000", cols="5")
+            logs_ws.append_row(["Timestamp", "UserID", "Question", "Answer"])
 
-# =============================================================================
-# รับรูปภาพ (Image Message) - SOS Step 4
-# =============================================================================
-@bot_config.handler.add(MessageEvent, message=ImageMessage)
-def handle_image_message(event):
-    user_id = event.source.user_id
-    state = bot_config.USER_STATES.get(user_id)
-
-    if state == "sos_step4":
-        image_id = event.message.id
-        content_url = f"https://api-data.line.me/v2/bot/message/{image_id}/content"
-        bot_config.USER_DATA[user_id]["photo_url"] = content_url
-        bot_config.USER_DATA[user_id]["image_id"] = image_id
-
-        bot_config.USER_STATES[user_id] = "sos_confirm"
-        _send_sos_summary(event, user_id)
-    else:
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="📸 ได้รับรูปภาพแล้วครับ หากต้องการแจ้ง SOS พร้อมส่งรูป กรุณาเริ่มจากเมนู 'SOS' ก่อนครับ")
-        )
+        # ลบแท็บเริ่มต้น
+        for default_name in ["ชีต1", "Sheet1"]:
+            if default_name in existing_sheets:
+                try:
+                    default_ws = sheet.worksheet(default_name)
+                    sheet.del_worksheet(default_ws)
+                except:
+                    pass
+        print("Auto-setup Google Sheets completed successfully!")
+    except Exception as e:
+        print(f"Error in automatic sheet setup: {e}")
 
 
 # =============================================================================
-# HELPER FUNCTIONS
+# 16. GOOGLE SHEETS CLIENT INITIALIZATION
 # =============================================================================
-def _send_sos_summary(event, user_id):
-    """สร้างและส่งสรุปข้อมูล SOS (Step 5)"""
-    data = bot_config.USER_DATA[user_id]
-    group_types = data.get("group_types", ["ผู้ใหญ่ทั่วไป"])
-    urgency = data.get("urgency_level", "ต่ำ")
-
-    priority_label, priority_code = bot_config.calculate_sos_priority(group_types, urgency)
-    bot_config.USER_DATA[user_id]["priority"] = priority_code
-    bot_config.USER_DATA[user_id]["priority_label"] = priority_label
-
-    lat = data.get("latitude", "0")
-    lon = data.get("longitude", "0")
-    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    photo_status = "📸 รูปภาพ: (แนบไฟล์)" if data.get("photo_url") not in [None, "-", ""] else "📸 รูปภาพ: ไม่มี"
-
-    summary_text = (
-        "📋 สรุปข้อมูลแจ้งเหตุ\n\n"
-        f"📍 พิกัด: {maps_link}\n"
-        f"👥 กลุ่ม: {', '.join(group_types)}\n"
-        f"🌊 สถานการณ์: {urgency}\n"
-        f"📝 รายละเอียด: {data.get('note', '-')}\n"
-        f"{photo_status}\n"
-        f"📊 ระดับความเร่งด่วน: {priority_label}\n\n"
-        f"ยืนยันการส่งข้อมูลแจ้งกู้ภัยหรือไม่?"
-    )
-
-    quick_reply = QuickReply(
-        items=[
-            QuickReplyButton(action=MessageAction(label="✅ ยืนยันแจ้งกู้ภัย", text="ยืนยันแจ้งกู้ภัย")),
-            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก/แก้ไข", text="ยกเลิกและแก้ไขใหม่"))
-        ]
-    )
-    bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
+SHEETS_INITIALIZED = False
+LAST_SHEETS_ERROR = "ยังไม่ได้เปิดใช้งาน"
 
 
-def _send_needs_summary(event, user_id):
-    """สร้างและส่งสรุปความต้องการ (Step 5)"""
-    data = bot_config.USER_DATA[user_id]
-    lat = data.get("need_latitude", "0")
-    lon = data.get("need_longitude", "0")
-    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+def get_sheets_client():
+    """เชื่อมต่อ Google Sheets แบบ Service Account"""
+    global SHEETS_INITIALIZED, LAST_SHEETS_ERROR
+    clean_sheet_id = extract_sheet_id(GOOGLE_SHEET_ID)
 
-    summary_text = (
-        "✅ สรุปรายการความต้องการ:\n\n"
-        f"📍 พิกัด: {maps_link}\n"
-        f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
-        f"📝 รายละเอียด: {data.get('need_details', '-')}\n"
-        f"⏳ ความเร่งด่วน: {data.get('need_urgency', '-')}\n\n"
-        f"ยืนยันการส่งข้อมูลไปยังศูนย์อาสาสมัครหรือไม่?"
-    )
+    if not GOOGLE_SERVICE_ACCOUNT_JSON or not clean_sheet_id:
+        print("Warning: Google Sheets variables not configured")
+        return None
+    try:
+        json_str = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
+        if json_str.startswith("'") and json_str.endswith("'"):
+            json_str = json_str[1:-1].strip()
+        if json_str.startswith('"') and json_str.endswith('"'):
+            json_str = json_str[1:-1].strip()
 
-    quick_reply = QuickReply(
-        items=[
-            QuickReplyButton(action=MessageAction(label="✅ ยืนยันการแจ้ง", text="ยืนยันการแจ้ง")),
-            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก/แก้ไข", text="ยกเลิก"))
-        ]
-    )
-    bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
+        creds_dict = json.loads(json_str)
+        client = gspread.service_account_from_dict(creds_dict)
 
+        if not SHEETS_INITIALIZED:
+            try:
+                sheet = client.open_by_key(clean_sheet_id)
+                setup_sheets_automatically(sheet)
+                SHEETS_INITIALIZED = True
+                LAST_SHEETS_ERROR = "เชื่อมต่อสำเร็จ"
+            except Exception as setup_err:
+                LAST_SHEETS_ERROR = f"สิทธิ์ไม่ผ่าน: {setup_err}"
+                print(f"Auto-setup failed: {setup_err}")
 
-# =============================================================================
-# MAIN
-# =============================================================================
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+        return client
+    except Exception as e:
+        LAST_SHEETS_ERROR = f"JSON Key ไม่ถูกต้อง: {e}"
+        print(f"Error initializing Sheets client: {e}")
+        return None
