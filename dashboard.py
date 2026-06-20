@@ -15,7 +15,6 @@ import bot_config
 
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/dashboard')
 
-
 @dashboard_bp.route('/', methods=['GET'])
 def dashboard_home():
     """Dashboard home - returns basic stats"""
