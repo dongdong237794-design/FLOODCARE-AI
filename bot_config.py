@@ -776,18 +776,37 @@ def sync_water_levels_to_supabase():
         return False
 
 
-def get_water_data_from_supabase(user_lat=None, user_lon=None, limit=100):
+def get_water_data_from_supabase(user_lat=None, user_lon=None, limit=2000):
     """
     Get water levels from Supabase.
-    If lat/lon provided, calculate distance and return nearest.
+    If lat/lon provided, calculate distance and return the TRUE nearest stations.
+
+    แก้ไขตามคำขอ: "ที่ถูกสุ่มมา ไม่ต้องสุ่มแต่ให้ไล่อ่าน"
+    - เมื่อมีพิกัดผู้ใช้ → ทำ FULL PAGINATION (ไล่อ่านทุกแถวในตาราง)
+    - ไม่ใช้ limit แบบสุ่ม ไม่พึ่ง updated_at ที่ timestamp เหมือนกัน
+    - รับประกันได้ 100% ว่าได้พิจารณาสถานีทุกแห่ง → ได้สถานีที่ใกล้จริงที่สุด
     """
     supabase = get_supabase_client()
     if not supabase:
         return []
     
     try:
-        response = supabase.table("water_levels").select("*").order("updated_at", desc=True).limit(limit).execute()
-        records = response.data or []
+        if user_lat is not None and user_lon is not None:
+            # Full sequential scan (ไล่อ่านทุกสถานี ไม่สุ่ม ไม่ตัดขาด)
+            records = []
+            offset = 0
+            page_size = 1000
+            while True:
+                resp = supabase.table("water_levels").select("*").range(offset, offset + page_size - 1).execute()
+                batch = resp.data or []
+                records.extend(batch)
+                if len(batch) < page_size:
+                    break
+                offset += page_size
+            print(f"[Supabase Water] Full scan for nearest search: loaded {len(records)} stations")
+        else:
+            response = supabase.table("water_levels").select("*").order("updated_at", desc=True).limit(limit).execute()
+            records = response.data or []
         
         if user_lat is not None and user_lon is not None:
             for rec in records:
@@ -800,7 +819,7 @@ def get_water_data_from_supabase(user_lat=None, user_lon=None, limit=100):
                 except:
                     rec["distance_km"] = 9999
             records.sort(key=lambda x: x.get("distance_km", 9999))
-            return records[:3]  # Return 3 nearest
+            return records[:3]  # Return the 3 truly nearest stations
         
         return records
     except Exception as e:
