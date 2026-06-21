@@ -1,5 +1,6 @@
 import os
 import datetime
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, abort, jsonify
 import bot_config
@@ -53,6 +54,27 @@ def _ensure_water_data_fresh():
         return True
     
     return False
+
+
+def _trigger_background_sync():
+    """
+    Fire-and-forget wrapper so _ensure_water_data_fresh() never blocks
+    a request/response cycle (the LINE webhook reply or app boot).
+    Safe to call multiple times; sync_water_levels_to_supabase() itself
+    only does real work when data is actually stale/missing.
+    """
+    def _run():
+        try:
+            _ensure_water_data_fresh()
+        except Exception as e:
+            print(f"[AutoSync] Background sync thread error: {e}")
+    threading.Thread(target=_run, daemon=True).start()
+
+
+# Kick off a freshness check as soon as the app process boots, so a fresh
+# deployment (empty water_levels table) gets populated automatically
+# instead of staying empty until someone manually hits /debug/force-sync.
+_trigger_background_sync()
 
 
 # =============================================================================
@@ -759,6 +781,10 @@ def handle_location_message(event):
     # Check water levels
     # ===========================
     elif state == "waiting_water_location":
+        # Keep Supabase warm: non-blocking freshness check/refresh on real usage,
+        # in case the startup sync hasn't completed or previously failed.
+        _trigger_background_sync()
+        
         # Priority 1: Supabase
         thaiwater_stations = []
         try:
