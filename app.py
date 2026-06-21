@@ -1,4 +1,5 @@
 import bot_config
+from flask import Flask
 app = Flask(__name__)
 
 # Register Dashboard Blueprint (if dashboard.py exists and is functional)
