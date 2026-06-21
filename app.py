@@ -162,9 +162,9 @@ def _send_sos_summary(event, user_id):
     summary_text = (
         "📋 สรุปข้อมูลแจ้งเหตุ\n\n"
         f"📍 พิกัด: {maps_link}\n"
-        f"👥 กลุ่ม: {", ".join(group_types)}\n"
+        f"👥 กลุ่ม: {', '.join(group_types)}\n"
         f"🌊 สถานการณ์: {urgency}\n"
-        f"📝 รายละเอียด: {data.get("note", "-")}\n"
+        f"📝 รายละเอียด: {data.get('note', '-')}\n"
         f"📊 ระดับความเร่งด่วน: {priority_label}\n\n"
         f"ยืนยันการส่งข้อมูลแจ้งกู้ภัยหรือไม่?"
     )
@@ -194,9 +194,9 @@ def _send_needs_summary(event, user_id):
     summary_text = (
         "✅ สรุปรายการความต้องการ:\n\n"
         f"📍 พิกัด: {maps_link}\n"
-        f"📦 หมวดหมู่: {", ".join(data.get("need_categories", []))}\n"
-        f"📝 รายละเอียด: {data.get("need_details", "-")}\n"
-        f"⏳ ความเร่งด่วน: {data.get("need_urgency", "-")}\n\n"
+        f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
+        f"📝 รายละเอียด: {data.get('need_details', '-')}\n"
+        f"⏳ ความเร่งด่วน: {data.get('need_urgency', '-')}\n\n"
         f"ยืนยันการส่งข้อมูลไปยังศูนย์อาสาสมัครหรือไม่?"
     )
     
@@ -545,7 +545,7 @@ def handle_text_message(event):
                     reply_text = (
                         f"✅ ได้รับแจ้งเหตุฉุกเฉินแล้วครับ!\n\n"
                         f"รหัสแจ้งเหตุ: {case_id}\n"
-                        f"ระดับความเร่งด่วน: {data.get("priority_label", "-")}\n\n"
+                        f"ระดับความเร่งด่วน: {data.get('priority_label', '-')}\n\n"
                         f"ทีมกู้ภัยกำลังดำเนินการ โปรดรอการติดต่อกลับครับ"
                     )
                 else:
@@ -711,8 +711,8 @@ def handle_text_message(event):
                 if success:
                     reply_text = (
                         f"🟢 บันทึกความต้องการเรียบร้อยครับ!\n\n"
-                        f"📦 หมวดหมู่: {", ".join(data.get("need_categories", []))}\n"
-                        f"📝 รายละเอียด: {data.get("need_details", "-")}\n\n"
+                        f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
+                        f"📝 รายละเอียด: {data.get('need_details', '-')}\n\n"
                         f"ทีมอาสาสมัครจะดำเนินการจัดส่งให้ครับ"
                     )
                 else:
@@ -1047,10 +1047,10 @@ def handle_location_message(event):
             reply_text = "📍 ศูนย์พักพิงใกล้คุณ (รัศมี 20 กม.):\n\n"
             for index, sh in enumerate(top_shelters, 1):
                 reply_text += (
-                    f"{index}. {sh["name"]}\n"
-                    f"   ห่าง: {sh["distance"]:.2f} กม.\n"
-                    f"   สถานะ: {sh["vacancy"]}\n"
-                    f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh["lat"]},{sh["lon"]}\n\n"
+                    f"{index}. {sh['name']}\n"
+                    f"   ห่าง: {sh['distance']:.2f} กม.\n"
+                    f"   สถานะ: {sh['vacancy']}\n"
+                    f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
                 )
             reply_text += "⚠️ โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน"
         
