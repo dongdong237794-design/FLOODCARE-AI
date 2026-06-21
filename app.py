@@ -178,9 +178,9 @@ def _send_sos_summary(event, user_id):
     summary_text = (
         "📋 สรุปข้อมูลแจ้งเหตุ\n\n"
         f"📍 พิกัด: {maps_link}\n"
-        f"👥 กลุ่ม: {", ".join(group_types)}\n"
+        f"👥 กลุ่ม: {', '.join(group_types)}\n"
         f"🌊 สถานการณ์: {urgency}\n"
-        f"📝 รายละเอียด: {data.get("note", "-")}\n"
+        f"📝 รายละเอียด: {data.get('note', '-')}\n"
         f"📊 ระดับความเร่งด่วน: {priority_label}\n\n"
         f"ยืนยันการส่งข้อมูลแจ้งกู้ภัยหรือไม่?"
     )
@@ -210,9 +210,9 @@ def _send_needs_summary(event, user_id):
     summary_text = (
         "✅ สรุปรายการความต้องการ:\n\n"
         f"📍 พิกัด: {maps_link}\n"
-        f"📦 หมวดหมู่: {", ".join(data.get("need_categories", []))}\n"
-        f"📝 รายละเอียด: {data.get("need_details", "-")}\n"
-        f"⏳ ความเร่งด่วน: {data.get("need_urgency", "-")}\n\n"
+        f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
+        f"📝 รายละเอียด: {data.get('need_details', '-')}\n"
+        f"⏳ ความเร่งด่วน: {data.get('need_urgency', '-')}\n\n"
         f"ยืนยันการส่งข้อมูลไปยังศูนย์อาสาสมัครหรือไม่?"
     )
     
@@ -258,8 +258,30 @@ def handle_text_message(event):
                 print(f"[LINE] Failed to send cancel message: {e}")
         return
 
+    # ===========================
+    # WEATHER KEYWORD (สภาพอากาศ)
+    # ===========================
+    weather_keywords = ["สภาพอากาศ", "อากาศ", "พยากรณ์อากาศ", "weather", "ฝนตก", "ฝนจะตกไหม"]
+    if any(kw in user_text for kw in weather_keywords):
+        bot_config.USER_STATES[user_id] = "waiting_weather_location"
+        location_quick_reply = QuickReply(
+            items=[
+                QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเพื่อดูสภาพอากาศ"))
+            ]
+        )
+        if bot_config.line_bot_api:
+            try:
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text="🌦️ คุณต้องการดูสภาพอากาศ โปรดกดแชร์พิกัด 'Location' ด้านล่างครับ",
+                        quick_reply=location_quick_reply
+                    )
+                )
+            except Exception as e:
+                print(f"[LINE] Failed to send weather keyword response: {e}")
+        return
 
-    
     # ===========================
     # SOS LOCATION STATE
     # ===========================
@@ -518,7 +540,7 @@ def handle_text_message(event):
                     reply_text = (
                         f"✅ ได้รับแจ้งเหตุฉุกเฉินแล้วครับ!\n\n"
                         f"รหัสแจ้งเหตุ: {case_id}\n"
-                        f"ระดับความเร่งด่วน: {data.get("priority_label", "-")}\n\n"
+                        f"ระดับความเร่งด่วน: {data.get('priority_label', '-')}\n\n"
                         f"ทีมกู้ภัยกำลังดำเนินการ โปรดรอการติดต่อกลับครับ"
                     )
                 else:
@@ -684,8 +706,8 @@ def handle_text_message(event):
                 if success:
                     reply_text = (
                         f"🟢 บันทึกความต้องการเรียบร้อยครับ!\n\n"
-                        f"📦 หมวดหมู่: {", ".join(data.get("need_categories", []))}\n"
-                        f"📝 รายละเอียด: {data.get("need_details", "-")}\n\n"
+                        f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
+                        f"📝 รายละเอียด: {data.get('need_details', '-')}\n\n"
                         f"ทีมอาสาสมัครจะดำเนินการจัดส่งให้ครับ"
                     )
                 else:
@@ -974,10 +996,10 @@ def handle_location_message(event):
             reply_text = "📍 ศูนย์พักพิงใกล้คุณ (รัศมี 20 กม.):\n\n"
             for index, sh in enumerate(top_shelters, 1):
                 reply_text += (
-                    f"{index}. {sh["name"]}\n"
-                    f"   ห่าง: {sh["distance"]:.2f} กม.\n"
-                    f"   สถานะ: {sh["vacancy"]}\n"
-                    f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh["lat"]},{sh["lon"]}\n\n"
+                    f"{index}. {sh['name']}\n"
+                    f"   ห่าง: {sh['distance']:.2f} กม.\n"
+                    f"   สถานะ: {sh['vacancy']}\n"
+                    f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
                 )
             reply_text += "⚠️ โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน"
         
@@ -987,6 +1009,28 @@ def handle_location_message(event):
             except Exception as e:
                 print(f"[LINE] Failed to send shelter list: {e}")
     
+    # ===========================
+    # Weather only (สภาพอากาศ)
+    # ===========================
+    elif state == "waiting_weather_location":
+        try:
+            weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
+            reply_text = (
+                "🌦️ สภาพอากาศปัจจุบัน\n\n"
+                f"{weather_info}\n\n"
+                "ข้อมูลจากกรมอุตุนิยมวิทยา (TMD)"
+            )
+            if bot_config.line_bot_api:
+                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        except Exception as e:
+            print(f"[Weather] Error: {e}")
+            if bot_config.line_bot_api:
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token, 
+                    TextSendMessage(text="⚠️ ไม่สามารถดึงข้อมูลสภาพอากาศได้ในขณะนี้ โปรดลองใหม่ครับ")
+                )
+        return
+
     # ===========================
     # Check water levels
     # ===========================
