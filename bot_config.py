@@ -1108,7 +1108,7 @@ def is_user_registered(sheets_client, sheet_id, user_id):
                     USER_DATA[user_id] = {}
                 USER_DATA[user_id]["first_name"] = fn
                 USER_DATA[user_id]["last_name"] = ln
-                USER_DATA[user_name] = ph
+                USER_DATA[user_id]["phone"] = ph
                 return True, fn, ln, ph
     except Exception as e:
         print(f"[UserReg] Failed to check sheets: {e}")
@@ -1311,6 +1311,51 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
 # =============================================================================
 # 12. GREETING & QUICK INFO FLEX MESSAGE
 # =============================================================================
+
+# รายการคำทักทายที่ระบบจะตอบทันทีโดย "ไม่เรียก" Gemini AI
+# เพื่อลดเวลาตอบสนองให้เหลือน้อยที่สุด (ไม่ต้องรอ AI ประมวลผล)
+GREETING_KEYWORDS = [
+    "สวัสดี", "สวัสดีครับ", "สวัสดีค่ะ", "สวัสดีคับ", "สวัสดีคะ",
+    "หวัดดี", "หวัดดีครับ", "หวัดดีค่ะ",
+    "ดีครับ", "ดีค่ะ", "หวัดดีจ้า",
+    "hello", "hi", "hey",
+    "good morning", "good afternoon", "good evening",
+    "เริ่ม", "start", "menu", "เมนู"
+]
+
+
+def is_greeting(text):
+    """
+    ตรวจสอบว่าข้อความที่ผู้ใช้พิมพ์มา 'มีความหมายเป็นการทักทาย' หรือไม่
+    ใช้การเทียบแบบ exact-match (lowercase) ก่อน แล้วค่อย fallback ไปเช็ค
+    คำทักทายที่ปรากฏเป็นคำแรกของข้อความ เพื่อกันการ false-positive กับ
+    ข้อความยาวที่บังเอิญมีคำว่า 'hi' ฝังอยู่ตรงกลางประโยค (เช่นคำถามจริงจัง)
+    """
+    if not text:
+        return False
+
+    clean = text.strip().lower()
+    # ตัดเครื่องหมายวรรคตอน/อิโมจิที่มักพ่วงมากับคำทักทายออกก่อนเทียบ
+    clean = clean.strip("!.,😊🙏👋 ")
+
+    if not clean:
+        return False
+
+    # 1) ตรงทั้งข้อความ (กรณีพิมพ์สั้น ๆ แบบ "สวัสดีครับ", "hi")
+    if clean in [kw.lower() for kw in GREETING_KEYWORDS]:
+        return True
+
+    # 2) ข้อความสั้น (<= 4 คำ) และคำแรกเป็นคำทักทาย เช่น "สวัสดีครับ floodcare"
+    words = clean.split()
+    if len(words) <= 4 and words:
+        first_word = words[0]
+        for kw in GREETING_KEYWORDS:
+            if first_word.startswith(kw.lower()) or kw.lower().startswith(first_word):
+                return True
+
+    return False
+
+
 def get_greeting_message(user_name="คุณ"):
     """
     สร้างข้อความทักทายแบบ Text ตามรูปแบบที่ผู้ใช้ต้องการ (เน้นความเร็วสูงสุด)
@@ -1397,6 +1442,45 @@ def send_line_notification(user_id, message):
         return True
     except Exception as e:
         print(f"[LINE] Failed to send notification: {e}")
+        return False
+
+
+# =============================================================================
+# 13B. TYPING INDICATOR (LINE Chat Loading Animation API)
+# =============================================================================
+# LINE รองรับการแสดง "กำลังพิมพ์..." (จุดสามจุด) ผ่าน REST endpoint นี้โดยตรง
+# SDK เวอร์ชันเก่า (linebot v2) ยังไม่มี wrapper ให้ จึงเรียกผ่าน requests ตรง ๆ
+# เอกสารอ้างอิง: https://developers.line.biz/en/reference/messaging-api/#display-a-loading-indicator
+LINE_LOADING_ANIMATION_URL = "https://api.line.me/v2/bot/chat/loading/start"
+
+
+def show_loading_animation(user_id, loading_seconds=10):
+    """
+    แสดง Typing Indicator (กำลังพิมพ์...) ให้ผู้ใช้เห็นระหว่างที่ระบบกำลัง
+    ประมวลผลกับ Gemini AI เพื่อให้ผู้ใช้รู้ว่าระบบยังทำงานอยู่ ไม่ได้ค้าง
+
+    loading_seconds: ระยะเวลาแสดง animation (5-60 วินาที ตาม spec ของ LINE)
+                      ถ้า AI ตอบเร็วกว่านี้ animation จะหายไปเองทันทีที่ reply ถูกส่ง
+    """
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        return False
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
+        }
+        payload = {
+            "chatId": user_id,
+            "loadingSeconds": max(5, min(loading_seconds, 60))
+        }
+        resp = requests.post(LINE_LOADING_ANIMATION_URL, headers=headers, json=payload, timeout=5)
+        if resp.status_code != 202:
+            print(f"[TypingIndicator] Unexpected status {resp.status_code}: {resp.text}")
+            return False
+        return True
+    except Exception as e:
+        # ไม่ critical พอที่จะทำให้ระบบล้ม ถ้า indicator ล้มเหลวให้ปล่อยผ่านเงียบ ๆ
+        print(f"[TypingIndicator] Failed to show loading animation: {e}")
         return False
 
 
