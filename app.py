@@ -1,5 +1,6 @@
 import os
 import datetime
+import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, abort, jsonify
@@ -21,83 +22,91 @@ app = Flask(__name__)
 # app.register_blueprint(dashboard_bp)
 
 # =============================================================================
-# AUTO-SYNC: Check water data freshness before serving
+# AUTO-SYNC: ซิงค์ข้อมูลระดับน้ำอัตโนมัติทุก 10 นาที (ทำงานตลอดเวลา)
 # =============================================================================
-WATER_DATA_MAX_AGE_MINUTES = 12
+WATER_DATA_MAX_AGE_MINUTES = 10          # ซิงค์ทุก 10 นาที
+AUTO_SYNC_INTERVAL_SECONDS = 600         # 10 นาที = 600 วินาที
 
 
 def _ensure_water_data_fresh():
     """
-    Check last sync time from Supabase sync_metadata.
-    If stale, missing, or table is empty -> trigger sync from ThaiWater.
+    เช็คว่าข้อมูลระดับน้ำเก่าเกินกำหนดหรือไม่
+    ถ้าเก่า / ไม่มีข้อมูล / ตารางว่าง → ซิงค์ใหม่จาก ThaiWater ทันที
     """
     needs_sync = True
     
     try:
         last_sync = bot_config.get_last_sync_time()
         
-        # ถ้าไม่มี last_sync record → ต้องซิงค์ทันที
         if not last_sync:
-            print("[AutoSync] No last_sync record found → forcing sync")
+            print("[AutoSync] ไม่พบ last_sync → ซิงค์ทันที")
             needs_sync = True
         else:
             last_sync_time = datetime.datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
             now = datetime.datetime.now(datetime.timezone.utc)
             age_minutes = (now - last_sync_time).total_seconds() / 60
-            print(f"[AutoSync] Water_Levels age: {age_minutes:.1f} min")
+            print(f"[AutoSync] ข้อมูลอายุ {age_minutes:.1f} นาที")
             
             if age_minutes <= WATER_DATA_MAX_AGE_MINUTES:
                 needs_sync = False
         
-        # เช็คเพิ่มเติม: ถ้าตารางว่าง → ซิงค์ทันที (แม้จะมี last_sync)
+        # เช็คเพิ่มเติมว่าตารางมีข้อมูลจริงหรือไม่
         if not needs_sync:
             supabase = bot_config.get_supabase_client()
             if supabase:
                 try:
                     response = supabase.table("water_levels").select("station_code", count="exact").limit(1).execute()
                     record_count = response.count if hasattr(response, 'count') else len(response.data or [])
-                    if record_count < 5:  # ถ้ามีข้อมูลน้อยกว่า 5 แถว ให้ถือว่ายังว่าง
-                        print(f"[AutoSync] Table almost empty ({record_count} records) → forcing sync")
+                    if record_count < 5:
+                        print(f"[AutoSync] ตารางมีข้อมูลน้อย ({record_count} แถว) → ซิงค์ใหม่")
                         needs_sync = True
                 except Exception as e:
-                    print(f"[AutoSync] Could not check table count: {e}")
+                    print(f"[AutoSync] เช็คจำนวนแถวไม่ได้: {e}")
                     needs_sync = True
                     
     except Exception as e:
-        print(f"[AutoSync] Could not read last sync, will sync: {e}")
+        print(f"[AutoSync] อ่าน last_sync ไม่ได้: {e}")
         needs_sync = True
     
     if needs_sync:
-        print("[AutoSync] Water_Levels stale/empty/missing → triggering sync now...")
+        print("[AutoSync] กำลังซิงค์ข้อมูลจาก ThaiWater...")
         try:
             success = bot_config.sync_water_levels_to_supabase()
-            print(f"[AutoSync] Sync result: {success}")
+            print(f"[AutoSync] ผลการซิงค์: {'สำเร็จ' if success else 'ล้มเหลว'}")
         except Exception as e:
-            print(f"[AutoSync] Sync attempt failed: {e}")
+            print(f"[AutoSync] ซิงค์ล้มเหลว: {e}")
         return True
     
     return False
 
 
-def _trigger_background_sync():
+def start_auto_sync():
     """
-    Fire-and-forget wrapper so _ensure_water_data_fresh() never blocks
-    a request/response cycle (the LINE webhook reply or app boot).
-    Safe to call multiple times; sync_water_levels_to_supabase() itself
-    only does real work when data is actually stale/missing.
+    เริ่ม thread ซิงค์อัตโนมัติทุก 10 นาที
+    ทำงานตลอดเวลาในพื้นหลัง (daemon thread)
     """
-    def _run():
+    def _sync_loop():
+        # ซิงค์ทันทีตอนเริ่มต้น
         try:
             _ensure_water_data_fresh()
         except Exception as e:
-            print(f"[AutoSync] Background sync thread error: {e}")
-    threading.Thread(target=_run, daemon=True).start()
+            print(f"[AutoSync] ซิงค์ครั้งแรกผิดพลาด: {e}")
+        
+        # หลังจากนั้นซิงค์ทุก 10 นาที
+        while True:
+            try:
+                time.sleep(AUTO_SYNC_INTERVAL_SECONDS)
+                _ensure_water_data_fresh()
+            except Exception as e:
+                print(f"[AutoSync] เกิดข้อผิดพลาดใน loop: {e}")
+    
+    thread = threading.Thread(target=_sync_loop, daemon=True)
+    thread.start()
+    print("[AutoSync] เริ่มระบบซิงค์อัตโนมัติทุก 10 นาทีแล้ว")
 
 
-# Kick off a freshness check as soon as the app process boots, so a fresh
-# deployment (empty water_levels table) gets populated automatically
-# instead of staying empty until someone manually hits /debug/force-sync.
-_trigger_background_sync()
+# เรียกใช้งานทันทีตอนแอพเริ่มทำงาน
+start_auto_sync()
 
 
 # =============================================================================
