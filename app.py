@@ -686,7 +686,7 @@ def handle_text_message(event):
             # Use shorter timeout for faster response
             response = bot_config.gemini_model.generate_content(
                 user_text,
-                generation_config={"max_output_tokens": 500}  # Limit output for speed
+                generation_config={"max_output_tokens": 800}  # เพิ่ม token เพื่อให้ตอบได้ครบถ้วนขึ้น (แก้ปัญหาตอบไม่ครบ)
             )
             ai_response = bot_config.clean_text_for_line(response.text.strip())
         except Exception as e:
