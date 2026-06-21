@@ -1,15 +1,11 @@
-Flask==3.0.3
-gunicorn==22.0.0
-requests==2.32.3
-line-bot-sdk==3.11.0
-google-generativeai==0.8.3
+# Core
+Flask>=3.0.0,<4.0.0
+gunicorn>=22.0.0,<23.0.0
+requests>=2.32.0,<3.0.0
 
-# --- Supabase ---
-# IMPORTANT: pin ONLY this package. Do NOT add separate lines for
-# gotrue / postgrest / httpx / realtime / supabase-auth below.
-# supabase-py declares its own compatible versions of those internally,
-# and manually pinning them is the #1 cause of:
-#   TypeError: Client.__init__() got an unexpected keyword argument 'proxy'
-# If you had any of those packages pinned in your old requirements.txt,
-# delete those lines.
+# LINE + AI
+line-bot-sdk>=3.11.0,<4.0.0
+google-generativeai>=0.8.0,<0.9.0
+
+# Supabase - สำคัญ: pin เฉพาะตัวนี้เท่านั้น ห้าม pin gotrue / postgrest / httpx / realtime
 supabase==2.31.0
