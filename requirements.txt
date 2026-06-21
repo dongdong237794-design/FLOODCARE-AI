@@ -1,11 +1,8 @@
-# Core
-Flask
-gunicorn
-requests
+Flask==3.0.3
+gunicorn==22.0.0
+requests==2.32.3
+line-bot-sdk==3.11.0
+google-generativeai==0.8.3
 
-# LINE + AI
-line-bot-sdk
-google-generativeai
-
-# Supabase - สำคัญ: pin เฉพาะตัวนี้เท่านั้น ห้าม pin gotrue / postgrest / httpx / realtime
-supabase==2.9.0
+# Supabase - pin เฉพาะตัวนี้ ห้าม pin gotrue / postgrest / httpx
+supabase==2.31.0
