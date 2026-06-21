@@ -304,33 +304,46 @@ def fetch_waterlevel_v3(use_cache=True):
 
 
 def parse_v3_station(v3_item):
-    """Parse V3 API response into standard format"""
+    """Parse V3 API response into standard format (improved for nested structure)"""
     station = v3_item.get("station") or {}
     geocode = station.get("geocode") or {}
     
     def get_val(*keys, default=None):
+        # First check top level
         for k in keys:
             if k in v3_item and v3_item[k] is not None:
                 val = v3_item[k]
-                # Handle potential non-numeric values for water/bank levels
                 if k in ["water_level", "bank_level"] and isinstance(val, str):
                     try:
                         return float(val)
                     except ValueError:
-                        return None # Return None if cannot convert to float
+                        return None
                 return val
+        
+        # Then check inside station object
+        for k in keys:
+            if k in station and station[k] is not None:
+                val = station[k]
+                return val
+        
+        # Then check inside geocode (for lat/lon)
+        for k in keys:
+            if k in geocode and geocode[k] is not None:
+                val = geocode[k]
+                return val
+        
         return default
     
-    # Extract values with robust handling for missing keys and types
-    station_code = get_val("station_code", "stationCode", default="N/A")
-    station_name = get_val("station_name", "stationName", default="ไม่ระบุ")
-    river_name = get_val("river_name", "riverName", default="-")
-    province_name = get_val("province_name", "provinceName", default="-")
+    # Extract values
+    station_code = get_val("station_code", "stationCode", "code", default="N/A")
+    station_name = get_val("station_name", "stationName", "name", default="ไม่ระบุ")
+    river_name = get_val("river_name", "riverName", "river", default="-")
+    province_name = get_val("province_name", "provinceName", "location", "province", default="-")
     latitude = get_val("latitude", "lat", default=0.0)
     longitude = get_val("longitude", "lon", default=0.0)
     water_level = get_val("water_level", "waterLevel", default=None)
     bank_level = get_val("bank_level", "bankLevel", default=None)
-    measure_time = get_val("measure_time", "resultTime", "time", default="-")
+    measure_time = get_val("measure_time", "resultTime", "time", "updated_at", default="-")
 
     # Ensure lat/lon are floats
     try:
@@ -581,8 +594,17 @@ def get_water_data_from_api():
             try:
                 parsed = parse_v3_station(item)
                 code = parsed.get("StationCode")
-                # Robust skip for missing/invalid station codes to prevent duplicate key 'N/A' in Supabase
+                
+                # Robust skip for invalid data
                 if not code or str(code).strip().upper() in ["N/A", "NONE", ""]:
+                    continue
+                
+                name = parsed.get("Name", "ไม่ระบุ")
+                lat = parsed.get("Lat", 0)
+                lon = parsed.get("Lon", 0)
+                
+                # Skip stations without proper name or coordinates (we want real stations only)
+                if name == "ไม่ระบุ" or (lat == 0 and lon == 0):
                     continue
                 
                 wl = parsed["WaterLevel"]
@@ -592,11 +614,11 @@ def get_water_data_from_api():
                 
                 results.append({
                     "StationCode": str(code).strip(),
-                    "Name": parsed["Name"],
-                    "River": parsed["River"],
-                    "Location": parsed["Location"],
-                    "Lat": parsed["Lat"],
-                    "Lon": parsed["Lon"],
+                    "Name": name,
+                    "River": parsed.get("River", "-"),
+                    "Location": parsed.get("Location", "-"),
+                    "Lat": lat,
+                    "Lon": lon,
                     "WaterLevel": wl if wl is not None else None,
                     "BankLevel": bl if bl is not None else None,
                     "Situation": situation,
@@ -634,7 +656,17 @@ def get_water_data_from_api():
         wl_value = None
         bl_value = None
         measure_time = "-"
-        code = st["stationCode"]
+        code = st.get("stationCode")
+        if not code:
+            continue
+            
+        name = st.get("stationName", "ไม่ระบุ")
+        lat = float(st.get("latitude", 0)) if st.get("latitude") is not None else 0.0
+        lon = float(st.get("longitude", 0)) if st.get("longitude") is not None else 0.0
+        
+        # Skip stations without proper name or coordinates
+        if name == "ไม่ระบุ" or (lat == 0 and lon == 0):
+            continue
         
         if runoff:
             wl_data = runoff.get("water_level", {})
@@ -649,11 +681,11 @@ def get_water_data_from_api():
         
         results.append({
             "StationCode": code,
-            "Name": st.get("stationName", "ไม่ระบุ"),
+            "Name": name,
             "River": st.get("riverName", "-"),
             "Location": st.get("provinceName", "-"),
-            "Lat": float(st.get("latitude", 0)) if st.get("latitude") is not None else 0.0,
-            "Lon": float(st.get("longitude", 0)) if st.get("longitude") is not None else 0.0,
+            "Lat": lat,
+            "Lon": lon,
             "WaterLevel": float(wl_value) if wl_value not in [None, "-", ""] else None,
             "BankLevel": float(bl_value) if bl_value not in [None, "-", ""] else None,
             "Situation": situation,
