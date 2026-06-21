@@ -7,11 +7,6 @@ import urllib.request
 import requests
 import google.generativeai as genai
 import gspread
-try:
-    from supabase import create_client, Client
-except ImportError:
-    create_client = None
-    Client = None
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import (
     FlexSendMessage, BubbleContainer, BoxComponent, TextComponent,
@@ -28,76 +23,12 @@ RICH_MENU_ID = os.environ.get("RICH_MENU_ID")
 GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 TMD_ACCESS_TOKEN = os.environ.get("TMD_ACCESS_TOKEN")
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 # =============================================================================
 # ระบบติดตามสถานะการสนทนาและเก็บข้อมูลคัดกรอง
 # =============================================================================
 USER_STATES = {}
 USER_DATA = {}
-
-# =============================================================================
-# SUPABASE CLIENT (เชื่อมต่อ Supabase แทน/คู่กับ Google Sheets)
-# =============================================================================
-_supabase_client = None
-
-def get_supabase_client():
-    """เชื่อมต่อ Supabase Client (ใช้ Service Role Key สำหรับ backend)"""
-    global _supabase_client
-    if _supabase_client is not None:
-        return _supabase_client
-    if not SUPABASE_URL or not SUPABASE_KEY or create_client is None:
-        print("[Supabase] SUPABASE_URL / SUPABASE_KEY not configured or library missing")
-        return None
-    try:
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        print("[Supabase] Client initialized successfully")
-        return _supabase_client
-    except Exception as e:
-        print(f"[Supabase] Initialization error: {e}")
-        return None
-
-# =============================================================================
-# SUPABASE TABLE SCHEMAS (แนะนำ - สร้างใน SQL Editor)
-# =============================================================================
-"""
--- ตารางระดับน้ำ (สำคัญที่สุดสำหรับคำขอนี้)
-CREATE TABLE IF NOT EXISTS water_levels (
-    station_code TEXT PRIMARY KEY,
-    name TEXT,
-    river TEXT,
-    location TEXT,
-    lat DOUBLE PRECISION,
-    lon DOUBLE PRECISION,
-    water_level DOUBLE PRECISION,
-    bank_level DOUBLE PRECISION,
-    situation TEXT,
-    trend TEXT,
-    measure_time TEXT,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ตารางศูนย์พักพิง (สำหรับแดชบอร์ด)
-CREATE TABLE IF NOT EXISTS shelters (
-    shelter_id TEXT PRIMARY KEY,
-    name TEXT,
-    province TEXT,
-    district TEXT,
-    lat DOUBLE PRECISION,
-    lon DOUBLE PRECISION,
-    capacity INT,
-    occupancy INT,
-    status TEXT,
-    beds INT,
-    toilets INT,
-    parking INT,
-    facilities TEXT,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- (ตาราง users, sos_requests, user_needs ตามที่ส่งไปก่อนหน้า)
-"""
 
 # =============================================================================
 # 2. THAIWATER API CONFIGURATION (V3 + V1 Legacy)
@@ -1048,96 +979,6 @@ def sync_water_levels_to_sheets(sheets_client, sheet_id):
         return False
 
 
-# =============================================================================
-# SUPABASE WATER LEVELS SYNC (ใหม่ - แนะนำใช้แทน/คู่กับ Sheets)
-# =============================================================================
-def sync_water_levels_to_supabase():
-    """
-    Sync ข้อมูลระดับน้ำจาก ThaiWater ไปยัง Supabase (ตาราง water_levels)
-    ใช้ bulk upsert เพื่อประสิทธิภาพสูง
-    """
-    supabase = get_supabase_client()
-    if not supabase:
-        print("[Supabase Water] Client not available")
-        return False
-
-    try:
-        # ดึงข้อมูลจาก API (ใช้ฟังก์ชันที่มีอยู่)
-        data = get_water_data_from_api(None, None)  # ไม่ต้อง sheets
-        if not data:
-            print("[Supabase Water] No data from API")
-            return False
-
-        # เตรียมข้อมูลสำหรับ Supabase
-        rows_to_upsert = []
-        for st in data:
-            situation_text = st.get("Situation", "ปกติ")
-            if isinstance(situation_text, dict):
-                situation_text = situation_text.get("status", "ปกติ")
-
-            rows_to_upsert.append({
-                "station_code": st.get("StationCode"),
-                "name": st.get("Name"),
-                "river": st.get("River"),
-                "location": st.get("Location"),
-                "lat": st.get("Lat"),
-                "lon": st.get("Lon"),
-                "water_level": st.get("WaterLevel") if st.get("WaterLevel") not in [None, "-"] else None,
-                "bank_level": st.get("BankLevel") if st.get("BankLevel") not in [None, "-"] else None,
-                "situation": situation_text,
-                "trend": st.get("Trend", "คงที่"),
-                "measure_time": st.get("Time"),
-                "updated_at": datetime.datetime.now().isoformat()
-            })
-
-        # Bulk upsert (ต้องมี unique constraint บน station_code)
-        if rows_to_upsert:
-            # ใช้ upsert แบบ chunk เพื่อความปลอดภัย
-            chunk_size = 200
-            for i in range(0, len(rows_to_upsert), chunk_size):
-                chunk = rows_to_upsert[i:i + chunk_size]
-                supabase.table("water_levels").upsert(chunk, on_conflict="station_code").execute()
-            
-            print(f"[Supabase Water] Synced {len(rows_to_upsert)} stations successfully")
-            return True
-        return False
-
-    except Exception as e:
-        print(f"[Supabase Water] Sync error: {e}")
-        return False
-
-
-def get_water_data_from_supabase(user_lat=None, user_lon=None, limit=100):
-    """
-    ดึงข้อมูลระดับน้ำจาก Supabase
-    ถ้ามี lat/lon จะคำนวณระยะทางและเรียงใกล้สุด
-    """
-    supabase = get_supabase_client()
-    if not supabase:
-        return []
-
-    try:
-        response = supabase.table("water_levels").select("*").order("updated_at", desc=True).limit(limit).execute()
-        records = response.data or []
-
-        if user_lat is not None and user_lon is not None:
-            for rec in records:
-                try:
-                    rec["distance_km"] = calculate_distance(
-                        user_lat, user_lon,
-                        float(rec.get("lat", 0) or 0),
-                        float(rec.get("lon", 0) or 0)
-                    )
-                except:
-                    rec["distance_km"] = 9999
-            records.sort(key=lambda x: x.get("distance_km", 9999))
-
-        return records[:3] if user_lat else records  # คืน 3 ที่ใกล้สุดถ้ามีพิกัด
-    except Exception as e:
-        print(f"[Supabase Water] Query error: {e}")
-        return []
-
-
 def get_water_data_lazy(sheets_client, sheet_id):
     """
     อ่านข้อมูลระดับน้ำจาก Google Sheets พร้อมระบบ Auto-Refresh (15 นาที)
@@ -1242,30 +1083,11 @@ def get_water_data_from_sheets(sheets_client, sheet_id, user_lat, user_lon):
 def is_user_registered(sheets_client, sheet_id, user_id):
     """
     ตรวจสอบว่าผู้ใช้ลงทะเบียนแล้วหรือยัง
-    ลำดับความสำคัญ: Supabase (ถ้าตั้งค่า) > Google Sheets > หน่วยความจำชั่วคราว
+    เช็คจาก Google Sheets (persistent) แทนแค่ USER_DATA
     Returns: (is_registered: bool, first_name, last_name, phone)
     """
-    # 1. ลอง Supabase ก่อน (แนะนำสำหรับ production)
-    supabase = get_supabase_client()
-    if supabase:
-        try:
-            response = supabase.table("users").select("first_name, last_name, phone").eq("user_id", str(user_id)).limit(1).execute()
-            if response.data and len(response.data) > 0:
-                row = response.data[0]
-                fn = row.get("first_name", "ผู้แจ้ง")
-                ln = row.get("last_name", "")
-                ph = row.get("phone", "-")
-                if user_id not in USER_DATA:
-                    USER_DATA[user_id] = {}
-                USER_DATA[user_id]["first_name"] = fn
-                USER_DATA[user_id]["last_name"] = ln
-                USER_DATA[user_id]["phone"] = ph
-                return True, fn, ln, ph
-        except Exception as e:
-            print(f"[Supabase UserReg] Check error: {e}")
-
-    # 2. Fallback to Google Sheets
     if not sheets_client or not sheet_id:
+        # Fallback: เช็คจากหน่วยความจำชั่วคราว
         if user_id in USER_DATA:
             d = USER_DATA[user_id]
             if "first_name" in d:
@@ -1281,15 +1103,17 @@ def is_user_registered(sheets_client, sheet_id, user_id):
                 fn = r.get("first_name", "ผู้แจ้ง")
                 ln = r.get("last_name", "")
                 ph = r.get("phone", "-")
+                # เก็บลงหน่วยความจำด้วยเพื่อใช้เร็วขึ้นครั้งต่อไป
                 if user_id not in USER_DATA:
                     USER_DATA[user_id] = {}
                 USER_DATA[user_id]["first_name"] = fn
                 USER_DATA[user_id]["last_name"] = ln
-                USER_DATA[user_id]["phone"] = ph
+                USER_DATA[user_name] = ph
                 return True, fn, ln, ph
     except Exception as e:
         print(f"[UserReg] Failed to check sheets: {e}")
 
+    # Fallback: เช็คจากหน่วยความจำ
     if user_id in USER_DATA:
         d = USER_DATA[user_id]
         if "first_name" in d:
@@ -1298,57 +1122,27 @@ def is_user_registered(sheets_client, sheet_id, user_id):
     return False, "", "", "-"
 
 
-def register_user_to_sheets(sheets_client=None, sheet_id=None, user_id=None, first_name=None, last_name=None, phone=None):
+def register_user_to_sheets(sheets_client, sheet_id, user_id, first_name, last_name, phone):
     """
-    ลงทะเบียนผู้ใช้ใหม่ (Supabase เป็นหลัก)
-    Google Sheets ถูกเลิกใช้เป็นหลักแล้ว (legacy)
+    ลงทะเบียนผู้ใช้ใหม่ลง Google Sheets
     """
-    supabase = get_supabase_client()
-    if supabase and user_id:
-        try:
-            register_date = datetime.datetime.now().strftime("%Y-%m-%d")
-            supabase.table("users").upsert({
-                "user_id": str(user_id),
-                "first_name": first_name,
-                "last_name": last_name,
-                "phone": phone,
-                "register_date": register_date,
-                "status": "ACTIVE"
-            }, on_conflict="user_id").execute()
-            print("[Supabase] User registered/updated successfully")
-            if user_id not in USER_DATA:
-                USER_DATA[user_id] = {}
-            USER_DATA[user_id]["first_name"] = first_name
-            USER_DATA[user_id]["last_name"] = last_name
-            USER_DATA[user_id]["phone"] = phone
-            return True
-        except Exception as e:
-            print(f"[Supabase UserReg] Error: {e}")
-
-    # Legacy fallback (ถ้ายังคงต้องการใช้ Sheets)
-    if sheets_client and sheet_id and user_id:
-        try:
-            sheet = sheets_client.open_by_key(sheet_id)
-            users_ws = sheet.worksheet("users")
-            register_date = datetime.datetime.now().strftime("%Y-%m-%d")
-            users_ws.append_row([user_id, first_name, last_name, phone, register_date, "ACTIVE"])
-            if user_id not in USER_DATA:
-                USER_DATA[user_id] = {}
-            USER_DATA[user_id]["first_name"] = first_name
-            USER_DATA[user_id]["last_name"] = last_name
-            USER_DATA[user_id]["phone"] = phone
-            return True
-        except Exception as e:
-            print(f"[Legacy Sheets] Register error: {e}")
-
-    # อย่างน้อยก็เก็บในหน่วยความจำ
-    if user_id:
+    if not sheets_client or not sheet_id:
+        return False
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        users_ws = sheet.worksheet("users")
+        register_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        users_ws.append_row([user_id, first_name, last_name, phone, register_date, "ACTIVE"])
+        # เก็บลงหน่วยความจำ
         if user_id not in USER_DATA:
             USER_DATA[user_id] = {}
-        USER_DATA[user_id]["first_name"] = first_name or ""
-        USER_DATA[user_id]["last_name"] = last_name or ""
-        USER_DATA[user_id]["phone"] = phone or "-"
-    return supabase is not None
+        USER_DATA[user_id]["first_name"] = first_name
+        USER_DATA[user_id]["last_name"] = last_name
+        USER_DATA[user_id]["phone"] = phone
+        return True
+    except Exception as e:
+        print(f"[UserReg] Failed to save: {e}")
+        return False
 
 
 # =============================================================================
@@ -1517,51 +1311,6 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
 # =============================================================================
 # 12. GREETING & QUICK INFO FLEX MESSAGE
 # =============================================================================
-
-# รายการคำทักทายที่ระบบจะตอบทันทีโดย "ไม่เรียก" Gemini AI
-# เพื่อลดเวลาตอบสนองให้เหลือน้อยที่สุด (ไม่ต้องรอ AI ประมวลผล)
-GREETING_KEYWORDS = [
-    "สวัสดี", "สวัสดีครับ", "สวัสดีค่ะ", "สวัสดีคับ", "สวัสดีคะ",
-    "หวัดดี", "หวัดดีครับ", "หวัดดีค่ะ",
-    "ดีครับ", "ดีค่ะ", "หวัดดีจ้า",
-    "hello", "hi", "hey",
-    "good morning", "good afternoon", "good evening",
-    "เริ่ม", "start", "menu", "เมนู"
-]
-
-
-def is_greeting(text):
-    """
-    ตรวจสอบว่าข้อความที่ผู้ใช้พิมพ์มา 'มีความหมายเป็นการทักทาย' หรือไม่
-    ใช้การเทียบแบบ exact-match (lowercase) ก่อน แล้วค่อย fallback ไปเช็ค
-    คำทักทายที่ปรากฏเป็นคำแรกของข้อความ เพื่อกันการ false-positive กับ
-    ข้อความยาวที่บังเอิญมีคำว่า 'hi' ฝังอยู่ตรงกลางประโยค (เช่นคำถามจริงจัง)
-    """
-    if not text:
-        return False
-
-    clean = text.strip().lower()
-    # ตัดเครื่องหมายวรรคตอน/อิโมจิที่มักพ่วงมากับคำทักทายออกก่อนเทียบ
-    clean = clean.strip("!.,😊🙏👋 ")
-
-    if not clean:
-        return False
-
-    # 1) ตรงทั้งข้อความ (กรณีพิมพ์สั้น ๆ แบบ "สวัสดีครับ", "hi")
-    if clean in [kw.lower() for kw in GREETING_KEYWORDS]:
-        return True
-
-    # 2) ข้อความสั้น (<= 4 คำ) และคำแรกเป็นคำทักทาย เช่น "สวัสดีครับ floodcare"
-    words = clean.split()
-    if len(words) <= 4 and words:
-        first_word = words[0]
-        for kw in GREETING_KEYWORDS:
-            if first_word.startswith(kw.lower()) or kw.lower().startswith(first_word):
-                return True
-
-    return False
-
-
 def get_greeting_message(user_name="คุณ"):
     """
     สร้างข้อความทักทายแบบ Text ตามรูปแบบที่ผู้ใช้ต้องการ (เน้นความเร็วสูงสุด)
@@ -1652,98 +1401,33 @@ def send_line_notification(user_id, message):
 
 
 # =============================================================================
-# 13B. TYPING INDICATOR (LINE Chat Loading Animation API)
-# =============================================================================
-# LINE รองรับการแสดง "กำลังพิมพ์..." (จุดสามจุด) ผ่าน REST endpoint นี้โดยตรง
-# SDK เวอร์ชันเก่า (linebot v2) ยังไม่มี wrapper ให้ จึงเรียกผ่าน requests ตรง ๆ
-# เอกสารอ้างอิง: https://developers.line.biz/en/reference/messaging-api/#display-a-loading-indicator
-LINE_LOADING_ANIMATION_URL = "https://api.line.me/v2/bot/chat/loading/start"
-
-
-def show_loading_animation(user_id, loading_seconds=10):
-    """
-    แสดง Typing Indicator (กำลังพิมพ์...) ให้ผู้ใช้เห็นระหว่างที่ระบบกำลัง
-    ประมวลผลกับ Gemini AI เพื่อให้ผู้ใช้รู้ว่าระบบยังทำงานอยู่ ไม่ได้ค้าง
-
-    loading_seconds: ระยะเวลาแสดง animation (5-60 วินาที ตาม spec ของ LINE)
-                      ถ้า AI ตอบเร็วกว่านี้ animation จะหายไปเองทันทีที่ reply ถูกส่ง
-    """
-    if not LINE_CHANNEL_ACCESS_TOKEN:
-        return False
-    try:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
-        }
-        payload = {
-            "chatId": user_id,
-            "loadingSeconds": max(5, min(loading_seconds, 60))
-        }
-        resp = requests.post(LINE_LOADING_ANIMATION_URL, headers=headers, json=payload, timeout=5)
-        if resp.status_code != 202:
-            print(f"[TypingIndicator] Unexpected status {resp.status_code}: {resp.text}")
-            return False
-        return True
-    except Exception as e:
-        # ไม่ critical พอที่จะทำให้ระบบล้ม ถ้า indicator ล้มเหลวให้ปล่อยผ่านเงียบ ๆ
-        print(f"[TypingIndicator] Failed to show loading animation: {e}")
-        return False
-
-
-# =============================================================================
 # 13. USER NEEDS MANAGEMENT
 # =============================================================================
-def save_user_need(sheets_client=None, sheet_id=None, user_id=None, timestamp=None, lat=None, lon=None, category=None, details=None, urgency=None):
+def save_user_need(sheets_client, sheet_id, user_id, timestamp, lat, lon, category, details, urgency):
     """
-    บันทึกความต้องการสิ่งของลง Supabase (หลัก)
-    Google Sheets ถูกเลิกใช้แล้ว
+    บันทึกความต้องการสิ่งของลง Google Sheets (แท็บ user_needs)
     """
-    supabase = get_supabase_client()
-    if supabase and user_id:
-        try:
-            supabase.table("user_needs").insert({
-                "timestamp": timestamp or datetime.datetime.now().isoformat(),
-                "user_id": str(user_id),
-                "latitude": float(lat) if lat else 0,
-                "longitude": float(lon) if lon else 0,
-                "category": category,
-                "details": details,
-                "urgency": urgency,
-                "status": "PENDING"
-            }).execute()
-            print("[Supabase] User need saved successfully")
-            return True
-        except Exception as e:
-            print(f"[Supabase UserNeeds] Error: {e}")
+    if not sheets_client or not sheet_id:
+        return False
 
-    # Legacy Sheets (optional)
-    if sheets_client and sheet_id:
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
         try:
-            sheet = sheets_client.open_by_key(sheet_id)
-            try:
-                ws = sheet.worksheet("user_needs")
-            except:
-                ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="12")
-                ws.append_row(["Timestamp", "UserID", "Latitude", "Longitude", "Category", "Details", "Urgency", "Status"])
-            ws.append_row([timestamp, user_id, lat, lon, category, details, urgency, "PENDING"])
-            return True
-        except Exception as e:
-            print(f"[Legacy Sheets] save_user_need error: {e}")
+            ws = sheet.worksheet("user_needs")
+        except gspread.WorksheetNotFound:
+            ws = sheet.add_worksheet(title="user_needs", rows="2000", cols="12")
+            ws.append_row(["Timestamp", "UserID", "Latitude", "Longitude",
+                           "Category", "Details", "Urgency", "Status"])
 
-    return False
+        ws.append_row([timestamp, user_id, lat, lon, category, details, urgency, "PENDING"])
+        return True
+    except Exception as e:
+        print(f"[UserNeeds] Failed to save: {e}")
+        return False
 
 
 def get_all_user_needs(sheets_client, sheet_id):
-    """ดึงรายการความต้องการสิ่งของทั้งหมด (Supabase ก่อน)"""
-    supabase = get_supabase_client()
-    if supabase:
-        try:
-            response = supabase.table("user_needs").select("*").order("timestamp", desc=True).limit(500).execute()
-            if response.data:
-                return response.data
-        except Exception as e:
-            print(f"[Supabase UserNeeds] Select error: {e}")
-
+    """ดึงรายการความต้องการสิ่งของทั้งหมด"""
     if not sheets_client or not sheet_id:
         return []
     try:
@@ -1756,18 +1440,7 @@ def get_all_user_needs(sheets_client, sheet_id):
 
 
 def update_need_status(sheets_client, sheet_id, timestamp, user_id, new_status):
-    """อัปเดตสถานะความต้องการ (PENDING -> COMPLETED) - Supabase ก่อน"""
-    supabase = get_supabase_client()
-    if supabase:
-        try:
-            # ใช้ timestamp + user_id เป็น key (สมมติไม่มี PK)
-            response = supabase.table("user_needs").update({"status": new_status}).eq("timestamp", timestamp).eq("user_id", str(user_id)).execute()
-            if response.data:
-                print("[Supabase] Need status updated")
-                return True
-        except Exception as e:
-            print(f"[Supabase UserNeeds] Update error: {e}")
-
+    """อัปเดตสถานะความต้องการ (PENDING -> COMPLETED)"""
     if not sheets_client or not sheet_id:
         return False
     try:
