@@ -531,15 +531,8 @@ def find_nearest_water_stations(user_lat, user_lon, max_stations=3, max_distance
 
 
 def assess_water_level_status(water_level_value, bank_level_value=None):
-    """
-    ประเมินสถานะระดับน้ำพร้อมกำหนดสีสำหรับ Status Pill ตาม UI Specs
-    """
     if water_level_value is None:
-        return {
-            "status": "ไม่มีข้อมูล", 
-            "color": "#1F2937", "bg_color": "#F3F4F6", "icon": "⚪",
-            "diff_text": "-", "advice": "ไม่สามารถประเมินได้"
-        }
+        return {"status": "⚪ ไม่มีข้อมูล", "color": "#9CA3AF", "diff_text": "-", "advice": "ไม่สามารถประเมินได้"}
     
     try:
         wl = float(water_level_value)
@@ -547,50 +540,25 @@ def assess_water_level_status(water_level_value, bank_level_value=None):
         diff = bl - wl
         diff_text = f"{abs(diff):.2f}"
     except (ValueError, TypeError):
-        return {
-            "status": "ข้อมูลไม่ถูกต้อง", 
-            "color": "#1F2937", "bg_color": "#F3F4F6", "icon": "⚪",
-            "diff_text": "-", "advice": "ไม่สามารถประเมินได้"
-        }
+        return {"status": "⚪ ข้อมูลไม่ถูกต้อง", "color": "#9CA3AF", "diff_text": "-", "advice": "ไม่สามารถประเมินได้"}
     
     if bl <= 0:
         if wl >= 3.0:
-            return {
-                "status": "วิกฤต", "color": "#B91C1C", "bg_color": "#FEE2E2", "icon": "🔴",
-                "diff_text": "-", "advice": "⚠️ อพยพทันที!"
-            }
-        return {
-            "status": "ปกติ", "color": "#15803D", "bg_color": "#DCFCE7", "icon": "🟢",
-            "diff_text": "-", "advice": "ติดตามสถานการณ์"
-        }
+            return {"status": "ล้นตลิ่ง", "color": "#EF4444", "diff_text": "-", "advice": "⚠️ อพยพทันที!"}
+        return {"status": "ปกติ", "color": "#10B981", "diff_text": "-", "advice": "ติดตามสถานการณ์"}
     
     ratio = wl / bl
     
     if wl >= bl:
-        return {
-            "status": "วิกฤต", "color": "#B91C1C", "bg_color": "#FEE2E2", "icon": "🔴",
-            "diff_text": f"-{abs(diff):.2f}", "advice": "⚠️ อพยพทันที! ระดับน้ำล้นตลิ่ง"
-        }
+        return {"status": "ล้นตลิ่ง", "color": "#FF0000", "diff_text": f"ล้นตลิ่ง {abs(diff):.2f}", "advice": "⚠️ อพยพทันที! ระดับน้ำล้นตลิ่ง"}
     elif ratio >= 0.70:
-        return {
-            "status": "มาก", "color": "#0369A1", "bg_color": "#E0F2FE", "icon": "🔵",
-            "diff_text": diff_text, "advice": "ระดับน้ำค่อนข้างสูง"
-        }
+        return {"status": "มาก", "color": "#0000FF", "diff_text": diff_text, "advice": "💧 ระดับน้ำค่อนข้างสูง"}
     elif ratio >= 0.30:
-        return {
-            "status": "ปกติ", "color": "#15803D", "bg_color": "#DCFCE7", "icon": "🟢",
-            "diff_text": diff_text, "advice": "ระดับน้ำปกติ"
-        }
+        return {"status": "ปกติ", "color": "#008000", "diff_text": diff_text, "advice": "✅ ระดับน้ำปกติ"}
     elif ratio >= 0.10:
-        return {
-            "status": "น้อย", "color": "#9A3412", "bg_color": "#FEF9C3", "icon": "🟡",
-            "diff_text": diff_text, "advice": "ระดับน้ำน้อย"
-        }
+        return {"status": "น้อย", "color": "#FFCC00", "diff_text": diff_text, "advice": "⚠️ ระดับน้ำน้อย"}
     else:
-        return {
-            "status": "น้อยวิกฤต", "color": "#9A3412", "bg_color": "#FFEDD5", "icon": "🟠",
-            "diff_text": diff_text, "advice": "ระดับน้ำน้อยวิกฤต"
-        }
+        return {"status": "น้อยวิกฤต", "color": "#E67E22", "diff_text": diff_text, "advice": "🚨 ระดับน้ำน้อยวิกฤต"}
 
 
 # =============================================================================
@@ -612,18 +580,18 @@ def get_water_data_from_api():
         for item in v3_data:
             try:
                 parsed = parse_v3_station(item)
-                code = parsed["StationCode"]
-                if not code or code == "N/A":
-                    # No real station code -> skip, otherwise multiple stations
-                    # would collide on the same "N/A" primary key in Supabase.
+                code = parsed.get("StationCode")
+                # Robust skip for missing/invalid station codes to prevent duplicate key 'N/A' in Supabase
+                if not code or str(code).strip().upper() in ["N/A", "NONE", ""]:
                     continue
+                
                 wl = parsed["WaterLevel"]
                 bl = parsed["BankLevel"]
                 situation = calculate_situation(wl, bl)
-                trend = "คงที่"  # Will be updated after comparing with previous data
+                trend = "คงที่"
                 
                 results.append({
-                    "StationCode": code,
+                    "StationCode": str(code).strip(),
                     "Name": parsed["Name"],
                     "River": parsed["River"],
                     "Location": parsed["Location"],
@@ -660,17 +628,13 @@ def get_water_data_from_api():
     
     # For now, let's process V1 sequentially with a small delay
     for i, st in enumerate(stations_v1_metadata):
-        code = st.get("stationCode")
-        if not code or code == "N/A":
-            # No real station code -> skip, would otherwise collide with
-            # other stations on the same primary key in Supabase.
-            continue
-        runoff = get_thaiwater_runoff_latest(code)
+        runoff = get_thaiwater_runoff_latest(st["stationCode"])
         time.sleep(0.05)  # Rate limiting
         
         wl_value = None
         bl_value = None
         measure_time = "-"
+        code = st["stationCode"]
         
         if runoff:
             wl_data = runoff.get("water_level", {})
@@ -722,16 +686,8 @@ def sync_water_levels_to_supabase():
             return False
         
         # Prepare rows for Supabase
-        rows_by_code = {}
-        skipped_no_code = 0
+        rows_to_insert = []
         for st in data:
-            code = st.get("StationCode")
-            if not code or code == "N/A":
-                # No usable primary key -> skip rather than collide with
-                # other rows on the same "N/A" station_code.
-                skipped_no_code += 1
-                continue
-
             situation_text = st.get("Situation", "ปกติ")
             # Ensure situation_text is a string, not a dict from assess_water_level_status
             if isinstance(situation_text, dict):
@@ -740,10 +696,8 @@ def sync_water_levels_to_supabase():
             wl_val = st.get("WaterLevel")
             bl_val = st.get("BankLevel")
             
-            # Dedupe by station_code within this batch (last one wins) so a
-            # single insert/chunk never contains the same primary key twice.
-            rows_by_code[code] = {
-                "station_code": code,
+            rows_to_insert.append({
+                "station_code": st.get("StationCode"),
                 "name": st.get("Name"),
                 "river": st.get("River"),
                 "location": st.get("Location"),
@@ -755,11 +709,7 @@ def sync_water_levels_to_supabase():
                 "trend": st.get("Trend", "คงที่"),
                 "measure_time": st.get("Time"),
                 "updated_at": datetime.datetime.now().isoformat()
-            }
-        
-        rows_to_insert = list(rows_by_code.values())
-        if skipped_no_code:
-            print(f"[Supabase Water] Skipped {skipped_no_code} station(s) with no usable station_code")
+            })
         
         # Step 1: TRUNCATE (delete all existing data)
         print("[Supabase Water] Truncating old data...")
@@ -974,129 +924,75 @@ def build_water_level_text_report(user_lat, user_lon, timestamp, stations, weath
 
 
 def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weather_info, water_flow):
-    """
-    Builds a minimalist Flex Message for water levels with Status Pills.
-    """
+    """Builds a Flex Message for water levels and weather."""
     header_box = BoxComponent(
         layout="vertical",
         contents=[
-            TextComponent(text="🌊 รายงานระดับน้ำจากสถานีใกล้คุณ", weight="bold", size="md", color="#1A1A1A"),
+            TextComponent(text="🌊 รายงานระดับน้ำรายพิกัด", weight="bold", size="md", color="#1A1A1A"),
             BoxComponent(
-                layout="vertical",
-                margin="md",
-                spacing="xs",
+                layout="horizontal",
                 contents=[
-                    TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#666666"),
-                    TextComponent(text=f"🕒 อัปเดตวันนี้ {timestamp}", size="xs", color="#666666")
-                ]
+                    TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="sm", color="#666666"),
+                    TextComponent(text=f"🕒 อัปเดต{timestamp}", size="sm", color="#666666", align="end")
+                ],
+                margin="md"
             ),
-            SeparatorComponent(margin="lg", color="#E0E0E0")
-        ]
+            SeparatorComponent(margin="md", color="#E0E0E0")
+        ],
+        padding_bottom="md"
     )
 
     stations_box = BoxComponent(
         layout="vertical",
-        spacing="lg",
-        margin="lg",
         contents=[]
     )
 
     if stations:
-        for st in stations[:3]:
+        stations_box.contents.append(            TextComponent(text="สถานีตรวจวัดใกล้คุณ", weight="bold", size="md", color="#333333", margin="md"))
+        for st in stations:
             distance = st.get("distance_km", 0)
             wl = st.get("water_level")
             bl = st.get("bank_level")
             
-            wl_display = f"{wl:.2f}" if wl is not None else "-"
-            bl_display = f"{bl:.2f}" if bl is not None else "-"
+            wl_value_display = wl if wl is not None else "-"
+            bl_value_display = bl if bl is not None else "-"
 
             assessment = assess_water_level_status(wl, bl)
+            risk_color = assessment["color"]
             
             station_card = BoxComponent(
                 layout="vertical",
+                margin="md",
                 contents=[
-                    # Station Name & Distance
-                    TextComponent(
-                        text=f"{st.get('stationName', st.get('Name', 'ไม่ระบุ'))} (ห่าง {distance:.2f} กม.)",
-                        size="sm", color="#111827", weight="bold"
-                    ),
-                    # Status Pill Row
+                    TextComponent(text=f"{st.get("stationName", st.get("Name", "ไม่ระบุ"))} (ห่าง {distance:.2f} กม.)", weight="bold", size="sm", color="#333333"),
+                    TextComponent(text=f"ระดับน้ำ {wl_value_display} ม. / ตลิ่ง {bl_value_display} ม.", size="sm", color="#555555", margin="xs"),
+                    TextComponent(text=f"ต่ำกว่าตลิ่ง {assessment["diff_text"]} ม.", size="sm", color="#555555", margin="xs"),
                     BoxComponent(
                         layout="horizontal",
-                        margin="md",
+                        margin="xs",
                         spacing="sm",
                         contents=[
-                            # Status Pill
-                            BoxComponent(
-                                layout="vertical",
-                                background_color=assessment["bg_color"],
-                                corner_radius="999px",
-                                padding_start="12px", padding_end="12px",
-                                padding_top="2px", padding_bottom="2px",
-                                flex=0,
-                                contents=[
-                                    TextComponent(
-                                        text=f"{assessment['icon']} {assessment['status']}",
-                                        size="xs", color=assessment["color"], weight="bold", align="center"
-                                    )
-                                ]
-                            ),
-                            # Advice/Short Desc
-                            TextComponent(
-                                text=assessment["advice"],
-                                size="xs", color="#4B5563", gravity="center"
-                            )
-                        ]
-                    ),
-                    # Data Row
-                    BoxComponent(
-                        layout="vertical",
-                        margin="sm",
-                        contents=[
-                            TextComponent(
-                                text=f"ระดับน้ำ: {wl_display} ม. | ตลิ่ง: {bl_display} ม.",
-                                size="xs", color="#6B7280"
-                            ),
-                            BoxComponent(
-                                layout="horizontal",
-                                contents=[
-                                    TextComponent(text="ต่ำกว่าตลิ่ง: ", size="xs", color="#6B7280", flex=0),
-                                    TextComponent(text=f"{assessment['diff_text']} ม.", size="xs", color="#111827", weight="bold")
-                                ]
-                            )
+                            TextComponent(text=f"{assessment["icon"]} {assessment["status"]}", size="sm", color="#555555", weight="bold"),
+                            TextComponent(text=f"แนวโน้ม: {st.get("trend", "คงที่")}", size="sm", color="#555555", align="end")
                         ]
                     )
                 ]
             )
             stations_box.contents.append(station_card)
     else:
-        stations_box.contents.append(
-            TextComponent(
-                text="ไม่พบสถานีวัดระดับน้ำใกล้เคียงในระยะ 50 กม.",
-                size="sm", color="#6B7280", align="center"
-            )
-        )
+        stations_box.contents.append(TextComponent(text="ไม่พบสถานีวัดระดับน้ำใกล้เคียงในระยะ 50 กม. โปรดตรวจสอบข้อมูลจากแหล่งอื่น หรือติดต่อ 1784", size="sm", color="#666666", margin="md"))
     
     footer_box = BoxComponent(
         layout="vertical",
-        margin="xl",
+        margin="lg",
         contents=[
-            SeparatorComponent(color="#E0E0E0"),
-            TextComponent(
-                text="📌 อ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)",
-                size="xxs", color="#9CA3AF", margin="md"
-            ),
+            SeparatorComponent(margin="md", color="#E0E0E0"),
+            TextComponent(text="อ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)", size="xs", color="#9CA3AF", margin="md"),
             ButtonComponent(
                 style="link",
                 height="sm",
-                action=URIAction(label="[ 🔗 ดูข้อมูลเพิ่มเติมที่ ThaiWater ]", uri=THAIWATER_WEB_URL),
+                action=URIAction(label="[ ดูข้อมูลเพิ่มเติมที่ ThaiWater ]", uri=THAIWATER_WEB_URL),
                 color="#2563EB"
-            ),
-            ButtonComponent(
-                style="link",
-                height="sm",
-                action=URIAction(label="[ 🌦️ ตรวจสอบสภาพอากาศ (TMD) ]", uri="https://www.tmd.go.th/"),
-                color="#0284C7"
             )
         ]
     )
@@ -1109,7 +1005,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                 stations_box,
                 footer_box
             ],
-            padding_all="xl"
+            padding_all="lg"
         )
     )
     
@@ -1289,6 +1185,37 @@ def save_user_need(user_id=None, timestamp=None, lat=None, lon=None, category=No
         except Exception as e:
             print(f"[Supabase UserNeeds] Error: {e}")
     return False
+
+
+def save_sos_request(case_id, user_id, first_name, last_name, phone, latitude, longitude, 
+                     group_types, urgency_level, note, priority, priority_label):
+    """Save SOS request to Supabase"""
+    supabase = get_supabase_client()
+    if not supabase:
+        print("[Supabase SOS] Client not available")
+        return False
+    try:
+        supabase.table("sos_requests").insert({
+            "case_id": case_id,
+            "user_id": str(user_id),
+            "first_name": first_name,
+            "last_name": last_name,
+            "phone": phone,
+            "latitude": float(latitude) if latitude not in [None, "0", ""] else None,
+            "longitude": float(longitude) if longitude not in [None, "0", ""] else None,
+            "group_types": group_types,
+            "urgency_level": urgency_level,
+            "note": note,
+            "priority": priority,
+            "priority_label": priority_label,
+            "status": "PENDING",
+            "created_at": datetime.datetime.now().isoformat()
+        }).execute()
+        print(f"[Supabase SOS] SOS request {case_id} saved successfully")
+        return True
+    except Exception as e:
+        print(f"[Supabase SOS] Error saving request {case_id}: {e}")
+        return True  # Don't break user flow
 
 
 def get_all_user_needs():
@@ -1479,91 +1406,3 @@ def web_research(query):
     ]
 
     return {"summary": dummy_summary, "links": "\n".join(dummy_links)}
-
-
-# from dashboard import dashboard_bp # Assuming dashboard is not provided or needs separate handling
-
-# LINE SDK
-
-
-
-def get_popular_questions(limit=5):
-    """Fetch the top N popular questions from Supabase."""
-    supabase = get_supabase_client()
-    if supabase:
-        try:
-            response = supabase.table("popular_questions").select("question_text").order("count", desc=True).limit(limit).execute()
-            return [item["question_text"] for item in response.data]
-        except Exception as e:
-            print(f"[Supabase] Error fetching popular questions: {e}")
-    return []
-
-
-# =============================================================================
-# 21. WEB RESEARCH (สำหรับตัวเลือก B - ค้นหาข้อมูลจากอินเทอร์เน็ต)
-# =============================================================================
-def web_research(query, max_results=5):
-    """
-    ค้นหาข้อมูลจากอินเทอร์เน็ตแบบง่าย (ใช้ DuckDuckGo Instant Answer API)
-    คืนค่า dict ที่มี 'summary' และ 'links'
-    """
-    try:
-        url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1&skip_disambig=1"
-        response = requests.get(url, timeout=10)
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-        data = response.json()
-        
-        results = []
-
-        # Abstract (สรุปหลักจาก Wikipedia หรือแหล่งที่มา)
-        if data.get("AbstractText"):
-            results.append({
-                "title": data.get("Heading", query),
-                "snippet": data.get("AbstractText"),
-                "url": data.get("AbstractURL", "")
-            })
-
-        # Related Topics
-        for topic in data.get("RelatedTopics", [])[:max_results]:
-            if isinstance(topic, dict) and topic.get("Text"):
-                results.append({
-                    "title": topic.get("Text", "")[:100],
-                    "snippet": topic.get("Text", ""),
-                    "url": topic.get("FirstURL", "")
-                })
-
-        if not results:
-            return {
-                "summary": f"ไม่พบข้อมูลที่เกี่ยวข้องกับ \"{query}\" ในขณะนี้",
-                "links": ""
-            }
-
-        # สร้างข้อความตอบกลับ
-        summary = f"🔍 ผลการค้นหา: {query}\n\n"
-        links_text = ""
-
-        for i, item in enumerate(results[:4], 1):
-            if item.get("url"):
-                links_text += f"{i}. {item['title']}\n   {item['url']}\n\n"
-
-        return {
-            "summary": summary,
-            "links": links_text.strip() if links_text else "ไม่พบลิงก์ที่เกี่ยวข้อง"
-        }
-
-    except requests.exceptions.RequestException as e:
-        print(f"[Web Research] HTTP Request Error: {e}")
-        return {
-            "summary": "ขออภัยครับ ขณะนี้ระบบค้นหาข้อมูลจากอินเทอร์เน็ตขัดข้องชั่วคราว (ข้อผิดพลาดในการเชื่อมต่อ)",
-            "links": ""
-        }
-    except Exception as e:
-        print(f"[Web Research] Unexpected Error: {e}")
-        return {
-            "summary": "ขออภัยครับ ขณะนี้ระบบค้นหาข้อมูลจากอินเทอร์เน็ตขัดข้องชั่วคราว",
-            "links": ""
-        }
-
-# =============================================================================
-# 16. WEB RESEARCH FUNCTION (Placeholder/Basic)
-# =============================================================================
