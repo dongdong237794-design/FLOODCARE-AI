@@ -4,7 +4,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, abort, jsonify
 import bot_config
-# from dashboard import dashboard_bp # Assuming dashboard is not provided or needs separate handling
+from dashboard import dashboard_bp
 
 # LINE SDK
 from linebot import LineBotApi, WebhookHandler
@@ -17,8 +17,8 @@ from linebot.models import (
 
 app = Flask(__name__)
 
-# Register Dashboard Blueprint (if dashboard.py exists and is functional)
-# app.register_blueprint(dashboard_bp)
+# Register Dashboard Blueprint
+app.register_blueprint(dashboard_bp)
 
 # =============================================================================
 # AUTO-SYNC: Check water data freshness before serving
@@ -29,46 +29,23 @@ WATER_DATA_MAX_AGE_MINUTES = 12
 def _ensure_water_data_fresh():
     """
     Check last sync time from Supabase sync_metadata.
-    If stale, missing, or table is empty -> trigger sync from ThaiWater.
+    If stale or missing -> trigger sync from ThaiWater.
     """
     needs_sync = True
-    
     try:
         last_sync = bot_config.get_last_sync_time()
-        
-        # ถ้าไม่มี last_sync record → ต้องซิงค์ทันที
-        if not last_sync:
-            print("[AutoSync] No last_sync record found → forcing sync")
-            needs_sync = True
-        else:
+        if last_sync:
             last_sync_time = datetime.datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
             now = datetime.datetime.now(datetime.timezone.utc)
             age_minutes = (now - last_sync_time).total_seconds() / 60
             print(f"[AutoSync] Water_Levels age: {age_minutes:.1f} min")
-            
             if age_minutes <= WATER_DATA_MAX_AGE_MINUTES:
                 needs_sync = False
-        
-        # เช็คเพิ่มเติม: ถ้าตารางว่าง → ซิงค์ทันที (แม้จะมี last_sync)
-        if not needs_sync:
-            supabase = bot_config.get_supabase_client()
-            if supabase:
-                try:
-                    response = supabase.table("water_levels").select("station_code", count="exact").limit(1).execute()
-                    record_count = response.count if hasattr(response, 'count') else len(response.data or [])
-                    if record_count < 5:  # ถ้ามีข้อมูลน้อยกว่า 5 แถว ให้ถือว่ายังว่าง
-                        print(f"[AutoSync] Table almost empty ({record_count} records) → forcing sync")
-                        needs_sync = True
-                except Exception as e:
-                    print(f"[AutoSync] Could not check table count: {e}")
-                    needs_sync = True
-                    
     except Exception as e:
         print(f"[AutoSync] Could not read last sync, will sync: {e}")
-        needs_sync = True
     
     if needs_sync:
-        print("[AutoSync] Water_Levels stale/empty/missing → triggering sync now...")
+        print("[AutoSync] Water_Levels stale or missing -> triggering sync now...")
         try:
             success = bot_config.sync_water_levels_to_supabase()
             print(f"[AutoSync] Sync result: {success}")
@@ -103,7 +80,7 @@ _trigger_background_sync()
 # =============================================================================
 # DEBUG ROUTES
 # =============================================================================
-@app.route("/debug/thaiwater", methods=["GET"])
+@app.route("/debug/thaiwater", methods=['GET'])
 def debug_thaiwater():
     result = {
         "v3_api_reachable": False,
@@ -117,9 +94,8 @@ def debug_thaiwater():
         if raw_data:
             result["v3_api_reachable"] = True
             result["v3_total_count"] = len(raw_data)
-            if len(raw_data) > 0:
-                result["v3_raw_sample"] = raw_data[0]
-                result["v3_parsed_sample"] = bot_config.parse_v3_station(raw_data[0])
+            result["v3_raw_sample"] = raw_data[0] if len(raw_data) > 0 else None
+            result["v3_parsed_sample"] = bot_config.parse_v3_station(raw_data[0]) if len(raw_data) > 0 else None
         else:
             result["error"] = "fetch_waterlevel_v3() returned None or empty list"
     except Exception as e:
@@ -128,7 +104,7 @@ def debug_thaiwater():
     return jsonify(result)
 
 
-@app.route("/debug/sync-status", methods=["GET"])
+@app.route("/debug/sync-status", methods=['GET'])
 def debug_sync_status():
     supabase = bot_config.get_supabase_client()
     last_sync = bot_config.get_last_sync_time()
@@ -149,7 +125,7 @@ def debug_sync_status():
     return jsonify(result)
 
 
-@app.route("/debug/force-sync", methods=["POST"])
+@app.route("/debug/force-sync", methods=['POST'])
 def debug_force_sync():
     try:
         success = bot_config.sync_water_levels_to_supabase()
@@ -161,97 +137,15 @@ def debug_force_sync():
 # =============================================================================
 # WEBHOOK ROUTE FOR LINE
 # =============================================================================
-@app.route("/callback", methods=["POST"])
+@app.route("/callback", methods=['POST'])
 def callback():
-    signature = request.headers.get("X-Line-Signature")
+    signature = request.headers.get('X-Line-Signature')
     body = request.get_data(as_text=True)
-
-    if bot_config.handler is None:
-        print("[LINE Webhook] LINE_CHANNEL_SECRET not configured, cannot handle webhook.")
-        abort(500) # Internal Server Error
-
     try:
         bot_config.handler.handle(body, signature)
     except InvalidSignatureError:
-        print("[LINE Webhook] Invalid signature. Aborting with 400.")
         abort(400)
-    except Exception as e:
-        print(f"[LINE Webhook] Error handling webhook: {e}")
-        abort(500)
-    return "OK"
-
-
-# =============================================================================
-# HELPER FUNCTIONS (Moved from original app.py to be local to app.py)
-# =============================================================================
-def _send_sos_summary(event, user_id):
-    """Create and send SOS summary (Step 4 - Confirm)"""
-    data = bot_config.USER_DATA[user_id]
-    group_types = data.get("group_types", ["ผู้ใหญ่ทั่วไป"])
-    urgency = data.get("urgency_level", "ต่ำ")
-    
-    priority_label, priority_code = bot_config.calculate_sos_priority(group_types, urgency)
-    bot_config.USER_DATA[user_id]["priority"] = priority_code
-    bot_config.USER_DATA[user_id]["priority_label"] = priority_label
-    
-    lat = data.get("latitude", "0")
-    lon = data.get("longitude", "0")
-    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    
-    summary_text = (
-        "📋 สรุปข้อมูลแจ้งเหตุ\n\n"
-        f"📍 พิกัด: {maps_link}\n"
-        f"👥 กลุ่ม: {', '.join(group_types)}\n"
-        f"🌊 สถานการณ์: {urgency}\n"
-        f"📝 รายละเอียด: {data.get('note', '-')}\n"
-        f"📊 ระดับความเร่งด่วน: {priority_label}\n\n"
-        f"ยืนยันการส่งข้อมูลแจ้งกู้ภัยหรือไม่?"
-    )
-    
-    quick_reply = QuickReply(
-        items=[
-            QuickReplyButton(action=MessageAction(label="✅ ยืนยันแจ้งกู้ภัย", text="ยืนยันแจ้งกู้ภัย")),
-            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก/แก้ไข", text="ยกเลิกและแก้ไขใหม่"))
-        ]
-    )
-    if bot_config.line_bot_api:
-        try:
-            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
-        except Exception as e:
-            print(f"[LINE] Failed to send SOS summary: {e}")
-    else:
-        print("[LINE] line_bot_api not initialized, cannot send SOS summary.")
-
-
-def _send_needs_summary(event, user_id):
-    """Create and send needs summary"""
-    data = bot_config.USER_DATA[user_id]
-    lat = data.get("need_latitude", "0")
-    lon = data.get("need_longitude", "0")
-    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    
-    summary_text = (
-        "✅ สรุปรายการความต้องการ:\n\n"
-        f"📍 พิกัด: {maps_link}\n"
-        f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
-        f"📝 รายละเอียด: {data.get('need_details', '-')}\n"
-        f"⏳ ความเร่งด่วน: {data.get('need_urgency', '-')}\n\n"
-        f"ยืนยันการส่งข้อมูลไปยังศูนย์อาสาสมัครหรือไม่?"
-    )
-    
-    quick_reply = QuickReply(
-        items=[
-            QuickReplyButton(action=MessageAction(label="✅ ยืนยันการแจ้ง", text="ยืนยันการแจ้ง")),
-            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก/แก้ไข", text="ยกเลิก"))
-        ]
-    )
-    if bot_config.line_bot_api:
-        try:
-            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
-        except Exception as e:
-            print(f"[LINE] Failed to send needs summary: {e}")
-    else:
-        print("[LINE] line_bot_api not initialized, cannot send needs summary.")
+    return 'OK'
 
 
 # =============================================================================
@@ -271,40 +165,12 @@ def handle_text_message(event):
     if user_text == "ยกเลิก":
         bot_config.USER_STATES.pop(user_id, None)
         bot_config.USER_DATA.pop(user_id, None)
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text="❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ คุณสามารถกดใช้งานเมนูหลักใหม่ได้ทันทีครับ")
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send cancel message: {e}")
-        return
-
-    # ===========================
-    # WEATHER KEYWORD (สภาพอากาศ)
-    # ===========================
-    weather_keywords = ["สภาพอากาศ", "อากาศ", "พยากรณ์อากาศ", "weather", "ฝนตก", "ฝนจะตกไหม"]
-    if any(kw in user_text for kw in weather_keywords):
-        bot_config.USER_STATES[user_id] = "waiting_weather_location"
-        location_quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเพื่อดูสภาพอากาศ"))
-            ]
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ คุณสามารถกดใช้งานเมนูหลักใหม่ได้ทันทีครับ")
         )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="🌦️ คุณต้องการดูสภาพอากาศ โปรดกดแชร์พิกัด 'Location' ด้านล่างครับ",
-                        quick_reply=location_quick_reply
-                    )
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send weather keyword response: {e}")
         return
-
+    
     # ===========================
     # SOS LOCATION STATE
     # ===========================
@@ -314,17 +180,13 @@ def handle_text_message(event):
                 QuickReplyButton(action=LocationAction(label="📍 ส่งพิกัดตำแหน่งแจ้งเหตุ"))
             ]
         )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="🚨 ระบบกำลังรอพิกัดของคุณครับ โปรดกดปุ่ม \'📍 ส่งพิกัดตำแหน่งแจ้งเหตุ\' ด้านล่าง หรือพิมพ์ \'ยกเลิก\' เพื่อเริ่มต้นใหม่ครับ",
-                        quick_reply=location_quick_reply
-                    )
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send SOS location prompt: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="🚨 ระบบกำลังรอพิกัดของคุณครับ โปรดกดปุ่ม '📍 ส่งพิกัดตำแหน่งแจ้งเหตุ' ด้านล่าง หรือพิมพ์ 'ยกเลิก' เพื่อเริ่มต้นใหม่ครับ",
+                quick_reply=location_quick_reply
+            )
+        )
         return
     
     # ===========================
@@ -336,17 +198,13 @@ def handle_text_message(event):
                 QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเพื่อรับสิ่งของ"))
             ]
         )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="📌 ระบบกำลังรอพิกัดของคุณครับ โปรดกดปุ่ม \'📍 แชร์พิกัดเพื่อรับสิ่งของ\' ด้านล่าง หรือพิมพ์ \'ยกเลิก\' เพื่อยกเลิกครับ",
-                        quick_reply=location_quick_reply
-                    )
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send needs location prompt: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="📌 ระบบกำลังรอพิกัดของคุณครับ โปรดกดปุ่ม '📍 แชร์พิกัดเพื่อรับสิ่งของ' ด้านล่าง หรือพิมพ์ 'ยกเลิก' เพื่อยกเลิกครับ",
+                quick_reply=location_quick_reply
+            )
+        )
         return
     
     # ===========================
@@ -357,14 +215,10 @@ def handle_text_message(event):
             bot_config.USER_DATA[user_id] = {}
         bot_config.USER_DATA[user_id]["temp_first_name"] = user_text
         bot_config.USER_STATES[user_id] = "register_last_name"
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ \'นามสกุล\' ของคุณครับ")
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send register last name prompt: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ 'นามสกุล' ของคุณครับ")
+        )
         return
     
     elif state == "register_last_name":
@@ -372,14 +226,10 @@ def handle_text_message(event):
             bot_config.USER_DATA[user_id] = {}
         bot_config.USER_DATA[user_id]["temp_last_name"] = user_text
         bot_config.USER_STATES[user_id] = "register_phone"
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ \'เบอร์โทรศัพท์\' 9-10 หลักครับ (เช่น 0812345678)")
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send register phone prompt: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ 'เบอร์โทรศัพท์' 9-10 หลักครับ (เช่น 0812345678)")
+        )
         return
     
     elif state == "register_phone":
@@ -387,14 +237,10 @@ def handle_text_message(event):
             bot_config.USER_DATA[user_id] = {}
         clean_phone = bot_config.extract_number(user_text)
         if len(clean_phone) < 9 or len(clean_phone) > 10:
-            if bot_config.line_bot_api:
-                try:
-                    bot_config.line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text="⚠️ เบอร์โทรไม่ถูกต้องครับ! โปรดพิมพ์ตัวเลข 9-10 หลักใหม่อีกครับ")
-                    )
-                except Exception as e:
-                    print(f"[LINE] Failed to send invalid phone message: {e}")
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="⚠️ เบอร์โทรไม่ถูกต้องครับ! โปรดพิมพ์ตัวเลข 9-10 หลักใหม่อีกครับ")
+            )
             return
         
         first_name = bot_config.USER_DATA[user_id].get("temp_first_name", "ผู้แจ้ง")
@@ -416,11 +262,7 @@ def handle_text_message(event):
                 f"🎉 ลงทะเบียนสำเร็จ (ระบบชั่วคราว) คุณ {first_name} {last_name}!\n"
                 f"⚠️ บันทึกลงฐานข้อมูลไม่สำเร็จ แต่ใช้งานได้ตามปกติครับ"
             )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            except Exception as e:
-                print(f"[LINE] Failed to send registration result: {e}")
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
     
     # ===========================
@@ -458,162 +300,165 @@ def handle_text_message(event):
                         QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
                     ]
                 )
-                selected_groups = ", ".join(bot_config.USER_DATA[user_id]["group_types"])
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(
-                                text=f"👥 กลุ่มที่เลือก: {selected_groups}\n\nเลือกเพิ่มหรือกด \'เสร็จสิ้น\' เพื่อไปต่อครับ",
-                                quick_reply=quick_reply
-                            )
-                        )
-                    except Exception as e:
-                        print(f"[LINE] Failed to send SOS group selection: {e}")
+                selected_text = ", ".join(bot_config.USER_DATA[user_id]["group_types"]) if bot_config.USER_DATA[user_id]["group_types"] else "ยังไม่ได้เลือก"
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text=f"👥 กลุ่มที่เลือก: {selected_text}\n\nเลือกเพิ่มหรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
+                        quick_reply=quick_reply
+                    )
+                )
                 return
-            elif user_text == "เสร็จสิ้น":
+            elif user_text in ["เสร็จสิ้น", "➡️ เสร็จสิ้น"]:
                 if not bot_config.USER_DATA[user_id].get("group_types"):
-                    if bot_config.line_bot_api:
-                        try:
-                            bot_config.line_bot_api.reply_message(
-                                event.reply_token,
-                                TextSendMessage(text="⚠️ กรุณาเลือกกลุ่มผู้ประสบภัยอย่างน้อย 1 กลุ่มครับ")
-                            )
-                        except Exception as e:
-                            print(f"[LINE] Failed to send SOS group validation: {e}")
-                    return
+                    bot_config.USER_DATA[user_id]["group_types"] = ["ผู้ใหญ่ทั่วไป"]
                 bot_config.USER_STATES[user_id] = "sos_step3"
                 quick_reply = QuickReply(
                     items=[
-                        QuickReplyButton(action=MessageAction(label="🔴 วิกฤต (อันตรายถึงชีวิต)", text="🔴 วิกฤต (อันตรายถึงชีวิต)")),
-                        QuickReplyButton(action=MessageAction(label="🟡 สูง (ต้องการความช่วยเหลือด่วน)", text="🟡 สูง (ต้องการความช่วยเหลือด่วน)")),
-                        QuickReplyButton(action=MessageAction(label="🟢 ปานกลาง (รอได้)", text="🟢 ปานกลาง (รอได้)"))
+                        QuickReplyButton(action=MessageAction(label="🔴 วิกฤต (มิดหัว/ติดหลังคา)", text="🔴 วิกฤต (มิดหัว/ติดบนหลังคา)")),
+                        QuickReplyButton(action=MessageAction(label="🟠 สูง (ระดับอก/เกิน 1 เมตร)", text="🟠 สูง (ระดับอก/เกิน 1 เมตร)")),
+                        QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง (ระดับเอว)", text="🟡 ปานกลาง (ระดับเอว)")),
+                        QuickReplyButton(action=MessageAction(label="🟢 ต่ำ (ระดับหน้าแข้ง)", text="🟢 ต่ำ (ระดับหน้าแข้ง)")),
+                        QuickReplyButton(action=MessageAction(label="💊 ขาดแคลนยา/อาหาร", text="💊 ขาดแคลนยา/อาหารหนัก"))
                     ]
                 )
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(
-                                text="🌊 สถานการณ์น้ำเป็นอย่างไรบ้างครับ?\n\nโปรดเลือก:",
-                                quick_reply=quick_reply
-                            )
-                        )
-                    except Exception as e:
-                        print(f"[LINE] Failed to send SOS urgency prompt: {e}")
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text="🌊 ระดับน้ำและสถานการณ์ปัจจุบัน\n\nโปรดเลือกระดับความรุนแรง:",
+                        quick_reply=quick_reply
+                    )
+                )
                 return
             else:
-                # Handle unexpected text input during group selection
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(text="⚠️ กรุณาเลือกจากตัวเลือกด้านล่าง หรือพิมพ์ \'เสร็จสิ้น\' ครับ")
-                        )
-                    except Exception as e:
-                        print(f"[LINE] Failed to send SOS invalid group input: {e}")
+                if user_text:
+                    bot_config.USER_DATA[user_id]["group_types"].append(user_text)
+                quick_reply = QuickReply(
+                    items=[
+                        QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา")),
+                        QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วย/พิการ", text="🚑 มีผู้ป่วยติดเตียง/พิการ")),
+                        QuickReplyButton(action=MessageAction(label="🩸 ผู้บาดเจ็บ", text="🩸 มีผู้บาดเจ็บฉุกเฉิน")),
+                        QuickReplyButton(action=MessageAction(label="👨‍👩‍👧 ผู้ใหญ่", text="👨‍👩‍👧 ผู้ใหญ่ทั่วไป")),
+                        QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง")),
+                        QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
+                    ]
+                )
+                selected_text = ", ".join(bot_config.USER_DATA[user_id]["group_types"])
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text=f"👥 กลุ่มที่เลือก: {selected_text}\n\nเลือกเพิ่มหรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
+                        quick_reply=quick_reply
+                    )
+                )
                 return
         
-        # ---- Step 3: Urgency Level ----
+        # ---- Step 3: Urgency level ----
         elif state == "sos_step3":
-            bot_config.USER_DATA[user_id]["urgency_level"] = user_text
-            bot_config.USER_STATES[user_id] = "sos_step4"
-            if bot_config.line_bot_api:
-                try:
-                    bot_config.line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text="📝 โปรดระบุรายละเอียดเพิ่มเติม (เช่น จำนวนคน, อาการบาดเจ็บ, สิ่งที่ต้องการ)")
-                    )
-                except Exception as e:
-                    print(f"[LINE] Failed to send SOS details prompt: {e}")
-            return
-        
-        # ---- Step 4: Additional Note ----
-        elif state == "sos_step4":
-            bot_config.USER_DATA[user_id]["note"] = user_text
+            urgency_map = {
+                "🔴 วิกฤต (มิดหัว/ติดบนหลังคา)": "วิกฤต",
+                "🟠 สูง (ระดับอก/เกิน 1 เมตร)": "สูง",
+                "🟡 ปานกลาง (ระดับเอว)": "ปานกลาง",
+                "🟢 ต่ำ (ระดับหน้าแข้ง)": "ต่ำ",
+                "💊 ขาดแคลนยา/อาหารหนัก": "ขาดแคลนยา"
+            }
+            bot_config.USER_DATA[user_id]["urgency_level"] = urgency_map.get(user_text, user_text)
+            # SKIP Step 4 (photo) - go directly to confirm
+            bot_config.USER_DATA[user_id]["photo_url"] = "-"
             bot_config.USER_STATES[user_id] = "sos_confirm"
             _send_sos_summary(event, user_id)
             return
         
-        # ---- Step 5: Confirm ----
+        # ---- Step 4: Confirm ----
         elif state == "sos_confirm":
-            if "ยืนยันแจ้งกู้ภัย" in user_text:
+            if "ยืนยัน" in user_text:
                 data = bot_config.USER_DATA.pop(user_id, {})
                 bot_config.USER_STATES.pop(user_id, None)
                 
                 case_id = bot_config.generate_case_id()
+                group_types = data.get("group_types", ["ผู้ใหญ่ทั่วไป"])
+                urgency = data.get("urgency_level", "ต่ำ")
+                priority_code = data.get("priority", "NORMAL")
                 
                 # Save to Supabase
-                success = bot_config.save_sos_request(
-                    case_id,
-                    user_id,
-                    data.get("first_name", "-"),
-                    data.get("last_name", "-"),
-                    data.get("phone", "-"),
-                    data.get("latitude", "0"),
-                    data.get("longitude", "0"),
-                    ", ".join(data.get("group_types", [])),
-                    data.get("urgency_level", "-"),
-                    data.get("note", "-"),
-                    data.get("priority", "NORMAL"),
-                    data.get("priority_label", "🟢 NORMAL (สถานการณ์ปกติ)")
-                )
+                success = False
+                supabase = bot_config.get_supabase_client()
+                if supabase:
+                    try:
+                        supabase.table("sos_requests").insert({
+                            "request_id": case_id,
+                            "user_id": str(user_id),
+                            "timestamp": timestamp,
+                            "latitude": float(data.get("latitude", 0)),
+                            "longitude": float(data.get("longitude", 0)),
+                            "group_count": len(group_types),
+                            "group_types": ", ".join(group_types),
+                            "urgency_level": urgency,
+                            "photo_url": "-",
+                            "water_level": "-",
+                            "note": data.get("note", "-"),
+                            "priority": priority_code,
+                            "status": "OPEN",
+                            "responder_name": "-",
+                            "responder_notes": "-",
+                            "accepted_at": None,
+                            "completed_at": None
+                        }).execute()
+                        print("[Supabase] SOS request saved successfully")
+                        success = True
+                    except Exception as e:
+                        print(f"[Supabase] Failed to save SOS: {e}")
                 
                 if success:
                     reply_text = (
-                        f"✅ ได้รับแจ้งเหตุฉุกเฉินแล้วครับ!\n\n"
-                        f"รหัสแจ้งเหตุ: {case_id}\n"
-                        f"ระดับความเร่งด่วน: {data.get('priority_label', '-')}\n\n"
-                        f"ทีมกู้ภัยกำลังดำเนินการ โปรดรอการติดต่อกลับครับ"
+                        f"🚀 ส่งข้อมูลสำเร็จ! เลขเคส: {case_id}\n"
+                        f"ทีมกู้ภัยกำลังจัดลำดับความสำคัญ\n\n"
+                        f"🛡️ ระหว่างรอ:\n"
+                        f"1. ตัดสะพานไฟในบ้านทันที\n"
+                        f"2. พยายามอยู่บนที่สูง\n"
+                        f"3. เตรียมไฟฉายหรือนกหวีด\n"
+                        f"4. ประหยัดแบตเตอรี่มือถือ\n"
+                        f"5. หากอันตรายถึงชีวิต โทร 1784"
                     )
                 else:
                     reply_text = (
-                        f"✅ ได้รับแจ้งเหตุฉุกเฉินแล้ว (ระบบชั่วคราว)!\n\n"
-                        f"รหัสแจ้งเหตุ: {case_id}\n"
-                        f"⚠️ ฐานข้อมูลขัดข้อง แต่ข้อมูลถูกเก็บบนเซิร์ฟเวอร์แล้ว\n\n"
-                        f"ทีมกู้ภัยกำลังดำเนินการ โปรดรอการติดต่อกลับครับ"
+                        f"⚠️ บันทึกข้อมูลไม่สำเร็จ\n"
+                        f"เลขเคส: {case_id}\n"
+                        f"กรุณาโทร 1784 หรือ 1669 โดยตรงครับ"
                     )
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-                    except Exception as e:
-                        print(f"[LINE] Failed to send SOS confirmation: {e}")
+                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
                 return
             else:
                 bot_config.USER_STATES.pop(user_id, None)
                 bot_config.USER_DATA.pop(user_id, None)
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกรายการแจ้งเหตุฉุกเฉินเรียบร้อยครับ"))
-                    except Exception as e:
-                        print(f"[LINE] Failed to send SOS cancellation: {e}")
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="❌ ยกเลิกเคสเรียบร้อยครับ กดปุ่ม SOS ใหม่ได้ทันทีครับ")
+                )
                 return
     
     # ===========================
-    # USER NEEDS FLOW
+    # USER NEEDS FLOW (5 Steps)
     # ===========================
     if state and state.startswith("needs_"):
         if user_id not in bot_config.USER_DATA:
             bot_config.USER_DATA[user_id] = {}
         
-        # ---- Step 2: Select categories ----
+        # ---- Step 2: Category selection ----
         if state == "needs_step2":
-            if "need_categories" not in bot_config.USER_DATA[user_id]:
-                bot_config.USER_DATA[user_id]["need_categories"] = []
-            
-            valid_options = {
+            categories = {
                 "🍲 อาหาร/น้ำดื่ม": "อาหาร/น้ำดื่ม",
-                "💊 ยา/เวชภัณฑ์": "ยารักษาโรค/เวชภัณฑ์",
-                "👶 ของใช้เด็ก": "ของใช้เด็กอ่อน",
+                "💊 ยารักษาโรค/เวชภัณฑ์": "ยารักษาโรค/เวชภัณฑ์",
+                "👶 ของใช้เด็กอ่อน": "ของใช้เด็กอ่อน",
                 "🧼 ของใช้ส่วนตัว": "ของใช้ส่วนตัว",
-                "🔦 ส่องสว่าง": "อุปกรณ์ส่องสว่าง",
-                "📝 อื่นๆ": "อื่นๆ (ระบุเอง)"
+                "🔦 อุปกรณ์ส่องสว่าง": "อุปกรณ์ส่องสว่าง",
+                "📝 อื่นๆ (ระบุเอง)": "อื่นๆ"
             }
             
-            if user_text in valid_options:
-                selected = valid_options[user_text]
-                if selected not in bot_config.USER_DATA[user_id]["need_categories"]:
-                    bot_config.USER_DATA[user_id]["need_categories"].append(selected)
+            if user_text in categories:
+                if "need_categories" not in bot_config.USER_DATA[user_id]:
+                    bot_config.USER_DATA[user_id]["need_categories"] = []
+                bot_config.USER_DATA[user_id]["need_categories"].append(categories[user_text])
                 
                 quick_reply = QuickReply(
                     items=[
@@ -626,58 +471,41 @@ def handle_text_message(event):
                         QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
                     ]
                 )
-                selected_categories = ", ".join(bot_config.USER_DATA[user_id]["need_categories"])
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(
-                                text=f"📦 หมวดหมู่ที่เลือก: {selected_categories}\n\nเลือกเพิ่มหรือกด \'เสร็จสิ้น\' เพื่อไปต่อครับ",
-                                quick_reply=quick_reply
-                            )
-                        )
-                    except Exception as e:
-                        print(f"[LINE] Failed to send needs category selection: {e}")
+                selected = ", ".join(bot_config.USER_DATA[user_id]["need_categories"])
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text=f"📦 หมวดหมู่ที่เลือก: {selected}\n\nเลือกเพิ่มหรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
+                        quick_reply=quick_reply
+                    )
+                )
                 return
             elif user_text == "เสร็จสิ้น":
                 if not bot_config.USER_DATA[user_id].get("need_categories"):
-                    if bot_config.line_bot_api:
-                        try:
-                            bot_config.line_bot_api.reply_message(
-                                event.reply_token,
-                                TextSendMessage(text="⚠️ กรุณาเลือกหมวดหมู่อย่างน้อย 1 รายการครับ")
-                            )
-                        except Exception as e:
-                            print(f"[LINE] Failed to send needs category validation: {e}")
+                    bot_config.line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="⚠️ กรุณาเลือกหมวดหมู่อย่างน้อย 1 รายการครับ")
+                    )
                     return
                 bot_config.USER_STATES[user_id] = "needs_step3"
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(
-                                text="📝 โปรดระบุรายละเอียดสั้นๆ\n\nเช่น จำนวนที่ต้องการ หรือยี่ห้อเฉพาะ\n(เช่น \'ขอน้ำดื่ม 2 แพ็ค และผ้าอนามัยครับ\')"
-                            )
-                        )
-                    except Exception as e:
-                        print(f"[LINE] Failed to send needs details prompt: {e}")
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text="📝 โปรดระบุรายละเอียดสั้นๆ\n\nเช่น จำนวนที่ต้องการ หรือยี่ห้อเฉพาะ\n(เช่น 'ขอน้ำดื่ม 2 แพ็ค และผ้าอนามัยครับ')"
+                    )
+                )
                 return
             else:
-                # If user types something else, assume it's an "other" category
                 if "need_categories" not in bot_config.USER_DATA[user_id]:
                     bot_config.USER_DATA[user_id]["need_categories"] = []
                 bot_config.USER_DATA[user_id]["need_categories"].append(f"อื่นๆ: {user_text}")
                 bot_config.USER_STATES[user_id] = "needs_step3"
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(
-                                text="📝 โปรดระบุรายละเอียดสั้นๆ\n\nเช่น จำนวนที่ต้องการ หรือยี่ห้อเฉพาะ\n(เช่น \'ขอน้ำดื่ม 2 แพ็ค และผ้าอนามัยครับ\')"
-                            )
-                        )
-                    except Exception as e:
-                        print(f"[LINE] Failed to send needs details prompt after other category: {e}")
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text="📝 โปรดระบุรายละเอียดสั้นๆ\n\nเช่น จำนวนที่ต้องการ หรือยี่ห้อเฉพาะ\n(เช่น 'ขอน้ำดื่ม 2 แพ็ค และผ้าอนามัยครับ')"
+                    )
+                )
                 return
         
         # ---- Step 3: Details ----
@@ -691,17 +519,13 @@ def handle_text_message(event):
                     QuickReplyButton(action=MessageAction(label="🟢 ไม่ด่วน", text="🟢 ไม่ด่วน (แจ้งไว้ล่วงหน้า)"))
                 ]
             )
-            if bot_config.line_bot_api:
-                try:
-                    bot_config.line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(
-                            text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:",
-                            quick_reply=quick_reply
-                        )
-                    )
-                except Exception as e:
-                    print(f"[LINE] Failed to send needs urgency prompt: {e}")
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:",
+                    quick_reply=quick_reply
+                )
+            )
             return
         
         # ---- Step 4: Urgency ----
@@ -713,7 +537,7 @@ def handle_text_message(event):
         
         # ---- Step 5: Confirm ----
         elif state == "needs_confirm":
-            if "ยืนยันการแจ้ง" in user_text:
+            if "ยืนยัน" in user_text:
                 data = bot_config.USER_DATA.pop(user_id, {})
                 bot_config.USER_STATES.pop(user_id, None)
                 
@@ -739,20 +563,12 @@ def handle_text_message(event):
                         f"⚠️ ฐานข้อมูลขัดข้อง แต่ข้อมูลถูกเก็บบนเซิร์ฟเวอร์แล้ว\n\n"
                         f"ทีมอาสาสมัครจะดำเนินการจัดส่งให้ครับ"
                     )
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-                    except Exception as e:
-                        print(f"[LINE] Failed to send needs confirmation: {e}")
+                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
                 return
             else:
                 bot_config.USER_STATES.pop(user_id, None)
                 bot_config.USER_DATA.pop(user_id, None)
-                if bot_config.line_bot_api:
-                    try:
-                        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกรายการเรียบร้อยครับ"))
-                    except Exception as e:
-                        print(f"[LINE] Failed to send needs cancellation: {e}")
+                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ ยกเลิกรายการเรียบร้อยครับ"))
                 return
     
     # ===========================
@@ -761,11 +577,7 @@ def handle_text_message(event):
     if user_text == "เบอร์โทรศัพท์ฉุกเฉิน":
         contacts_text = bot_config.get_emergency_contacts()
         reply_text = f"📞 เบอร์โทรฉุกเฉิน:\n\n{contacts_text}"
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            except Exception as e:
-                print(f"[LINE] Failed to send emergency contacts: {e}")
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
     
     elif user_text == "ศูนย์พักพิง":
         bot_config.USER_STATES[user_id] = "waiting_shelter_location"
@@ -774,17 +586,13 @@ def handle_text_message(event):
                 QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดหาศูนย์พักพิง"))
             ]
         )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="📍 โปรดกดแชร์พิกัด \'Location\' ด้านล่าง หรือพิมพ์ชื่ออำเภอ/จังหวัดครับ",
-                        quick_reply=location_quick_reply
-                    )
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send shelter prompt: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="📍 โปรดกดแชร์พิกัด 'Location' ด้านล่าง หรือพิมพ์ชื่ออำเภอ/จังหวัดครับ",
+                quick_reply=location_quick_reply
+            )
+        )
     
     elif user_text == "ตรวจสอบระดับน้ำ":
         bot_config.USER_STATES[user_id] = "waiting_water_location"
@@ -793,19 +601,16 @@ def handle_text_message(event):
                 QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเช็กระดับน้ำ"))
             ]
         )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="🌊 โปรดกดแชร์พิกัด \'Location\' เพื่อตรวจสอบระดับน้ำจากสถานี ThaiWater ใกล้คุณครับ",
-                        quick_reply=location_quick_reply
-                    )
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send water level prompt: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="🌊 โปรดกดแชร์พิกัด 'Location' เพื่อตรวจสอบระดับน้ำจากสถานี ThaiWater ใกล้คุณครับ",
+                quick_reply=location_quick_reply
+            )
+        )
     
     elif user_text == "SOS ขอความช่วยเหลือ":
+        # Check from Supabase
         is_reg, first_name, last_name, phone = bot_config.is_user_registered(user_id)
         
         if not is_reg:
@@ -814,13 +619,9 @@ def handle_text_message(event):
             reply_text = (
                 "📝 คุณเข้าใช้งานเป็นครั้งแรก\n\n"
                 "เพื่อประสานงานกู้ภัยได้อย่างมีประสิทธิภาพ\n"
-                "โปรดพิมพ์ \'ชื่อจริง\' ของคุณครับ (เช่น สมชาย)"
+                "โปรดพิมพ์ 'ชื่อจริง' ของคุณครับ (เช่น สมชาย)"
             )
-            if bot_config.line_bot_api:
-                try:
-                    bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-                except Exception as e:
-                    print(f"[LINE] Failed to send registration initiation: {e}")
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         else:
             bot_config.USER_STATES[user_id] = "sos_location"
             bot_config.USER_DATA[user_id] = {
@@ -838,14 +639,10 @@ def handle_text_message(event):
                 f"สวัสดีครับคุณ {first_name}!\n"
                 f"โปรดกดปุ่มด้านล่างเพื่อส่งพิกัดให้ทีมกู้ภัยครับ"
             )
-            if bot_config.line_bot_api:
-                try:
-                    bot_config.line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text=reply_text, quick_reply=location_quick_reply)
-                    )
-                except Exception as e:
-                    print(f"[LINE] Failed to send SOS initiation: {e}")
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=reply_text, quick_reply=location_quick_reply)
+            )
     
     elif user_text == "แจ้งความต้องการเพิ่มเติม" or user_text == "ความต้องการ":
         bot_config.USER_STATES[user_id] = "needs_location"
@@ -854,38 +651,17 @@ def handle_text_message(event):
                 QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเพื่อรับสิ่งของ"))
             ]
         )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="📌 แจ้งความต้องการสิ่งของบรรเทาทุกข์\n\nโปรดกดปุ่มด้านล่างเพื่อแชร์พิกัดครับ",
-                        quick_reply=location_quick_reply
-                    )
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send needs initiation: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="📌 แจ้งความต้องการสิ่งของบรรเทาทุกข์\n\nโปรดกดปุ่มด้านล่างเพื่อแชร์พิกัดครับ",
+                quick_reply=location_quick_reply
+            )
+        )
     
     elif user_text == "ถาม AI เรื่องน้ำท่วม" or "ถาม-ตอบด้วย AI" in user_text or "ถาม–ตอบด้วย AI" in user_text:
-        popular_questions = bot_config.get_popular_questions(limit=5)
-        quick_reply_items = []
-        if popular_questions:
-            for q in popular_questions:
-                quick_reply_items.append(QuickReplyButton(action=MessageAction(label=q, text=q)))
-            reply_text = "🤖 พิมพ์คำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมได้ทันทีครับ หรือเลือกจากคำถามยอดนิยมด้านล่างครับ"
-            quick_reply = QuickReply(items=quick_reply_items)
-        else:
-            reply_text = "🤖 พิมพ์คำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมได้ทันทีครับ"
-            quick_reply = None
-
-        if bot_config.line_bot_api:
-            try:
-                if quick_reply_items:
-                    bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text, quick_reply=quick_reply))
-                else:
-                    bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            except Exception as e:
-                print(f"[LINE] Failed to send AI chat prompt with popular questions: {e}")
+        reply_text = "🤖 พิมพ์คำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมได้ทันทีครับ"
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
     
     # ===========================
     # GREETING DETECTION (Fast Path)
@@ -894,60 +670,37 @@ def handle_text_message(event):
         bot_config.handle_greeting_logic(event)
     
     # ===========================
-    # AI CHAT (With Typing Indicator and Automatic Web Research)
+    # AI CHAT (With Typing Indicator)
     # ===========================
     else:
         # Show typing indicator FIRST (before any processing)
+        # This gives instant visual feedback to user
         try:
             bot_config.show_loading_animation(user_id, loading_seconds=15)
         except Exception as e:
             print(f"[TypingIndicator] Skipped: {e}")
         
-        final_answer = ""
-        if bot_config.gemini_model:
-            try:
-                # Perform web research automatically
-                research_result = bot_config.web_research(user_text)
-                
-                research_prompt = f"""
-คำถามของผู้ใช้: {user_text}
-
-ผลการค้นหาจากอินเทอร์เน็ต:
-{research_result.get("links", "")}
-
-กรุณาทำสิ่งต่อไปนี้:
-- สรุปข้อมูลที่สำคัญและน่าเชื่อถือจากแหล่งที่มา
-- ระบุแหล่งที่มาของข้อมูลให้ชัดเจน (ชื่อเว็บ + ลิงก์)
-- ตอบเป็นภาษาไทย กระชับ เป็นขั้นตอน
-- ใช้โทนใจดีแต่เด็ดขาด เหมือน FLOODCARE AI
-"""
-                gemini_response = bot_config.gemini_model.generate_content(research_prompt)
-                final_answer = bot_config.clean_text_for_line(gemini_response.text.strip())
-            except Exception as e:
-                print(f"[AI Chat/Research Gemini] Error: {e}")
-                final_answer = "⚠️ AI ขัดข้องชั่วคราว ไม่สามารถค้นหาข้อมูลได้ หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
-                if research_result.get("summary"):
-                    final_answer += "\n\n" + research_result.get("summary", "")
-                if research_result.get("links"):
-                    final_answer += "\n\n" + research_result.get("links", "")
-        else:
-            final_answer = "⚠️ AI ไม่พร้อมใช้งาน หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
-        
-        # Log to Supabase (fire-and-forget, don\'t wait)
+        # Generate AI response
+        ai_response = ""
         try:
-            bot_config.log_ai_chat(user_id, user_text, final_answer, timestamp)
-            bot_config.log_user_question(user_text) # Log user question for popular questions
+            # Use shorter timeout for faster response
+            response = bot_config.gemini_model.generate_content(
+                user_text,
+                generation_config={"max_output_tokens": 500}  # Limit output for speed
+            )
+            ai_response = bot_config.clean_text_for_line(response.text.strip())
+        except Exception as e:
+            print(f"Gemini Error: {e}")
+            ai_response = "⚠️ AI ขัดข้องชั่วคราว หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
+        
+        # Log to Supabase (fire-and-forget, don't wait)
+        try:
+            bot_config.log_ai_chat(user_id, user_text, ai_response, timestamp)
         except Exception as e:
             print(f"[AI Log] Error: {e}")
         
         # Send reply (this will dismiss the typing indicator automatically)
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=final_answer))
-            except Exception as e:
-                print(f"[LINE] Failed to send AI response: {e}")
-        else:
-            print("[LINE] line_bot_api not initialized, cannot send AI response.")
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
 
 # =============================================================================
@@ -990,11 +743,7 @@ def handle_location_message(event):
         
         if not shelter_list:
             reply_text = "⚠️ ไม่พบข้อมูลศูนย์พักพิง โปรดโทร ปภ. 1784 ทันทีครับ"
-            if bot_config.line_bot_api:
-                try:
-                    bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-                except Exception as e:
-                    print(f"[LINE] Failed to send no shelter data message: {e}")
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             return
         
         nearest_shelters = []
@@ -1026,34 +775,8 @@ def handle_location_message(event):
                 )
             reply_text += "⚠️ โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน"
         
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            except Exception as e:
-                print(f"[LINE] Failed to send shelter list: {e}")
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
     
-    # ===========================
-    # Weather only (สภาพอากาศ)
-    # ===========================
-    elif state == "waiting_weather_location":
-        try:
-            weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
-            reply_text = (
-                "🌦️ สภาพอากาศปัจจุบัน\n\n"
-                f"{weather_info}\n\n"
-                "ข้อมูลจากกรมอุตุนิยมวิทยา (TMD)"
-            )
-            if bot_config.line_bot_api:
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        except Exception as e:
-            print(f"[Weather] Error: {e}")
-            if bot_config.line_bot_api:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token, 
-                    TextSendMessage(text="⚠️ ไม่สามารถดึงข้อมูลสภาพอากาศได้ในขณะนี้ โปรดลองใหม่ครับ")
-                )
-        return
-
     # ===========================
     # Check water levels
     # ===========================
@@ -1075,8 +798,8 @@ def handle_location_message(event):
                         "latitude": s.get("latitude"),
                         "longitude": s.get("longitude"),
                         "distance_km": s.get("distance_km", 0),
-                        "water_level": s.get("water_level"), # Directly use float from Supabase
-                        "bank_level": s.get("bank_level"), # Directly use float from Supabase
+                        "water_level": {"value": s.get("water_level"), "uom": "m"},
+                        "bank_level": s.get("bank_level"),
                         "situation": s.get("situation", "ปกติ"),
                         "trend": s.get("trend", "คงที่"),
                         "measure_time": s.get("measure_time", "-"),
@@ -1097,8 +820,6 @@ def handle_location_message(event):
                 print(f"[WaterLevel] API fallback failed: {e}")
         
         # Parallel fetch: weather + flood forecast
-        weather_info = ""
-        water_flow = {"flow": "ไม่สามารถตรวจสอบได้", "height": "~1.5 เมตร", "status": "🟢 รอข้อมูลอัปเดต", "icon": "🟢"}
         try:
             with ThreadPoolExecutor(max_workers=2) as executor:
                 weather_future = executor.submit(bot_config.get_live_weather_scraper, latitude, longitude)
@@ -1107,25 +828,21 @@ def handle_location_message(event):
                 water_flow = water_flow_future.result()
         except Exception as e:
             print(f"[WaterLevel] Parallel fetch failed: {e}")
-            # Fallback to sequential if parallel fails
             weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
             water_flow = bot_config.get_live_water_scraper(latitude, longitude)
         
-        if bot_config.line_bot_api:
-            try:
-                flex_msg = bot_config.build_water_level_flex_message(
-                    latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
-                )
-                bot_config.line_bot_api.reply_message(event.reply_token, flex_msg)
-                print("[WaterLevel] Sent Flex Message")
-            except Exception as e:
-                print(f"[WaterLevel] Flex failed: {e}, using text fallback")
-                text_report = bot_config.build_water_level_text_report(
-                    latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
-                )
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=text_report))
-        else:
-            print("[LINE] line_bot_api not initialized, cannot send water level report.")
+        try:
+            flex_msg = bot_config.build_water_level_flex_message(
+                latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
+            )
+            bot_config.line_bot_api.reply_message(event.reply_token, flex_msg)
+            print("[WaterLevel] Sent Flex Message")
+        except Exception as e:
+            print(f"[WaterLevel] Flex failed: {e}, using text")
+            text_report = bot_config.build_water_level_text_report(
+                latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
+            )
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=text_report))
     
     # ===========================
     # SOS Step 1: GPS
@@ -1144,21 +861,16 @@ def handle_location_message(event):
                 QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วย/พิการ", text="🚑 มีผู้ป่วยติดเตียง/พิการ")),
                 QuickReplyButton(action=MessageAction(label="🩸 ผู้บาดเจ็บ", text="🩸 มีผู้บาดเจ็บฉุกเฉิน")),
                 QuickReplyButton(action=MessageAction(label="👨‍👩‍👧 ผู้ใหญ่", text="👨‍👩‍👧 ผู้ใหญ่ทั่วไป")),
-                QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง")),
-                QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
+                QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง"))
             ]
         )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="👥 ระบุกลุ่มผู้ประสบภัย (เลือกได้หลายกลุ่ม กด \'เสร็จสิ้น\' เมื่อเลือกครบ):",
-                        quick_reply=quick_reply
-                    )
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send SOS group selection prompt: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="👥 ระบุกลุ่มผู้ประสบภัย (เลือกได้หลายกลุ่ม กด 'เสร็จสิ้น' เมื่อเลือกครบ):",
+                quick_reply=quick_reply
+            )
+        )
     
     # ===========================
     # User Needs Step 1: GPS
@@ -1177,29 +889,81 @@ def handle_location_message(event):
                 QuickReplyButton(action=MessageAction(label="👶 ของใช้เด็ก", text="👶 ของใช้เด็กอ่อน")),
                 QuickReplyButton(action=MessageAction(label="🧼 ของใช้ส่วนตัว", text="🧼 ของใช้ส่วนตัว")),
                 QuickReplyButton(action=MessageAction(label="🔦 ส่องสว่าง", text="🔦 อุปกรณ์ส่องสว่าง")),
-                QuickReplyButton(action=MessageAction(label="📝 อื่นๆ", text="📝 อื่นๆ (ระบุเอง)")),
-                QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
+                QuickReplyButton(action=MessageAction(label="📝 อื่นๆ", text="📝 อื่นๆ (ระบุเอง)"))
             ]
         )
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="📦 เลือกหมวดหมู่สิ่งของที่ต้องการ (เลือกได้หลายหมวด กด \'เสร็จสิ้น\' เมื่อเลือกครบ):",
-                        quick_reply=quick_reply
-                    )
-                )
-            except Exception as e:
-                print(f"[LINE] Failed to send needs category prompt: {e}")
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="📦 เลือกหมวดหมู่สิ่งของที่ต้องการ (เลือกได้หลายหมวด กด 'เสร็จสิ้น' เมื่อเลือกครบ):",
+                quick_reply=quick_reply
+            )
+        )
     
     else:
-        confirm_text = "📍 ได้รับพิกัดแล้วครับ หากต้องการแจ้ง SOS กรุณากดเมนู \'SOS ขอความช่วยเหลือ\' ก่อนครับ"
-        if bot_config.line_bot_api:
-            try:
-                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
-            except Exception as e:
-                print(f"[LINE] Failed to send generic location message: {e}")
+        confirm_text = "📍 ได้รับพิกัดแล้วครับ หากต้องการแจ้ง SOS กรุณากดเมนู 'SOS ขอความช่วยเหลือ' ก่อนครับ"
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=confirm_text))
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+def _send_sos_summary(event, user_id):
+    """Create and send SOS summary (Step 4 - Confirm)"""
+    data = bot_config.USER_DATA[user_id]
+    group_types = data.get("group_types", ["ผู้ใหญ่ทั่วไป"])
+    urgency = data.get("urgency_level", "ต่ำ")
+    
+    priority_label, priority_code = bot_config.calculate_sos_priority(group_types, urgency)
+    bot_config.USER_DATA[user_id]["priority"] = priority_code
+    bot_config.USER_DATA[user_id]["priority_label"] = priority_label
+    
+    lat = data.get("latitude", "0")
+    lon = data.get("longitude", "0")
+    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+    
+    summary_text = (
+        "📋 สรุปข้อมูลแจ้งเหตุ\n\n"
+        f"📍 พิกัด: {maps_link}\n"
+        f"👥 กลุ่ม: {', '.join(group_types)}\n"
+        f"🌊 สถานการณ์: {urgency}\n"
+        f"📝 รายละเอียด: {data.get('note', '-')}\n"
+        f"📊 ระดับความเร่งด่วน: {priority_label}\n\n"
+        f"ยืนยันการส่งข้อมูลแจ้งกู้ภัยหรือไม่?"
+    )
+    
+    quick_reply = QuickReply(
+        items=[
+            QuickReplyButton(action=MessageAction(label="✅ ยืนยันแจ้งกู้ภัย", text="ยืนยันแจ้งกู้ภัย")),
+            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก/แก้ไข", text="ยกเลิกและแก้ไขใหม่"))
+        ]
+    )
+    bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
+
+
+def _send_needs_summary(event, user_id):
+    """Create and send needs summary"""
+    data = bot_config.USER_DATA[user_id]
+    lat = data.get("need_latitude", "0")
+    lon = data.get("need_longitude", "0")
+    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+    
+    summary_text = (
+        "✅ สรุปรายการความต้องการ:\n\n"
+        f"📍 พิกัด: {maps_link}\n"
+        f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
+        f"📝 รายละเอียด: {data.get('need_details', '-')}\n"
+        f"⏳ ความเร่งด่วน: {data.get('need_urgency', '-')}\n\n"
+        f"ยืนยันการส่งข้อมูลไปยังศูนย์อาสาสมัครหรือไม่?"
+    )
+    
+    quick_reply = QuickReply(
+        items=[
+            QuickReplyButton(action=MessageAction(label="✅ ยืนยันการแจ้ง", text="ยืนยันการแจ้ง")),
+            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก/แก้ไข", text="ยกเลิก"))
+        ]
+    )
+    bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary_text, quick_reply=quick_reply))
 
 
 # =============================================================================
