@@ -8,4 +8,4 @@ line-bot-sdk
 google-generativeai
 
 # Supabase - สำคัญ: pin เฉพาะตัวนี้เท่านั้น ห้าม pin gotrue / postgrest / httpx / realtime
-supabase = 2.31.0
+supabase==2.31.0
