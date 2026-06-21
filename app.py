@@ -167,15 +167,17 @@ def debug_supabase_test():
     return jsonify(bot_config.test_supabase_connection())
 
 
-@app.route("/debug/force-sync", methods=["POST"])
+@app.route("/debug/force-sync", methods=["GET", "POST"])
 def debug_force_sync():
     try:
         success = bot_config.sync_water_levels_to_supabase()
-        return jsonify({"success": success})
+        return jsonify({
+            "success": success,
+            "message": "ซิงค์ข้อมูลสำเร็จ" if success else "ซิงค์ไม่สำเร็จ"
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
-
-
+        
 # =============================================================================
 # WEBHOOK ROUTE FOR LINE
 # =============================================================================
