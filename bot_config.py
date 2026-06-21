@@ -613,6 +613,10 @@ def get_water_data_from_api():
             try:
                 parsed = parse_v3_station(item)
                 code = parsed["StationCode"]
+                if not code or code == "N/A":
+                    # No real station code -> skip, otherwise multiple stations
+                    # would collide on the same "N/A" primary key in Supabase.
+                    continue
                 wl = parsed["WaterLevel"]
                 bl = parsed["BankLevel"]
                 situation = calculate_situation(wl, bl)
@@ -656,13 +660,17 @@ def get_water_data_from_api():
     
     # For now, let's process V1 sequentially with a small delay
     for i, st in enumerate(stations_v1_metadata):
-        runoff = get_thaiwater_runoff_latest(st["stationCode"])
+        code = st.get("stationCode")
+        if not code or code == "N/A":
+            # No real station code -> skip, would otherwise collide with
+            # other stations on the same primary key in Supabase.
+            continue
+        runoff = get_thaiwater_runoff_latest(code)
         time.sleep(0.05)  # Rate limiting
         
         wl_value = None
         bl_value = None
         measure_time = "-"
-        code = st["stationCode"]
         
         if runoff:
             wl_data = runoff.get("water_level", {})
@@ -714,8 +722,16 @@ def sync_water_levels_to_supabase():
             return False
         
         # Prepare rows for Supabase
-        rows_to_insert = []
+        rows_by_code = {}
+        skipped_no_code = 0
         for st in data:
+            code = st.get("StationCode")
+            if not code or code == "N/A":
+                # No usable primary key -> skip rather than collide with
+                # other rows on the same "N/A" station_code.
+                skipped_no_code += 1
+                continue
+
             situation_text = st.get("Situation", "ปกติ")
             # Ensure situation_text is a string, not a dict from assess_water_level_status
             if isinstance(situation_text, dict):
@@ -724,8 +740,10 @@ def sync_water_levels_to_supabase():
             wl_val = st.get("WaterLevel")
             bl_val = st.get("BankLevel")
             
-            rows_to_insert.append({
-                "station_code": st.get("StationCode"),
+            # Dedupe by station_code within this batch (last one wins) so a
+            # single insert/chunk never contains the same primary key twice.
+            rows_by_code[code] = {
+                "station_code": code,
                 "name": st.get("Name"),
                 "river": st.get("River"),
                 "location": st.get("Location"),
@@ -737,7 +755,11 @@ def sync_water_levels_to_supabase():
                 "trend": st.get("Trend", "คงที่"),
                 "measure_time": st.get("Time"),
                 "updated_at": datetime.datetime.now().isoformat()
-            })
+            }
+        
+        rows_to_insert = list(rows_by_code.values())
+        if skipped_no_code:
+            print(f"[Supabase Water] Skipped {skipped_no_code} station(s) with no usable station_code")
         
         # Step 1: TRUNCATE (delete all existing data)
         print("[Supabase Water] Truncating old data...")
