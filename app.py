@@ -1,6 +1,5 @@
 import os
 import datetime
-from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, abort
 import bot_config
 from dashboard import dashboard_bp
@@ -423,34 +422,7 @@ def handle_text_message(event):
                 priority_code = data.get("priority", "NORMAL")
 
                 success = False
-                supabase = bot_config.get_supabase_client()
-                if supabase:
-                    try:
-                        supabase.table("sos_requests").insert({
-                            "request_id": case_id,
-                            "user_id": str(user_id),
-                            "timestamp": timestamp,
-                            "latitude": float(data.get("latitude", 0)),
-                            "longitude": float(data.get("longitude", 0)),
-                            "group_count": len(group_types),
-                            "group_types": ", ".join(group_types),
-                            "urgency_level": urgency,
-                            "photo_url": data.get("photo_url", "-"),
-                            "water_level": "-",
-                            "note": data.get("note", "-"),
-                            "priority": priority_code,
-                            "status": "OPEN",
-                            "responder_name": "-",
-                            "responder_notes": "-",
-                            "accepted_at": None,
-                            "completed_at": None
-                        }).execute()
-                        print("[Supabase] SOS request saved successfully")
-                        success = True
-                    except Exception as e:
-                        print(f"[Supabase] Failed to save SOS (check table 'sos_requests' schema): {e}")
-
-                if sheets_client and not success:  # Fallback to Sheets only if Supabase failed
+                if sheets_client:
                     try:
                         sheet = sheets_client.open_by_key(clean_sheet_id)
                         sos_ws = sheet.worksheet("sos_requests")
@@ -475,7 +447,7 @@ def handle_text_message(event):
                         ])
                         success = True
                     except Exception as e:
-                        print(f"Failed to save SOS to Sheets: {e}")
+                        print(f"Failed to save SOS: {e}")
 
                 if success:
                     reply_text = (
@@ -761,22 +733,8 @@ def handle_text_message(event):
         reply_text = "🤖 พิมพ์คำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมได้ทันทีครับ"
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
-    # ===========================
-    # FEATURE: ตรวจจับคำทักทาย -> ตอบทันที ไม่เรียก Gemini AI
-    # (ลดเวลาตอบจาก ~5 วินาทีเหลือเสี้ยววินาที สำหรับคำทักทายทั่วไป)
-    # ===========================
-    elif bot_config.is_greeting(user_text):
-        bot_config.handle_greeting_logic(event)
-
     else:
         # ระบบคุยตอบโต้อิสระด้วย AI
-        # แสดง Typing Indicator ก่อนเรียก Gemini เพื่อให้ผู้ใช้รู้ว่าระบบกำลังประมวลผล
-        # (ใช้ try/except แยกเพื่อไม่ให้ความล้มเหลวของ indicator กระทบการตอบจริง)
-        try:
-            bot_config.show_loading_animation(user_id, loading_seconds=15)
-        except Exception as e:
-            print(f"[TypingIndicator] Skipped: {e}")
-
         ai_response = ""
         try:
             response = bot_config.gemini_model.generate_content(user_text)
@@ -818,30 +776,7 @@ def handle_location_message(event):
         shelter_list = []
         db_connected = False
 
-        # 1. ลอง Supabase ก่อน (แนะนำ - เพราะมีแดชบอร์ดจัดการข้อมูล)
-        supabase = bot_config.get_supabase_client()
-        if supabase:
-            try:
-                response = supabase.table("shelters").select("*").execute()
-                for row in (response.data or []):
-                    if str(row.get("status", "")).strip().lower() in ["ปิดทำการ", "closed"]:
-                        continue
-                    shelter_list.append({
-                        "name": row.get("name", row.get("Name", "ไม่ระบุชื่อ")),
-                        "lat": float(row.get("lat", row.get("Latitude", 0)) or 0),
-                        "lon": float(row.get("lon", row.get("Longitude", 0)) or 0),
-                        "capacity": row.get("capacity", row.get("Capacity", 100)),
-                        "occupancy": row.get("occupancy", row.get("Occupancy", 0)),
-                        "status": row.get("status", row.get("Status", "ว่าง"))
-                    })
-                if shelter_list:
-                    db_connected = True
-                    print(f"[Shelter] Loaded {len(shelter_list)} shelters from Supabase")
-            except Exception as e:
-                print(f"[Shelter] Supabase fetch error: {e}")
-
-        # 2. Fallback ไป Google Sheets
-        if not db_connected and sheets_client:
+        if sheets_client:
             try:
                 sheet = sheets_client.open_by_key(clean_sheet_id)
                 shelters_ws = sheet.worksheet("Shelters")
@@ -859,7 +794,7 @@ def handle_location_message(event):
                     })
                 db_connected = True
             except Exception as e:
-                print(f"Failed to fetch shelters from Sheets: {e}")
+                print(f"Failed to fetch shelters: {e}")
 
         if not db_connected:
             reply_text = "⚠️ ระบบขัดข้อง โปรดโทร ปภ. 1784 ทันทีครับ"
@@ -901,48 +836,24 @@ def handle_location_message(event):
     # 12.2 ตรวจสอบระดับน้ำ (Lazy Sync from Sheets)
     # ===========================
     elif state == "waiting_water_location":
-        # 1. ลอง Supabase ก่อน (แนะนำ)
+        # Auto-sync: ถ้าข้อมูลใน Sheets เก่ากว่า WATER_DATA_MAX_AGE_MINUTES (หรือยังไม่มี)
+        # จะดึงจาก ThaiWater มาอัปเดต Sheets ก่อนใช้งานทันที
+        try:
+            _ensure_water_data_fresh(sheets_client, clean_sheet_id)
+        except Exception as e:
+            print(f"[WaterLevel] Auto-sync check failed: {e}")
+
         thaiwater_stations = []
         try:
-            supabase_stations = bot_config.get_water_data_from_supabase(latitude, longitude, limit=100)
-            if supabase_stations:
-                # แปลงโครงสร้างให้เข้ากับโค้ดเดิม
-                for s in supabase_stations:
-                    thaiwater_stations.append({
-                        "stationName": s.get("name", "ไม่ระบุ"),
-                        "provinceName": s.get("location", ""),
-                        "riverName": s.get("river", ""),
-                        "latitude": s.get("lat"),
-                        "longitude": s.get("lon"),
-                        "distance_km": s.get("distance_km", 0),
-                        "water_level": {"value": s.get("water_level"), "uom": "m"},
-                        "bank_level": s.get("bank_level"),
-                        "situation": s.get("situation", "ปกติ"),
-                        "trend": s.get("trend", "คงที่"),
-                        "measure_time": s.get("measure_time", "-"),
-                        "source": "supabase"
-                    })
-                print(f"[WaterLevel] Loaded {len(thaiwater_stations)} stations from Supabase")
+            thaiwater_stations = bot_config.get_water_data_from_sheets(
+                sheets_client, clean_sheet_id, latitude, longitude
+            )
+            if thaiwater_stations:
+                print(f"[WaterLevel] Loaded {len(thaiwater_stations)} stations from Sheets")
         except Exception as e:
-            print(f"[WaterLevel] Supabase load failed: {e}")
+            print(f"[WaterLevel] Sheets load failed: {e}")
 
-        # 2. Fallback ไป Sheets + Auto-sync
-        if not thaiwater_stations:
-            try:
-                _ensure_water_data_fresh(sheets_client, clean_sheet_id)
-            except Exception as e:
-                print(f"[WaterLevel] Auto-sync check failed: {e}")
-
-            try:
-                thaiwater_stations = bot_config.get_water_data_from_sheets(
-                    sheets_client, clean_sheet_id, latitude, longitude
-                )
-                if thaiwater_stations:
-                    print(f"[WaterLevel] Loaded {len(thaiwater_stations)} stations from Sheets (fallback)")
-            except Exception as e:
-                print(f"[WaterLevel] Sheets load failed: {e}")
-
-        # 3. Fallback สุดท้าย: เรียก ThaiWater API ตรง ๆ
+        # Fallback: ดึงจาก ThaiWater API ตรงๆ ถ้า Sheets ไม่มี
         if not thaiwater_stations:
             try:
                 thaiwater_stations = bot_config.find_nearest_water_stations(
@@ -952,19 +863,8 @@ def handle_location_message(event):
             except Exception as e:
                 print(f"[WaterLevel] API fallback failed: {e}")
 
-        # ดึงข้อมูลสภาพอากาศและน้ำหลากแบบ "พร้อมกัน" (parallel) แทนการรอทีละตัว
-        # เพราะทั้งสองเป็น network call ที่เป็นอิสระจากกัน การรันคู่กันช่วยลดเวลารอ
-        # จากผลรวมของทั้งสอง (sequential) ให้เหลือเท่ากับตัวที่ช้าที่สุดเพียงตัวเดียว
-        try:
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                weather_future = executor.submit(bot_config.get_live_weather_scraper, latitude, longitude)
-                water_flow_future = executor.submit(bot_config.get_live_water_scraper, latitude, longitude)
-                weather_info = weather_future.result()
-                water_flow = water_flow_future.result()
-        except Exception as e:
-            print(f"[WaterLevel] Parallel fetch failed, falling back to sequential: {e}")
-            weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
-            water_flow = bot_config.get_live_water_scraper(latitude, longitude)
+        weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
+        water_flow = bot_config.get_live_water_scraper(latitude, longitude)
 
         try:
             flex_msg = bot_config.build_water_level_flex_message(
