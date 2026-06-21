@@ -10,7 +10,6 @@ from linebot.models import (
     MessageEvent, TextMessage, LocationMessage, TextSendMessage,
     QuickReply, QuickReplyButton, MessageAction, LocationAction
 )
-
 import bot_config
 from bot_config import gemini_model, is_user_registered, register_user, generate_case_id
 import bot_config
