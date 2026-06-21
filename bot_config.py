@@ -47,6 +47,17 @@ def get_supabase_client():
         _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
         print("[Supabase] Client initialized successfully")
         return _supabase_client
+    except TypeError as e:
+        # Known supabase-py issue: incompatible gotrue/httpx/postgrest versions
+        # raise "unexpected keyword argument 'proxy'" (or similar) at create_client().
+        # This is NOT a wrong URL/KEY problem -- it's a dependency version mismatch.
+        print(
+            "[Supabase] Initialization TypeError (likely a supabase-py/gotrue/httpx "
+            f"version mismatch, not a credentials issue): {e}. "
+            "Fix: pin compatible versions in requirements.txt, e.g. "
+            "supabase==2.8.1 and gotrue==2.8.1, then reinstall/redeploy."
+        )
+        return None
     except Exception as e:
         print(f"[Supabase] Initialization error: {e}")
         return None
