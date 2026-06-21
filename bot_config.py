@@ -964,16 +964,16 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                 layout="vertical",
                 margin="md",
                 contents=[
-                    TextComponent(text=f"{st.get("stationName", st.get("Name", "ไม่ระบุ"))} (ห่าง {distance:.2f} กม.)", weight="bold", size="sm", color="#333333"),
+                    TextComponent(text=f"{st.get('stationName', st.get('Name', 'ไม่ระบุ'))} (ห่าง {distance:.2f} กม.)", weight="bold", size="sm", color="#333333"),
                     TextComponent(text=f"ระดับน้ำ {wl_value_display} ม. / ตลิ่ง {bl_value_display} ม.", size="sm", color="#555555", margin="xs"),
-                    TextComponent(text=f"ต่ำกว่าตลิ่ง {assessment["diff_text"]} ม.", size="sm", color="#555555", margin="xs"),
+                    TextComponent(text=f"ต่ำกว่าตลิ่ง {assessment['diff_text']} ม.", size="sm", color="#555555", margin="xs"),
                     BoxComponent(
                         layout="horizontal",
                         margin="xs",
                         spacing="sm",
                         contents=[
-                            TextComponent(text=f"{assessment["icon"]} {assessment["status"]}", size="sm", color="#555555", weight="bold"),
-                            TextComponent(text=f"แนวโน้ม: {st.get("trend", "คงที่")}", size="sm", color="#555555", align="end")
+                            TextComponent(text=f"{assessment['icon']} {assessment['status']}", size="sm", color="#555555", weight="bold"),
+                            TextComponent(text=f"แนวโน้ม: {st.get('trend', 'คงที่')}", size="sm", color="#555555", align="end")
                         ]
                     )
                 ]
