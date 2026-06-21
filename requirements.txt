@@ -1,6 +1,13 @@
-Flask>=2.3.0
-line-bot-sdk>=3.0.0
-google-generativeai>=0.7.0
-supabase>=2.0.0
-requests>=2.31.0
-gunicorn>=21.0.0
+Flask>=2.3.0,<3.0.0
+line-bot-sdk>=3.0.0,<4.0.0
+google-generativeai>=0.7.0,<1.0.0
+
+# Pinned together on purpose: unpinned "supabase>=2.0.0" lets pip pull a
+# newer gotrue/httpx combo that breaks create_client() with
+# "TypeError: Client.__init__() got an unexpected keyword argument 'proxy'".
+# This exact pair is a known-working combination.
+supabase==2.8.1
+gotrue==2.8.1
+
+requests>=2.31.0,<3.0.0
+gunicorn>=21.0.0,<22.0.0
