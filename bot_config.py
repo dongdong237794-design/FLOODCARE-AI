@@ -714,8 +714,8 @@ def sync_water_levels_to_supabase():
                 "name": st.get("Name"),
                 "river": st.get("River"),
                 "location": st.get("Location"),
-                "lat": st.get("Lat"),
-                "lon": st.get("Lon"),
+                "latitude": st.get("Lat"),
+                "longitude": st.get("Lon"),
                 "water_level": float(wl_val) if wl_val not in [None, "-", ""] else None,
                 "bank_level": float(bl_val) if bl_val not in [None, "-", ""] else None,
                 "situation": situation_text,
@@ -794,8 +794,8 @@ def get_water_data_from_supabase(user_lat=None, user_lon=None, limit=100):
                 try:
                     rec["distance_km"] = calculate_distance(
                         user_lat, user_lon,
-                        float(rec.get("lat", 0) or 0),
-                        float(rec.get("lon", 0) or 0)
+                        float(rec.get("latitude", 0) or 0),
+                        float(rec.get("longitude", 0) or 0)
                     )
                 except:
                     rec["distance_km"] = 9999
