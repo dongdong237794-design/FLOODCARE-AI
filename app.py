@@ -29,23 +29,46 @@ WATER_DATA_MAX_AGE_MINUTES = 12
 def _ensure_water_data_fresh():
     """
     Check last sync time from Supabase sync_metadata.
-    If stale or missing -> trigger sync from ThaiWater.
+    If stale, missing, or table is empty -> trigger sync from ThaiWater.
     """
     needs_sync = True
+    
     try:
         last_sync = bot_config.get_last_sync_time()
-        if last_sync:
+        
+        # ถ้าไม่มี last_sync record → ต้องซิงค์ทันที
+        if not last_sync:
+            print("[AutoSync] No last_sync record found → forcing sync")
+            needs_sync = True
+        else:
             last_sync_time = datetime.datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
             now = datetime.datetime.now(datetime.timezone.utc)
             age_minutes = (now - last_sync_time).total_seconds() / 60
             print(f"[AutoSync] Water_Levels age: {age_minutes:.1f} min")
+            
             if age_minutes <= WATER_DATA_MAX_AGE_MINUTES:
                 needs_sync = False
+        
+        # เช็คเพิ่มเติม: ถ้าตารางว่าง → ซิงค์ทันที (แม้จะมี last_sync)
+        if not needs_sync:
+            supabase = bot_config.get_supabase_client()
+            if supabase:
+                try:
+                    response = supabase.table("water_levels").select("station_code", count="exact").limit(1).execute()
+                    record_count = response.count if hasattr(response, 'count') else len(response.data or [])
+                    if record_count < 5:  # ถ้ามีข้อมูลน้อยกว่า 5 แถว ให้ถือว่ายังว่าง
+                        print(f"[AutoSync] Table almost empty ({record_count} records) → forcing sync")
+                        needs_sync = True
+                except Exception as e:
+                    print(f"[AutoSync] Could not check table count: {e}")
+                    needs_sync = True
+                    
     except Exception as e:
         print(f"[AutoSync] Could not read last sync, will sync: {e}")
+        needs_sync = True
     
     if needs_sync:
-        print("[AutoSync] Water_Levels stale or missing -> triggering sync now...")
+        print("[AutoSync] Water_Levels stale/empty/missing → triggering sync now...")
         try:
             success = bot_config.sync_water_levels_to_supabase()
             print(f"[AutoSync] Sync result: {success}")
