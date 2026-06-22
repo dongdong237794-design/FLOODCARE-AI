@@ -15,7 +15,7 @@ except ImportError:
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import (
     FlexSendMessage, BubbleContainer, BoxComponent, TextComponent,
-    SeparatorComponent, ButtonComponent, URIAction, TextSendMessage
+    SeparatorComponent, ButtonComponent, URIAction, TextSendMessage, BubbleStyle, BlockStyle
 )
 
 # =============================================================================
@@ -89,48 +89,36 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET) if LINE_CHANNEL_SECRET else None
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-gemini_model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash",
-    system_instruction=(
-        "คุณคือ FLOODCARE AI ผู้ช่วยกู้ภัยมืออาชีพประจำศูนย์ประสานงานภัยน้ำท่วมระดับชาติ\n"
-        "บทบาท: ผู้นำในวิกฤตที่ใจดีแต่เด็ดขาด (Calm and Firm)\n"
-        "เป้าหมาย: ให้ข้อมูลที่แม่นยำ กระชับ และช่วยผู้ประสบภัยเอาตัวรอดได้จริง\n\n"
+gemini_model = None
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel(
+        model_name="gemini-2.5-flash",
+        system_instruction=(
+            "คุณคือ FLOODCARE AI ผู้ช่วยกู้ภัยมืออาชีพประจำศูนย์ประสานงานภัยน้ำท่วมระดับชาติ\n"
+            "บทบาท: ผู้นำในวิกฤตที่ใจดีแต่เด็ดขาด (Calm and Firm) เป้าหมาย: ให้ข้อมูลที่แม่นยำ กระชับ และช่วยผู้ประสบภัยเอาตัวรอดได้จริง\n\n"
 
-        "[1] Data-Driven Response (ให้ความสำคัญกับข้อมูลระบบก่อนเสมอ):\n"
-        "- ข้อมูลระดับน้ำจาก ThaiWater, รายชื่อศูนย์พักพิง, เบอร์โทรในฐานข้อมูล คือข้อมูลหลัก\n"
-        "- หากผู้ใช้ถามสถานที่ที่ไม่มีในฐานข้อมูล ให้กล้ายอมรับว่า 'ไม่มีข้อมูลในระบบ'\n"
-        "- แนะนำให้ดูลิงก์แผนที่รวมแทนการเดาพิกัดเอง\n"
-        "- ห้ามแนะนำเส้นทางที่ไม่แน่ใจ หรือยืนยันว่าปลอดภัย 100%\n\n"
-
-        "[2] Emergency Detection (ตรวจจับความเร่งด่วน):\n"
-        "- หากพบคำสำคัญบ่งบอกอันตรายถึงชีวิต เช่น 'ช่วยด้วย' 'จะจมแล้ว' 'ไฟดูด' 'หายใจไม่ออก' 'จมน้ำ' 'ไฟฟ้าดูด'\n"
-        "- หยุดการเกริ่นนำทันที ส่ง 'ขั้นตอนเอาตัวรอดทันที' พร้อมเบอร์ 1784 หรือ 1669 เป็นอันดับแรก\n"
-        "- จากนั้นค่อยถามรายละเอียดเพิ่มเติม\n\n"
-
-        "[3] Tone of Voice (Calm and Authoritative):\n"
-        "- ใช้โทน 'ใจดีแต่เด็ดขาด' ไม่ผวา ไม่เยิ่นเย้อ\n"
-        "- เน้นการสั่งการเป็นขั้นตอน (1, 2, 3) แทนการพูดคลุมเครือ\n"
-        "- เช่น '1. ยกเบรกเกอร์ 2. ขึ้นที่สูง 3. เตรียมไฟฉาย' แทน 'แนะนำให้ลองทำแบบนี้ดูนะครับ'\n"
-        "- ใช้คำลงท้าย 'ครับ' หรือ 'นะครับ' เป็นหลัก\n\n"
-
-        "[4] Shelter and Route Safety Rules:\n"
-        "- ห้ามยืนยันว่าเส้นทางปลอดภัย 100% เพราะระดับน้ำเปลี่ยนตลอดเวลา\n"
-        "- ต้องมีประโยคเตือนเสมอ: 'โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน'\n"
-        "- แนะนำให้โทรศูนย์พักพิงก่อนออกเดินทางทุกครั้ง\n\n"
-
-        "[5] Formatting for Crisis (อ่านง่ายบนมือถือ):\n"
-        "- กฎ 3 บรรทัดแรก: ข้อมูลสำคัญสุดต้องอยู่ใน 3 บรรทัดแรกเสมอ\n"
-        "- ห้ามใช้ตัวหนาเยอะ ให้ใช้การเว้นบรรทัดแยกหัวข้อแทน\n"
-        "- ห้ามใช้เครื่องหมายดอกจัน (*) ในการทำสัญลักษณ์\n"
-        "- ใช้อิโมจิที่จำเป็นเท่านั้น (เช่น ⚠️ 📞 🏃 🩹)\n"
-        "- ความยาวข้อความไม่เกิน 10 บรรทัดต่อกลุ่ม\n\n"
-
-        "[6] General Safety:\n"
-        "- ห้ามเดาข้อมูลหรือจินตนาการสิ่งที่ไม่เป็นความจริง\n"
-        "- หากข้อมูลไม่แน่ชิด ให้แสดงความห่วงใจ + แนะนำเบอร์สายด่วน\n"
-        "- ให้คำตอบเป็นภาษาไทยเสมอ"
+            "**หลักการตอบ:**\n"
+            "1. **ข้อมูลระบบสำคัญสุด:** ใช้ข้อมูลจาก ThaiWater, ศูนย์พักพิง, เบอร์โทรในฐานข้อมูลเป็นหลัก หากไม่มีให้แจ้งว่า \'ไม่มีข้อมูลในระบบ\' และแนะนำลิงก์แผนที่รวม ห้ามเดาหรือยืนยันความปลอดภัย 100%\n"
+            "2. **ตรวจจับเหตุฉุกเฉิน:** หากพบคำอันตรายถึงชีวิต (เช่น \'ช่วยด้วย\', \'จะจมแล้ว\', \'ไฟดูด\', \'หายใจไม่ออก\', \'จมน้ำ\
+', \'ไฟฟ้าดูด\') ให้หยุดการเกริ่นนำ ส่ง \'ขั้นตอนเอาตัวรอดทันที\' พร้อมเบอร์ 1784/1669 ก่อน แล้วค่อยถามรายละเอียด\n"
+            "3. **โทนเสียง:** ใจดีแต่เด็ดขาด เน้นสั่งการเป็นขั้นตอน (1, 2, 3) ใช้คำลงท้าย \'ครับ\' หรือ \'นะครับ\'\n"
+            "4. **ความปลอดภัยเส้นทาง/ศูนย์พักพิง:** เตือนเสมอ \'โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน\' แนะนำให้โทรศูนย์พักพิงก่อนออกเดินทาง\n"
+            "5. **รูปแบบข้อความ (LINE Mobile):** ข้อมูลสำคัญสุด 3 บรรทัดแรก ห้ามใช้ตัวหนาเยอะ ใช้อิโมจิที่จำเป็น (⚠️ 📞 🏃 🩹) ความยาวไม่เกิน 10 บรรทัดต่อกลุ่ม\n"
+            "6. **ความปลอดภัยทั่วไป:** ห้ามเดาข้อมูล หากไม่แน่ใจให้แสดงความห่วงใจและแนะนำเบอร์สายด่วน ตอบเป็นภาษาไทยเสมอ\n"
+            "7. **ประหยัด Token:** ตอบให้กระชับ ตรงประเด็น ไม่ต้องอธิบายยาวเกินความจำเป็น"
+        )
     )
-)
+
+_chat_sessions = {}
+
+def get_chat_session(user_id):
+    if user_id not in _chat_sessions:
+        if gemini_model:
+            _chat_sessions[user_id] = gemini_model.start_chat(history=[])
+        else:
+            return None
+    return _chat_sessions[user_id]
 
 # =============================================================================
 # 4. UTILITY FUNCTIONS
@@ -253,7 +241,7 @@ def get_live_weather_scraper(lat, lon):
         return sheet_data
 
     if not TMD_ACCESS_TOKEN:
-        return "🌡️ อุณหภูมิ: ~28 °C\n🌧️ สภาพอากาศ: ข้อมูลพยากรณ์ทั่วไป"
+        return "🌧️ ขออภัยครับ ขณะนี้ระบบไม่สามารถดึงข้อมูลสภาพอากาศในพื้นที่ได้ชั่วคราว"
 
     try:
         url = "https://data.tmd.go.th/nwpapi/v1/forecast/location/hourly/at"
@@ -290,7 +278,7 @@ def get_live_weather_scraper(lat, lon):
 
     except Exception as e:
         print(f"TMD API Error: {e}")
-        return "🌡️ อุณหภูมิ: ~28 °C\n🌧️ สภาพอากาศ: ท้องฟ้าครึ้ม"
+        return "🌧️ ขออภัยครับ ขณะนี้ระบบไม่สามารถเข้าถึงข้อมูลสภาพอากาศได้ โปรดตรวจสอบอีกครั้งในภายหลังครับ"
 
 
 def get_live_water_scraper(lat, lon):
@@ -317,7 +305,7 @@ def get_live_water_scraper(lat, lon):
 
             return {
                 "flow": f"{current_flow:.2f} ลบ.ม./วินาที",
-                "height": f"{simulated_height:.2f} เมตร",
+                "height": f"ระดับน้ำจริงหน้างาน",
                 "status": status,
                 "icon": icon
             }
@@ -325,9 +313,9 @@ def get_live_water_scraper(lat, lon):
         print(f"Water Scraper Error: {e}")
         return {
             "flow": "ไม่สามารถตรวจสอบได้",
-            "height": "~1.5 เมตร",
-            "status": "🟢 รอข้อมูลอัปเดต",
-            "icon": "🟢"
+            "height": "โปรดสังเกตระดับน้ำจริง",
+            "status": "🌊 ขออภัยครับ ระบบเซนเซอร์ขัดข้องชั่วคราว โปรดระมัดระวังและตรวจสอบระดับน้ำในพื้นที่จริงครับ",
+            "icon": "⚠️"
         }
 
 # =============================================================================
@@ -1145,6 +1133,183 @@ def register_user_to_sheets(sheets_client=None, sheet_id=None, user_id=None, fir
 # =============================================================================
 # 11. WATER LEVEL REPORT BUILDERS
 # =============================================================================
+def _build_sos_summary_flex(user_id, user_data):
+    # ดึงข้อมูลที่จำเป็นจาก user_data
+    latitude = user_data.get("sos_latitude", "N/A")
+    longitude = user_data.get("sos_longitude", "N/A")
+    group_types = ", ".join(user_data.get("group_types", [])) or "-"
+    details = user_data.get("sos_details", "-")
+    phone = user_data.get("phone", "-")
+    first_name = user_data.get("first_name", "ผู้แจ้ง")
+    last_name = user_data.get("last_name", "")
+
+    return FlexSendMessage(
+        alt_text="สรุปข้อมูลแจ้งเหตุฉุกเฉิน (SOS)",
+        contents=BubbleContainer(
+            direction='ltr',
+            hero=BoxComponent(
+                layout='vertical',
+                contents=[
+                    TextComponent(text='🚨 สรุปข้อมูลแจ้งเหตุฉุกเฉิน (SOS) 🚨',
+                                  weight='bold', size='md', color='#FFFFFF', align='center')
+                ],
+                background_color='#EF4444',
+                padding_all='md'
+            ),
+            body=BoxComponent(
+                layout='vertical',
+                spacing='sm',
+                contents=[
+                    TextComponent(text=f'คุณ {first_name} {last_name}', weight='bold', size='md'),
+                    SeparatorComponent(margin='md'),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='📍 พิกัด:', size='sm', color='#6B7280'),
+                            TextComponent(text=f'{latitude}, {longitude}', size='sm', wrap=True)
+                        ]
+                    ),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='👥 กลุ่มผู้ประสบภัย:', size='sm', color='#6B7280'),
+                            TextComponent(text=group_types, size='sm', wrap=True)
+                        ]
+                    ),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='📝 รายละเอียด:', size='sm', color='#6B7280'),
+                            TextComponent(text=details, size='sm', wrap=True)
+                        ]
+                    ),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='📞 เบอร์โทรติดต่อ:', size='sm', color='#6B7280'),
+                            TextComponent(text=phone, size='sm', wrap=True)
+                        ]
+                    )
+                ]
+            ),
+            footer=BoxComponent(
+                layout='vertical',
+                spacing='sm',
+                contents=[
+                    ButtonComponent(
+                        style='primary',
+                        height='sm',
+                        action=MessageAction(label='✅ ยืนยันการแจ้งเหตุ', text='ยืนยันการแจ้งเหตุ SOS'),
+                        color='#10B981'
+                    ),
+                    ButtonComponent(
+                        style='secondary',
+                        height='sm',
+                        action=MessageAction(label='❌ ยกเลิก', text='ยกเลิก'),
+                        color='#EF4444'
+                    )
+                ]
+            )
+        )
+    )
+
+def _build_needs_summary_flex(user_id, user_data):
+    # ดึงข้อมูลที่จำเป็นจาก user_data
+    latitude = user_data.get("need_latitude", "N/A")
+    longitude = user_data.get("need_longitude", "N/A")
+    categories = ", ".join(user_data.get("need_categories", [])) or "-"
+    details = user_data.get("need_details", "-")
+    urgency = user_data.get("need_urgency", "-")
+    phone = user_data.get("phone", "-")
+    first_name = user_data.get("first_name", "ผู้แจ้ง")
+    last_name = user_data.get("last_name", "")
+
+    return FlexSendMessage(
+        alt_text="สรุปข้อมูลความต้องการสิ่งของ",
+        contents=BubbleContainer(
+            direction='ltr',
+            hero=BoxComponent(
+                layout='vertical',
+                contents=[
+                    TextComponent(text='📦 สรุปข้อมูลความต้องการสิ่งของ 📦',
+                                  weight='bold', size='md', color='#FFFFFF', align='center')
+                ],
+                background_color='#3B82F6',
+                padding_all='md'
+            ),
+            body=BoxComponent(
+                layout='vertical',
+                spacing='sm',
+                contents=[
+                    TextComponent(text=f'คุณ {first_name} {last_name}', weight='bold', size='md'),
+                    SeparatorComponent(margin='md'),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='📍 พิกัด:', size='sm', color='#6B7280'),
+                            TextComponent(text=f'{latitude}, {longitude}', size='sm', wrap=True)
+                        ]
+                    ),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='📦 หมวดหมู่:', size='sm', color='#6B7280'),
+                            TextComponent(text=categories, size='sm', wrap=True)
+                        ]
+                    ),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='📝 รายละเอียด:', size='sm', color='#6B7280'),
+                            TextComponent(text=details, size='sm', wrap=True)
+                        ]
+                    ),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='⏳ ความเร่งด่วน:', size='sm', color='#6B7280'),
+                            TextComponent(text=urgency, size='sm', wrap=True)
+                        ]
+                    ),
+                    BoxComponent(
+                        layout='vertical',
+                        spacing='xs',
+                        contents=[
+                            TextComponent(text='📞 เบอร์โทรติดต่อ:', size='sm', color='#6B7280'),
+                            TextComponent(text=phone, size='sm', wrap=True)
+                        ]
+                    )
+                ]
+            ),
+            footer=BoxComponent(
+                layout='vertical',
+                spacing='sm',
+                contents=[
+                    ButtonComponent(
+                        style='primary',
+                        height='sm',
+                        action=MessageAction(label='✅ ยืนยันความต้องการ', text='ยืนยันความต้องการสิ่งของ'),
+                        color='#10B981'
+                    ),
+                    ButtonComponent(
+                        style='secondary',
+                        height='sm',
+                        action=MessageAction(label='❌ ยกเลิก', text='ยกเลิก'),
+                        color='#EF4444'
+                    )
+                ]
+            )
+        )
+    )
+
 def build_water_level_text_report(user_lat, user_lon, timestamp, stations, weather_info=None, water_flow=None):
     lines = [
         "🌊 รายงานระดับน้ำจากสถานีใกล้คุณ",
