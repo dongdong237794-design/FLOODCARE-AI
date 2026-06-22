@@ -1332,7 +1332,6 @@ def build_language_selector_flex():
                         height="sm"
                     )
                 ]
-            }
         )
     )
 
