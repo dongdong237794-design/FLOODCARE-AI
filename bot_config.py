@@ -645,70 +645,62 @@ def find_nearest_water_stations(user_lat, user_lon, max_stations=3, max_distance
 
     return result
 
-def assess_water_level_status(water_level_value, bank_level_value=None):
-    """ประเมินสถานะระดับน้ำและกำหนดสี"""
-    if water_level_value is None:
-        return {
-            "status": "⚪ ไม่มีข้อมูล",
-            "color": "#9CA3AF",
-            "diff_text": "-",
-            "advice": "ไม่สามารถประเมินได้"
-        }
+def assess_water_level_status(water_level_value, bank_level_value=None, situation=None, lang="TH"):
+    """
+    ประเมินสถานะระดับน้ำพร้อมรองรับหลายภาษา (TH, EN, JP, MY)
+    """
+    if not situation:
+        situation = calculate_situation(water_level_value, bank_level_value)
 
     try:
-        wl = float(water_level_value)
-        bl = float(bank_level_value) if bank_level_value else 0
+        wl = float(water_level_value) if water_level_value not in [None, "-", ""] else 0
+        bl = float(bank_level_value) if bank_level_value not in [None, "-", ""] else 0
         diff = bl - wl
         diff_text = f"{abs(diff):.2f}"
     except (ValueError, TypeError):
-        return {
-            "status": "⚪ ข้อมูลไม่ถูกต้อง",
-            "color": "#9CA3AF",
-            "diff_text": "-",
-            "advice": "ไม่สามารถประเมินได้"
+        diff_text = "-"
+
+    # พจนานุกรมแปลภาษา
+    translations = {
+        "TH": {
+            "ล้นตลิ่ง": "ล้นตลิ่ง", "มาก": "มาก", "ปกติ": "ปกติ", "น้อย": "น้อย", "น้อยวิกฤต": "น้อยวิกฤต",
+            "advice_ล้นตลิ่ง": "อพยพทันที", "advice_มาก": "ระดับน้ำสูง", "advice_ปกติ": "ระดับน้ำปกติ",
+            "advice_น้อย": "ระดับน้ำน้อย", "advice_น้อยวิกฤต": "น้อยวิกฤต", "none": "ไม่มีข้อมูล", "wait": "ติดตามสถานการณ์"
+        },
+        "EN": {
+            "ล้นตลิ่ง": "Overflow", "มาก": "High", "ปกติ": "Normal", "น้อย": "Low", "น้อยวิกฤต": "Critical Low",
+            "advice_ล้นตลิ่ง": "Evacuate Now", "advice_มาก": "High Water Level", "advice_ปกติ": "Normal Level",
+            "advice_น้อย": "Low Water Level", "advice_น้อยวิกฤต": "Critical Low Level", "none": "No Data", "wait": "Stay Alert"
+        },
+        "JP": {
+            "ล้นตลิ่ง": "氾濫", "มาก": "高い", "ปกติ": "通常", "น้อย": "低い", "น้อยวิกฤต": "危機的低水位",
+            "advice_ล้นตลิ่ง": "直ちに避難", "advice_มาก": "水位上昇中", "advice_ปกติ": "水位は正常です",
+            "advice_น้อย": "水位が低いです", "advice_น้อยวิกฤต": "危機的な低水位", "none": "データなし", "wait": "状況を注視"
+        },
+        "MY": {
+            "ล้นตลิ่ง": "Limpah", "มาก": "Tinggi", "ปกติ": "Normal", "น้อย": "Rendah", "น้อยวิกฤต": "Rendah Kritikal",
+            "advice_ล้นตลิ่ง": "Pindah Segera", "advice_มาก": "Aras Air Tinggi", "advice_ปกติ": "Aras Air Normal",
+            "advice_น้อย": "Aras Air Rendah", "advice_น้อยวิกฤต": "Aras Air Rendah Kritikal", "none": "Tiada Data", "wait": "Pantau Keadaan"
         }
+    }
 
-    if bl <= 0:
-        if wl >= 3.0: return {"status": "ล้นตลิ่ง", "color": "#EF4444", "diff_text": "-", "advice": "⚠️ อพยพทันที!"}
-        return {"status": "ปกติ", "color": "#10B981", "diff_text": "-", "advice": "ติดตามสถานการณ์"}
-
-    ratio = wl / bl
+    t = translations.get(lang, translations["TH"])
     
-    if wl >= bl:
-        return {
-            "status": "ล้นตลิ่ง",
-            "color": "#FF0000",
-            "diff_text": f"ล้นตลิ่ง {abs(diff):.2f}",
-            "advice": "⚠️ อพยพทันที! ระดับน้ำล้นตลิ่ง"
-        }
-    elif ratio >= 0.70:
-        return {
-            "status": "มาก",
-            "color": "#0000FF",
-            "diff_text": diff_text,
-            "advice": "💧 ระดับน้ำค่อนข้างสูง"
-        }
-    elif ratio >= 0.30:
-        return {
-            "status": "ปกติ",
-            "color": "#008000",
-            "diff_text": diff_text,
-            "advice": "✅ ระดับน้ำปกติ"
-        }
-    elif ratio >= 0.10:
-        return {
-            "status": "น้อย",
-            "color": "#FFCC00",
-            "diff_text": diff_text,
-            "advice": "⚠️ ระดับน้ำน้อย"
-        }
-    else:
-        return {
-            "status": "น้อยวิกฤต",
-            "color": "#E67E22",
-            "diff_text": diff_text,
-            "advice": "🚨 ระดับน้ำน้อยวิกฤต"
-        }
+    status_map = {
+        "ล้นตลิ่ง": {"status": t["ล้นตลิ่ง"], "bg_color": "#FEE2E2", "text_color": "#EF4444", "advice": t["advice_ล้นตลิ่ง"]},
+        "มาก": {"status": t["มาก"], "bg_color": "#DBEAFE", "text_color": "#3B82F6", "advice": t["advice_มาก"]},
+        "ปกติ": {"status": t["ปกติ"], "bg_color": "#D1FAE5", "text_color": "#10B981", "advice": t["advice_ปกติ"]},
+        "น้อย": {"status": t["น้อย"], "bg_color": "#FEF9C3", "text_color": "#F59E0B", "advice": t["advice_น้อย"]},
+        "น้อยวิกฤต": {"status": t["น้อยวิกฤต"], "bg_color": "#FFEDD5", "text_color": "#F97316", "advice": t["advice_น้อยวิกฤต"]}
+    }
+
+    res = status_map.get(situation, {
+        "status": t["none"] if not situation else situation,
+        "bg_color": "#9CA3AF", "text_color": "#FFFFFF", "advice": t["wait"]
+    })
+    
+    res["diff_text"] = diff_text
+    return res
 
 # =============================================================================
 # 9. LAZY SYNC SYSTEM (V3 API Primary → V1 Fallback → Sheets)
@@ -1153,129 +1145,315 @@ def register_user_to_sheets(sheets_client=None, sheet_id=None, user_id=None, fir
 # =============================================================================
 # 11. WATER LEVEL REPORT BUILDERS
 # =============================================================================
-def build_water_level_text_report(user_lat, user_lon, timestamp, stations, weather_info, water_flow):
+def build_water_level_text_report(user_lat, user_lon, timestamp, stations, weather_info=None, water_flow=None):
     lines = [
-        "🌊 รายงานสถานการณ์น้ำรายพิกัด",
+        "🌊 รายงานระดับน้ำจากสถานีใกล้คุณ",
         f"📍 พิกัด: {user_lat:.4f}, {user_lon:.4f}",
-        f"⏰ อัปเดตล่าสุด: {timestamp}",
+        f"🕒 อัปเดตวันนี้ {timestamp}",
         ""
     ]
-
-    lines.append("🌦️ สภาพอากาศ:")
-    lines.append(weather_info)
-    lines.append("")
 
     lines.append("📡 ข้อมูลจากสถานี ThaiWater ใกล้คุณ:")
     lines.append("")
 
     if not stations:
-        lines.append("⚠️ ไม่พบสถานีในรัศมี 50 กม.")
+        lines.append("⚠️ ไม่พบสถานีตรวจวัดในพื้นที่ใกล้เคียง")
     else:
         for i, st in enumerate(stations, 1):
             wl = st.get("water_level")
             distance = st.get("distance_km", 0)
-            situation = st.get("situation", "ไม่มีข้อมูล")
-            trend = st.get("trend", "คงที่")
-
+            situation = st.get("situation")
+            
             if wl and wl.get("value") not in [None, "-", ""]:
                 try:
                     wl_value = float(wl["value"])
                     bl = st.get("bank_level")
-                    assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None)
-                    lines.append(f"{i}. 📍 {st['stationName']}")
-                    lines.append(f"   ห่าง: {distance:.2f} กม.")
-                    lines.append(f"   ระดับน้ำ: {wl_value:.2f} ม.")
-                    lines.append(f"   สถานะ: {assessment['status']}")
-                    lines.append(f"   สถานการณ์: {situation} | แนวโน้ม: {trend}")
-                    lines.append(f"   {assessment['advice']}")
-                    if st.get('measure_time') and st['measure_time'] != '-':
-                        lines.append(f"   วัดล่าสุด: {st['measure_time']}")
+                    assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None, situation)
+                    lines.append(f"{i}. {st['stationName']} (ห่าง {distance:.2f} กม.)")
+                    lines.append(f"   [{assessment['status']}] {assessment['advice']}")
+                    lines.append(f"   ระดับน้ำ: {wl_value:.2f} ม. | ตลิ่ง: {st.get('bank_level', '-')} ม.")
+                    lines.append(f"   ต่ำกว่าตลิ่ง: {assessment['diff_text']} ม.")
                 except (ValueError, TypeError):
-                    lines.append(f"{i}. 📍 {st['stationName']}")
-                    lines.append(f"   ห่าง: {distance:.2f} กม.")
+                    lines.append(f"{i}. {st['stationName']} (ห่าง {distance:.2f} กม.)")
             else:
-                lines.append(f"{i}. 📍 {st['stationName']}")
-                lines.append(f"   ห่าง: {distance:.2f} กม.")
+                lines.append(f"{i}. {st['stationName']} (ห่าง {distance:.2f} กม.)")
                 lines.append(f"   ไม่มีข้อมูลระดับน้ำ")
             lines.append("")
 
-    lines.append("🌊 ประมาณการน้ำหลาก:")
-    lines.append(f"   อัตราการไหล: {water_flow.get('flow', 'N/A')}")
-    lines.append(f"   ความสูงน้ำ: {water_flow.get('height', 'N/A')}")
-    lines.append(f"   สถานะ: {water_flow.get('status', 'N/A')}")
-    lines.append("")
-    lines.append(f"📌 แหล่งข้อมูล: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)")
-    lines.append(f"🔗 ดูเพิ่มเติม: {THAIWATER_WEB_URL}")
+    lines.append(f"📌 อ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)")
+    lines.append(f"🔗 ดูข้อมูลเพิ่มเติมที่ ThaiWater: {THAIWATER_WEB_URL}")
 
     return "\n".join(lines)
 
-def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weather_info, water_flow):
+def build_sos_form_flex(user_name="คุณ"):
+    """สร้าง SOS Flex Form สีแดงมินิมอลสำหรับการแจ้งเหตุแบบรวดเร็ว"""
+    return FlexSendMessage(
+        alt_text="🚨 แจ้งเหตุฉุกเฉิน SOS",
+        contents=BubbleContainer(
+            styles=BubbleStyle(header=BlockStyle(background_color="#EF4444")),
+            header=BoxComponent(
+                layout="vertical",
+                contents=[
+                    TextComponent(text="🚨 แจ้งเหตุฉุกเฉิน SOS", weight="bold", size="lg", color="#FFFFFF", align="center")
+                ]
+            ),
+            body=BoxComponent(
+                layout="vertical",
+                spacing="md",
+                contents=[
+                    TextComponent(text=f"สวัสดีครับคุณ {user_name}", size="sm", color="#4B5563", weight="bold"),
+                    TextComponent(text="โปรดระบุข้อมูลเพื่อประสานงานกู้ภัย:", size="xs", color="#9CA3AF"),
+                    
+                    # ส่วนที่ 1: พิกัด
+                    BoxComponent(
+                        layout="vertical",
+                        background_color="#FEE2E2",
+                        corner_radius="md",
+                        padding_all="md",
+                        contents=[
+                            TextComponent(text="📍 ตำแหน่งที่เกิดเหตุ", size="xs", color="#B91C1C", weight="bold"),
+                            ButtonComponent(
+                                action=LocationAction(label="แชร์พิกัดปัจจุบัน"),
+                                style="primary",
+                                color="#EF4444",
+                                margin="sm",
+                                height="sm"
+                            )
+                        ]
+                    ),
+                    
+                    # ส่วนที่ 2: ระดับความรุนแรง (จำลองปุ่มเลือก)
+                    TextComponent(text="🌊 ระดับน้ำปัจจุบัน:", size="xs", color="#4B5563", margin="md"),
+                    BoxComponent(
+                        layout="horizontal",
+                        spacing="sm",
+                        contents=[
+                            ButtonComponent(action=MessageAction(label="วิกฤต", text="🚨 ระดับน้ำวิกฤต"), style="outline", color="#EF4444", height="sm"),
+                            ButtonComponent(action=MessageAction(label="สูง", text="🌊 ระดับน้ำสูง"), style="outline", color="#EF4444", height="sm"),
+                            ButtonComponent(action=MessageAction(label="ปกติ", text="✅ ระดับน้ำปกติ"), style="outline", color="#10B981", height="sm")
+                        ]
+                    ),
+                    
+                    # ส่วนที่ 3: กลุ่มผู้ประสบภัย
+                    TextComponent(text="👥 กลุ่มผู้ประสบภัย:", size="xs", color="#4B5563", margin="md"),
+                    BoxComponent(
+                        layout="vertical",
+                        spacing="xs",
+                        contents=[
+                            ButtonComponent(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา"), style="secondary", height="sm", color="#F3F4F6"),
+                            ButtonComponent(action=MessageAction(label="🚑 ผู้ป่วยติดเตียง", text="🚑 มีผู้ป่วยติดเตียง"), style="secondary", height="sm", color="#F3F4F6"),
+                            ButtonComponent(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง"), style="secondary", height="sm", color="#F3F4F6")
+                        ]
+                    )
+                ]
+            ),
+            footer=BoxComponent(
+                layout="vertical",
+                contents=[
+                    TextComponent(text="*ข้อมูลจะถูกส่งไปยังทีมกู้ภัยทันที", size="xxs", color="#9CA3AF", align="center", margin="sm")
+                ]
+            )
+        )
+    )
+
+def build_ai_response_flex(ai_text, original_question):
+    """สร้างกล่องคำตอบ AI พร้อมปุ่ม Research ข้อมูลเชิงลึก"""
+    return FlexSendMessage(
+        alt_text="🤖 คำตอบจาก FLOODCARE AI",
+        contents=BubbleContainer(
+            body=BoxComponent(
+                layout="vertical",
+                contents=[
+                    BoxComponent(
+                        layout="horizontal",
+                        contents=[
+                            TextComponent(text="🤖 FLOODCARE AI", weight="bold", size="sm", color="#1E40AF", flex=1),
+                            TextComponent(text="BETA", size="xxs", color="#9CA3AF", align="end")
+                        ]
+                    ),
+                    SeparatorComponent(margin="md"),
+                    TextComponent(text=ai_text, wrap=True, size="sm", color="#374151", margin="md"),
+                    
+                    # ปุ่ม Research ข้อมูลเชิงลึก
+                    BoxComponent(
+                        layout="vertical",
+                        margin="xl",
+                        spacing="sm",
+                        contents=[
+                            TextComponent(text="ต้องการข้อมูลเชิงลึกเรื่องความปลอดภัย/การรักษา?", size="xxs", color="#9CA3AF", align="center"),
+                            ButtonComponent(
+                                action=MessageAction(label="🔍 ค้นหาข้อมูลวิจัย (Research AI)", text=f"Research: {original_question}"),
+                                style="primary",
+                                color="#1E40AF",
+                                height="sm"
+                            )
+                        ]
+                    )
+                ]
+            )
+        )
+    )
+
+def build_language_selector_flex():
+    """สร้างแผ่นเลือกภาษามินิมอล"""
+    return FlexSendMessage(
+        alt_text="🌐 เลือกภาษา / Select Language",
+        contents=BubbleContainer(
+            size="sm",
+            body=BoxComponent(
+                layout="vertical",
+                spacing="md",
+                contents=[
+                    TextComponent(text="🌐 Language Settings", weight="bold", size="md", color="#1F2937", align="center"),
+                    TextComponent(text="โปรดเลือกภาษาที่ต้องการใช้งาน\nPlease select your language", size="xxs", color="#9CA3AF", align="center", wrap=True),
+                    SeparatorComponent(margin="md"),
+                    ButtonComponent(
+                        action=MessageAction(label="[ TH ] ภาษาไทย", text="ตั้งค่าภาษา: TH"),
+                        style="secondary",
+                        color="#F3F4F6",
+                        height="sm"
+                    ),
+                    ButtonComponent(
+                        action=MessageAction(label="[ EN ] English", text="ตั้งค่าภาษา: EN"),
+                        style="secondary",
+                        color="#F3F4F6",
+                        height="sm"
+                    ),
+                    ButtonComponent(
+                        action=MessageAction(label="[ JP ] 日本語", text="ตั้งค่าภาษา: JP"),
+                        style="secondary",
+                        color="#F3F4F6",
+                        height="sm"
+                    ),
+                    ButtonComponent(
+                        action=MessageAction(label="[ MY ] Bahasa Melayu", text="ตั้งค่าภาษา: MY"),
+                        style="secondary",
+                        color="#F3F4F6",
+                        height="sm"
+                    )
+                ]
+            }
+        )
+    )
+
+def set_user_language(sheets_client, sheet_id, user_id, lang):
+    """บันทึกภาษาที่ผู้ใช้เลือกลงใน Google Sheets"""
+    if not sheets_client or not sheet_id:
+        return False
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        try:
+            ws = sheet.worksheet("User_Settings")
+        except:
+            ws = sheet.add_worksheet(title="User_Settings", rows="1000", cols="5")
+            ws.append_row(["UserID", "Language", "UpdatedAt"])
+        
+        records = ws.get_all_records()
+        row_idx = -1
+        for idx, row in enumerate(records):
+            if str(row.get("UserID")) == str(user_id):
+                row_idx = idx + 2 # +2 เพราะ header และ 0-index
+                break
+        
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if row_idx != -1:
+            ws.update_cell(row_idx, 2, lang)
+            ws.update_cell(row_idx, 3, timestamp)
+        else:
+            ws.append_row([user_id, lang, timestamp])
+        return True
+    except Exception as e:
+        print(f"Error setting language: {e}")
+        return False
+
+def get_user_language(sheets_client, sheet_id, user_id):
+    """ดึงค่าภาษาของผู้ใช้จาก Google Sheets"""
+    if not sheets_client or not sheet_id:
+        return "TH" # Default
+    try:
+        sheet = sheets_client.open_by_key(sheet_id)
+        ws = sheet.worksheet("User_Settings")
+        records = ws.get_all_records()
+        for row in records:
+            if str(row.get("UserID")) == str(user_id):
+                return row.get("Language", "TH")
+    except:
+        pass
+    return "TH"
+
+def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weather_info=None, water_flow=None):
     header_box = BoxComponent(
         layout="vertical",
         contents=[
-            TextComponent(text="🌊 รายงานระดับน้ำรายพิกัด", weight="bold", size="lg", color="#1E3A8A"),
-            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f} | {timestamp}", size="xs", color="#6B7280", margin="sm")
+            TextComponent(text="🌊 ระดับน้ำใกล้คุณ", weight="bold", size="xl", color="#1F2937"),
+            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#6B7280"),
+            TextComponent(text=f"🕒 อัปเดตล่าสุด: {timestamp}", size="xs", color="#9CA3AF")
         ]
     )
 
     stations_box = BoxComponent(
         layout="vertical",
+        spacing="md",
         margin="lg",
-        contents=[TextComponent(text="📡 สถานีตรวจวัดใกล้คุณ", weight="bold", size="sm", color="#374151")]
+        contents=[]
     )
 
     if not stations:
         stations_box.contents.append(
-            TextComponent(text="⚠️ ไม่พบสถานีในรัศมี 50 กม.", size="xs", color="#EF4444", margin="sm")
+            TextComponent(text="⚠️ ไม่พบสถานีตรวจวัดในพื้นที่ใกล้เคียง", size="sm", color="#EF4444", margin="md")
         )
     else:
         for st in stations:
             wl = st.get("water_level")
             distance = st.get("distance_km", 0)
-            situation = st.get("situation", "ไม่มีข้อมูล")
-            trend = st.get("trend", "คงที่")
-
+            
             wl_value = "-"
-            risk_color = "#9CA3AF"
             assessment = assess_water_level_status(None)
 
             if wl and wl.get("value") not in [None, "-", ""]:
                 try:
                     wl_value = float(wl["value"])
                     bl = st.get("bank_level")
-                    assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None)
-                    risk_color = assessment["color"]
+                    situation = st.get("situation") # ดึงสถานะจากข้อมูลสถานี
+                    assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None, situation)
                 except (ValueError, TypeError):
                     pass
 
             station_card = BoxComponent(
                 layout="vertical",
-                margin="sm",
-                background_color="#F9FAFB",
-                corner_radius="md",
-                padding_all="sm",
                 contents=[
-                    TextComponent(text=f"📍 {st['stationName']}", weight="bold", size="xs", color="#1F2937"),
-                    TextComponent(text=f"ห่าง {distance:.2f} กม. | ระดับ {wl_value} ม. / ตลิ่ง {st.get('bank_level', '-')} ม.", size="xxs", color="#4B5563", margin="xs"),
+                    TextComponent(text=f"{st['stationName']} (ห่าง {distance:.2f} กม.)", weight="bold", size="sm", color="#1F2937"),
                     BoxComponent(
                         layout="horizontal",
-                        margin="xs",
+                        margin="sm",
                         spacing="sm",
                         contents=[
                             BoxComponent(
                                 layout="vertical",
-                                background_color=risk_color,
-                                corner_radius="sm",
-                                padding_start="sm",
-                                padding_end="sm",
+                                background_color=assessment.get("bg_color", "#9CA3AF"),
+                                corner_radius="xl", # Status Pill shape
+                                padding_start="md",
+                                padding_end="md",
+                                padding_top="xs",
+                                padding_bottom="xs",
                                 contents=[
-                                    TextComponent(text=assessment["status"], size="xxs", color="#FFFFFF", weight="bold")
+                                    TextComponent(text=assessment["status"], size="xs", color=assessment.get("text_color", "#FFFFFF"), weight="bold", align="center")
                                 ]
                             ),
-                            TextComponent(text=f"ต่ำกว่าตลิ่ง: {assessment['diff_text']} ม.", size="xxs", color=risk_color, weight="bold")
+                            TextComponent(text=assessment["advice"], size="xs", color="#4B5563", gravity="center")
                         ]
                     ),
-                    TextComponent(text=f"แนวโน้ม: {trend} | {assessment['advice']}", size="xxs", color="#6B7280", margin="xs")
+                    TextComponent(
+                        text=f"ระดับน้ำ: {wl_value} ม. | ตลิ่ง: {st.get('bank_level', '-')} ม.", 
+                        size="xs", color="#4B5563", margin="sm"
+                    ),
+                    BoxComponent(
+                        layout="horizontal",
+                        contents=[
+                            TextComponent(text="ต่ำกว่าตลิ่ง: ", size="xs", color="#4B5563"),
+                            TextComponent(text=f"{assessment['diff_text']} ม.", size="xs", color=assessment.get("text_color", "#1F2937"), weight="bold")
+                        ]
+                    )
                 ]
             )
             stations_box.contents.append(station_card)
@@ -1284,29 +1462,30 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
         layout="vertical",
         margin="lg",
         contents=[
-            SeparatorComponent(margin="sm"),
-            TextComponent(text="📌 แหล่งข้อมูล: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)", size="xxs", color="#9CA3AF", margin="sm"),
+            SeparatorComponent(margin="md"),
+            TextComponent(text="📌 อ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)", size="xxs", color="#9CA3AF", margin="sm"),
             ButtonComponent(
                 style="link",
                 height="sm",
-                action=URIAction(label="ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=THAIWATER_WEB_URL),
+                action=URIAction(label="🔗 ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=THAIWATER_WEB_URL),
                 color="#2563EB"
             )
         ]
     )
 
     bubble = BubbleContainer(
-        header=header_box,
         body=BoxComponent(
             layout="vertical",
             contents=[
+                header_box,
+                SeparatorComponent(margin="md"),
                 stations_box,
                 footer_box
             ]
         )
     )
 
-    return FlexSendMessage(alt_text="รายงานระดับน้ำรายพิกัด", contents=bubble)
+    return FlexSendMessage(alt_text="รายงานระดับน้ำจากสถานีใกล้คุณ", contents=bubble)
 
 # =============================================================================
 # 12. GREETING & QUICK INFO FLEX MESSAGE
@@ -1341,19 +1520,25 @@ def is_greeting(text):
     return False
 
 def get_greeting_message(user_name="คุณ"):
+    # เช็คเวลาเพื่อทักทายพิเศษตอนเช้า
+    now = datetime.datetime.now()
+    time_greeting = "สวัสดี"
+    if 5 <= now.hour < 10:
+        time_greeting = "อรุณสวัสดิ์"
+    
     text = (
-        f"สวัสดี คุณ {user_name}\n"
+        f"{time_greeting} คุณ {user_name}\n"
         "ผมคือ FLOODCARE AI\n"
-        "แชทบอทอัจฉริยะสำหรับ ติดตามและพยากรณ์ระดับน้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยน้ำท่วม\n"
-        "🔍 ผมช่วยคุณได้\n"
-        "1. เบอร์โทรฉุกเฉิน\n"
-        "2. SOS แจ้งเหตุฉุกเฉิน\n"
-        "3. ค้นหาศูนย์อพยพ\n"
-        "4. ตรวจสอบระดับน้ำตรวจสอบข้อมูลระดับน้ำ\n"
-        "5. แจ้งความต้องการหรือขอความช่วยเหลือด้านต่าง ๆ\n"
-        "6. สอบถามข้อมูลจาก AI\n\n"
+        "แชทบอทอัจฉริยะสำหรับ ติดตามสถานการณ์น้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยแบบครบวงจรครับ\n\n"
+        "🔍 ผมช่วยคุณได้ดังนี้:\n"
+        "1. 📞 เบอร์โทรฉุกเฉิน\n"
+        "2. 🚨 SOS แจ้งเหตุฉุกเฉิน\n"
+        "3. 🏠 ค้นหาศูนย์อพยพใกล้เคียง\n"
+        "4. 🌊 ตรวจสอบระดับน้ำแบบเรียลไทม์\n"
+        "5. 📦 แจ้งความต้องการของใช้จำเป็น\n"
+        "6. 🤖 สอบถามข้อมูลจาก AI อัจฉริยะ\n\n"
         "🤝 ติดต่อและช่วยเหลือผู้ประสบภัยน้ำท่วม\n"
-        "ผมพร้อมตอบทุกคำถามเกี่ยวกับสถานการณ์น้ำได้ตลอดเวลาครับ 💧😊"
+        "ผมพร้อมตอบทุกคำถามและช่วยเหลือคุณตลอด 24 ชั่วโมงครับ 💧😊"
     )
     return TextSendMessage(text=text)
 
