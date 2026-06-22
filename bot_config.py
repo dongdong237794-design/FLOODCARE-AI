@@ -1185,24 +1185,32 @@ def build_water_level_text_report(user_lat, user_lon, timestamp, stations, weath
 
     return "\n".join(lines)
 
-def build_sos_form_flex(user_name="คุณ"):
-    """สร้าง SOS Flex Form สีแดงมินิมอลสำหรับการแจ้งเหตุแบบรวดเร็ว"""
+def build_sos_form_flex(user_name="คุณ", lang="TH"):
+    """สร้าง SOS Flex Form สีแดงมินิมอลสำหรับการแจ้งเหตุแบบรวดเร็ว (รองรับหลายภาษา)"""
+    translations = {
+        "TH": {"alt": "🚨 แจ้งเหตุฉุกเฉิน SOS", "title": "🚨 แจ้งเหตุฉุกเฉิน SOS", "hi": "สวัสดีครับคุณ", "info": "โปรดระบุข้อมูลเพื่อประสานงานกู้ภัย:", "loc": "📍 ตำแหน่งที่เกิดเหตุ", "btn_loc": "แชร์พิกัดปัจจุบัน", "wl": "🌊 ระดับน้ำปัจจุบัน:", "cri": "วิกฤต", "high": "สูง", "norm": "ปกติ", "grp": "👥 กลุ่มผู้ประสบภัย:", "child": "👶 เด็กเล็ก/คนชรา", "sick": "🚑 ผู้ป่วยติดเตียง", "pet": "🐶 สัตว์เลี้ยง", "footer": "*ข้อมูลจะถูกส่งไปยังทีมกู้ภัยทันที"},
+        "EN": {"alt": "🚨 SOS Emergency", "title": "🚨 SOS Emergency", "hi": "Hello", "info": "Please provide info for rescue:", "loc": "📍 Incident Location", "btn_loc": "Share Current Location", "wl": "🌊 Current Water Level:", "cri": "Critical", "high": "High", "norm": "Normal", "grp": "👥 Victim Groups:", "child": "👶 Children/Elderly", "sick": "🚑 Bedridden Patients", "pet": "🐶 Pets", "footer": "*Data sent to rescue team immediately"},
+        "JP": {"alt": "🚨 SOS 緊急通報", "title": "🚨 SOS 緊急通報", "hi": "こんにちは", "info": "救助のための情報を提供してください:", "loc": "📍 発生場所", "btn_loc": "現在地を共有", "wl": "🌊 現在の水位:", "cri": "危機的", "high": "高い", "norm": "通常", "grp": "👥 被災者グループ:", "child": "👶 子供/高齢者", "sick": "🚑 寝たきり患者", "pet": "🐶 ペット", "footer": "*データは直ちに救助隊に送信されます"},
+        "MY": {"alt": "🚨 Kecemasan SOS", "title": "🚨 Kecemasan SOS", "hi": "Helo", "info": "Sila berikan maklumat untuk menyelamat:", "loc": "📍 Lokasi Kejadian", "btn_loc": "Kongsi Lokasi Semasa", "wl": "🌊 Aras Air Semasa:", "cri": "Kritikal", "high": "Tinggi", "norm": "Normal", "grp": "👥 Kumpulan Mangsa:", "child": "👶 Kanak-kanak/Warga Emas", "sick": "🚑 Pesakit Terlantar", "pet": "🐶 Haiwan Peliharaan", "footer": "*Data dihantar ke pasukan penyelamat segera"}
+    }
+    t = translations.get(lang, translations["TH"])
+
     return FlexSendMessage(
-        alt_text="🚨 แจ้งเหตุฉุกเฉิน SOS",
+        alt_text=t["alt"],
         contents=BubbleContainer(
             styles=BubbleStyle(header=BlockStyle(background_color="#EF4444")),
             header=BoxComponent(
                 layout="vertical",
                 contents=[
-                    TextComponent(text="🚨 แจ้งเหตุฉุกเฉิน SOS", weight="bold", size="lg", color="#FFFFFF", align="center")
+                    TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")
                 ]
             ),
             body=BoxComponent(
                 layout="vertical",
                 spacing="md",
                 contents=[
-                    TextComponent(text=f"สวัสดีครับคุณ {user_name}", size="sm", color="#4B5563", weight="bold"),
-                    TextComponent(text="โปรดระบุข้อมูลเพื่อประสานงานกู้ภัย:", size="xs", color="#9CA3AF"),
+                    TextComponent(text=f"{t['hi']} {user_name}", size="sm", color="#4B5563", weight="bold"),
+                    TextComponent(text=t["info"], size="xs", color="#9CA3AF"),
                     
                     # ส่วนที่ 1: พิกัด
                     BoxComponent(
@@ -1211,9 +1219,9 @@ def build_sos_form_flex(user_name="คุณ"):
                         corner_radius="md",
                         padding_all="md",
                         contents=[
-                            TextComponent(text="📍 ตำแหน่งที่เกิดเหตุ", size="xs", color="#B91C1C", weight="bold"),
+                            TextComponent(text=t["loc"], size="xs", color="#B91C1C", weight="bold"),
                             ButtonComponent(
-                                action=LocationAction(label="แชร์พิกัดปัจจุบัน"),
+                                action=LocationAction(label=t["btn_loc"]),
                                 style="primary",
                                 color="#EF4444",
                                 margin="sm",
@@ -1222,27 +1230,27 @@ def build_sos_form_flex(user_name="คุณ"):
                         ]
                     ),
                     
-                    # ส่วนที่ 2: ระดับความรุนแรง (จำลองปุ่มเลือก)
-                    TextComponent(text="🌊 ระดับน้ำปัจจุบัน:", size="xs", color="#4B5563", margin="md"),
+                    # ส่วนที่ 2: ระดับความรุนแรง
+                    TextComponent(text=t["wl"], size="xs", color="#4B5563", margin="md"),
                     BoxComponent(
                         layout="horizontal",
                         spacing="sm",
                         contents=[
-                            ButtonComponent(action=MessageAction(label="วิกฤต", text="🚨 ระดับน้ำวิกฤต"), style="outline", color="#EF4444", height="sm"),
-                            ButtonComponent(action=MessageAction(label="สูง", text="🌊 ระดับน้ำสูง"), style="outline", color="#EF4444", height="sm"),
-                            ButtonComponent(action=MessageAction(label="ปกติ", text="✅ ระดับน้ำปกติ"), style="outline", color="#10B981", height="sm")
+                            ButtonComponent(action=MessageAction(label=t["cri"], text=f"🚨 {t['wl']} {t['cri']}"), style="outline", color="#EF4444", height="sm"),
+                            ButtonComponent(action=MessageAction(label=t["high"], text=f"🌊 {t['wl']} {t['high']}"), style="outline", color="#EF4444", height="sm"),
+                            ButtonComponent(action=MessageAction(label=t["norm"], text=f"✅ {t['wl']} {t['norm']}"), style="outline", color="#10B981", height="sm")
                         ]
                     ),
                     
                     # ส่วนที่ 3: กลุ่มผู้ประสบภัย
-                    TextComponent(text="👥 กลุ่มผู้ประสบภัย:", size="xs", color="#4B5563", margin="md"),
+                    TextComponent(text=t["grp"], size="xs", color="#4B5563", margin="md"),
                     BoxComponent(
                         layout="vertical",
                         spacing="xs",
                         contents=[
-                            ButtonComponent(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา"), style="secondary", height="sm", color="#F3F4F6"),
-                            ButtonComponent(action=MessageAction(label="🚑 ผู้ป่วยติดเตียง", text="🚑 มีผู้ป่วยติดเตียง"), style="secondary", height="sm", color="#F3F4F6"),
-                            ButtonComponent(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง"), style="secondary", height="sm", color="#F3F4F6")
+                            ButtonComponent(action=MessageAction(label=t["child"], text=t["child"]), style="secondary", height="sm", color="#F3F4F6"),
+                            ButtonComponent(action=MessageAction(label=t["sick"], text=t["sick"]), style="secondary", height="sm", color="#F3F4F6"),
+                            ButtonComponent(action=MessageAction(label=t["pet"], text=t["pet"]), style="secondary", height="sm", color="#F3F4F6")
                         ]
                     )
                 ]
@@ -1250,16 +1258,24 @@ def build_sos_form_flex(user_name="คุณ"):
             footer=BoxComponent(
                 layout="vertical",
                 contents=[
-                    TextComponent(text="*ข้อมูลจะถูกส่งไปยังทีมกู้ภัยทันที", size="xxs", color="#9CA3AF", align="center", margin="sm")
+                    TextComponent(text=t.get("footer", "*Data sent to rescue team immediately"), size="xxs", color="#9CA3AF", align="center", margin="sm")
                 ]
             )
         )
     )
 
-def build_ai_response_flex(ai_text, original_question):
-    """สร้างกล่องคำตอบ AI พร้อมปุ่ม Research ข้อมูลเชิงลึก"""
+def build_ai_response_flex(ai_text, original_question, lang="TH"):
+    """สร้างกล่องคำตอบ AI พร้อมปุ่ม Research ข้อมูลเชิงลึก (รองรับหลายภาษา)"""
+    translations = {
+        "TH": {"alt": "🤖 คำตอบจาก AI", "info": "ต้องการข้อมูลเชิงลึกเรื่องความปลอดภัย/การรักษา?", "btn": "🔍 ค้นหาข้อมูลวิจัย (Research AI)", "cmd": "Research:"},
+        "EN": {"alt": "🤖 AI Response", "info": "Need in-depth safety/medical info?", "btn": "🔍 Research AI", "cmd": "Research:"},
+        "JP": {"alt": "🤖 AIの回答", "info": "安全性や医療に関する詳細情報が必要ですか？", "btn": "🔍 詳細リサーチ (Research AI)", "cmd": "Research:"},
+        "MY": {"alt": "🤖 Jawapan AI", "info": "Perlu info keselamatan/perubatan mendalam?", "btn": "🔍 Penyelidikan AI", "cmd": "Research:"}
+    }
+    t = translations.get(lang, translations["TH"])
+
     return FlexSendMessage(
-        alt_text="🤖 คำตอบจาก FLOODCARE AI",
+        alt_text=t["alt"],
         contents=BubbleContainer(
             body=BoxComponent(
                 layout="vertical",
@@ -1280,9 +1296,9 @@ def build_ai_response_flex(ai_text, original_question):
                         margin="xl",
                         spacing="sm",
                         contents=[
-                            TextComponent(text="ต้องการข้อมูลเชิงลึกเรื่องความปลอดภัย/การรักษา?", size="xxs", color="#9CA3AF", align="center"),
+                            TextComponent(text=t["info"], size="xxs", color="#9CA3AF", align="center"),
                             ButtonComponent(
-                                action=MessageAction(label="🔍 ค้นหาข้อมูลวิจัย (Research AI)", text=f"Research: {original_question}"),
+                                action=MessageAction(label=t["btn"], text=f"{t['cmd']} {original_question}"),
                                 style="primary",
                                 color="#1E40AF",
                                 height="sm"
@@ -1332,7 +1348,7 @@ def build_language_selector_flex():
                         height="sm"
                     )
                 ]
-            )
+            }
         )
     )
 
@@ -1463,11 +1479,11 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
         margin="lg",
         contents=[
             SeparatorComponent(margin="md"),
-            TextComponent(text="📌 อ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)", size="xxs", color="#9CA3AF", margin="sm"),
+            TextComponent(text=t["ref"], size="xxs", color="#9CA3AF", margin="sm"),
             ButtonComponent(
                 style="link",
                 height="sm",
-                action=URIAction(label="🔗 ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=THAIWATER_WEB_URL),
+                action=URIAction(label=t["web"], uri=THAIWATER_WEB_URL),
                 color="#2563EB"
             )
         ]
