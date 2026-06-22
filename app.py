@@ -23,7 +23,7 @@ app.register_blueprint(dashboard_bp)
 # ถ้าข้อมูลเก่ากว่า WATER_DATA_MAX_AGE_MINUTES (หรือยังไม่เคย sync)
 # จะเรียก bot_config.sync_water_levels_to_sheets() ให้อัตโนมัติ
 # =============================================================================
-WATER_DATA_MAX_AGE_MINUTES = 12
+WATER_DATA_MAX_AGE_MINUTES = 10
 
 
 def _ensure_water_data_fresh(sheets_client, sheet_id):
@@ -170,6 +170,35 @@ def handle_text_message(event):
     state = bot_config.USER_STATES.get(user_id)
     sheets_client = bot_config.get_sheets_client()
     clean_sheet_id = bot_config.extract_sheet_id(bot_config.GOOGLE_SHEET_ID)
+
+    # ===========================
+    # FEATURE: เปลี่ยนภาษา (Language Settings)
+    # ===========================
+    if user_text in ["เปลี่ยนภาษา", "change language", "lang"]:
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            bot_config.build_language_selector_flex()
+        )
+        return
+
+    if user_text.startswith("ตั้งค่าภาษา: "):
+        lang = user_text.replace("ตั้งค่าภาษา: ", "").strip()
+        success = bot_config.set_user_language(sheets_client, clean_sheet_id, user_id, lang)
+        
+        if lang == "TH":
+            msg = "✅ เปลี่ยนภาษาเป็นภาษาไทยเรียบร้อยแล้วครับ"
+        elif lang == "JP":
+            msg = "✅ 日本語に設定されました。"
+        elif lang == "MY":
+            msg = "✅ Bahasa telah ditukar kepada Bahasa Melayu."
+        else:
+            msg = "✅ Language changed to English successfully."
+            
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=msg)
+        )
+        return
 
     # ===========================
     # FEATURE: พิมพ์ "ยกเลิก"
@@ -381,31 +410,7 @@ def handle_text_message(event):
                 "💊 ขาดแคลนยา/อาหารหนัก": "ขาดแคลนยา"
             }
             bot_config.USER_DATA[user_id]["urgency_level"] = urgency_map.get(user_text, user_text)
-            bot_config.USER_STATES[user_id] = "sos_step4"
-
-            quick_reply = QuickReply(
-                items=[
-                    QuickReplyButton(action=MessageAction(label="⏩ ข้ามขั้นตอนนี้", text="ข้ามขั้นตอนนี้"))
-                ]
-            )
-            bot_config.line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(
-                    text="📸 ส่งรูปถ่ายสภาพหน้างาน (ถ้าทำได้)\n\nถ่ายรูประดับน้ำหรือสภาพในบ้าน 1 รูป เพื่อให้ทีมกู้ภัยเตรียมอุปกรณ์ได้ถูกต้องครับ\n\nหรือกด 'ข้ามขั้นตอนนี้'",
-                    quick_reply=quick_reply
-                )
-            )
-            return
-
-        # ---- Step 4: รอรูปภาพหรือข้าม ----
-        elif state == "sos_step4":
-            if user_text == "ข้ามขั้นตอนนี้":
-                bot_config.USER_DATA[user_id]["photo_url"] = "-"
-            else:
-                bot_config.USER_DATA[user_id]["photo_url"] = "-"
-                if user_text and user_text != "ข้ามขั้นตอนนี้":
-                    bot_config.USER_DATA[user_id]["note"] = user_text
-
+            bot_config.USER_DATA[user_id]["photo_url"] = "-"
             bot_config.USER_STATES[user_id] = "sos_confirm"
             _send_sos_summary(event, user_id)
             return
@@ -675,6 +680,21 @@ def handle_text_message(event):
             )
         )
 
+    elif user_text == "เช็กสภาพอากาศ" or "สภาพอากาศ" in user_text:
+        bot_config.USER_STATES[user_id] = "waiting_weather_location"
+        location_quick_reply = QuickReply(
+            items=[
+                QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเช็กสภาพอากาศ"))
+            ]
+        )
+        bot_config.line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="🌦️ โปรดกดแชร์พิกัด 'Location' เพื่อตรวจสอบสภาพอากาศและโอกาสเกิดฝนในพื้นที่ของคุณครับ",
+                quick_reply=location_quick_reply
+            )
+        )
+
     elif user_text == "SOS ขอความช่วยเหลือ":
         # ใช้ฟังก์ชัน is_user_registered() ที่เช็คจาก Sheets
         is_reg, first_name, last_name, phone = False, "", "", "-"
@@ -693,26 +713,9 @@ def handle_text_message(event):
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         else:
-            bot_config.USER_STATES[user_id] = "sos_location"
-            bot_config.USER_DATA[user_id] = {
-                "first_name": first_name,
-                "last_name": last_name,
-                "phone": phone
-            }
-            location_quick_reply = QuickReply(
-                items=[
-                    QuickReplyButton(action=LocationAction(label="📍 ส่งพิกัดตำแหน่งแจ้งเหตุ"))
-                ]
-            )
-            reply_text = (
-                f"🚨 เริ่มขั้นตอนแจ้งเหตุฉุกเฉิน\n\n"
-                f"สวัสดีครับคุณ {first_name}!\n"
-                f"โปรดกดปุ่มด้านล่างเพื่อส่งพิกัดให้ทีมกู้ภัยครับ"
-            )
-            bot_config.line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=reply_text, quick_reply=location_quick_reply)
-            )
+            # ใช้ SOS Flex Form แบบใหม่ (สีแดงมินิมอล)
+            sos_flex = bot_config.build_sos_form_flex(first_name)
+            bot_config.line_bot_api.reply_message(event.reply_token, sos_flex)
 
     elif user_text == "แจ้งความต้องการเพิ่มเติม" or user_text == "ความต้องการ":
         bot_config.USER_STATES[user_id] = "needs_location"
@@ -733,16 +736,54 @@ def handle_text_message(event):
         reply_text = "🤖 พิมพ์คำถามหรือข้อกังวลเกี่ยวกับภัยน้ำท่วมได้ทันทีครับ"
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
+    elif bot_config.is_greeting(user_text):
+        bot_config.handle_greeting_logic(event)
+
+    elif user_text.startswith("Research:"):
+        # ระบบ Research AI เชิงลึก (On-Demand Research)
+        original_query = user_text.replace("Research:", "").strip()
+        bot_config.show_loading_animation(user_id, loading_seconds=15)
+        
+        try:
+            research_prompt = (
+                f"ในฐานะผู้เชี่ยวชาญด้านความปลอดภัยและการรักษาพยาบาลในภาวะน้ำท่วม "
+                f"โปรดทำการวิจัยและให้ข้อมูลเชิงลึกเกี่ยวกับเรื่องนี้: '{original_query}'\n\n"
+                f"เงื่อนไข:\n"
+                f"1. เน้นข้อมูลด้านความปลอดภัยและการรักษาพยาบาล\n"
+                f"2. ระบุแหล่งที่มาของข้อมูล (เช่น กรมควบคุมโรค, WHO, ปภ.)\n"
+                f"3. ใช้ภาษาที่เป็นทางการแต่เข้าใจง่าย\n"
+                f"4. ตอบให้ละเอียดและเป็นลำดับขั้นตอน"
+            )
+            response = bot_config.gemini_model.generate_content(research_prompt)
+            research_result = bot_config.clean_text_for_line(response.text.strip())
+            
+            # ส่งผลการวิจัยกลับเป็น TextSendMessage (เพราะข้อมูลอาจจะยาว)
+            bot_config.line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage(text=f"📊 ผลการวิจัยเชิงลึก (Research AI):\n\n{research_result}")
+            )
+        except Exception as e:
+            print(f"Research AI Error: {e}")
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ ระบบ Research ขัดข้อง โปรดลองใหม่ภายหลังครับ"))
+
     else:
-        # ระบบคุยตอบโต้อิสระด้วย AI
+        # ระบบคุยตอบโต้อิสระด้วย AI (Normal Chat)
+        bot_config.show_loading_animation(user_id, loading_seconds=5)
+        
         ai_response = ""
         try:
-            response = bot_config.gemini_model.generate_content(user_text)
+            prompt = f"ตอบคำถามนี้อย่างกระชับและรวดเร็ว: {user_text}"
+            response = bot_config.gemini_model.generate_content(prompt)
             ai_response = bot_config.clean_text_for_line(response.text.strip())
         except Exception as e:
             print(f"Gemini Error: {e}")
             ai_response = "⚠️ AI ขัดข้องชั่วคราว หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
 
+        # ส่งคำตอบเป็น Flex Message พร้อมปุ่ม Research
+        ai_flex = bot_config.build_ai_response_flex(ai_response, user_text)
+        bot_config.line_bot_api.reply_message(event.reply_token, ai_flex)
+
+        # บันทึก Log ลง Sheets
         sheets_client = bot_config.get_sheets_client()
         if sheets_client:
             try:
@@ -751,8 +792,6 @@ def handle_text_message(event):
                 log_ws.append_row([timestamp, user_id, user_text, ai_response])
             except Exception as se:
                 print(f"Sheets Log Error: {se}")
-
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
 
 
 # =============================================================================
@@ -804,23 +843,23 @@ def handle_location_message(event):
         nearest_shelters = []
         for sh in shelter_list:
             distance = bot_config.calculate_distance(latitude, longitude, sh["lat"], sh["lon"])
-            if distance <= 20.0:
-                vacancy_status = bot_config.check_shelter_vacancy(sh["capacity"], sh["occupancy"])
-                nearest_shelters.append({
-                    "name": sh["name"],
-                    "distance": distance,
-                    "vacancy": vacancy_status,
-                    "lat": sh["lat"],
-                    "lon": sh["lon"]
-                })
+            # ไม่จำกัดระยะทาง 20 กม. ตามคำสั่งใหม่
+            vacancy_status = bot_config.check_shelter_vacancy(sh["capacity"], sh["occupancy"])
+            nearest_shelters.append({
+                "name": sh["name"],
+                "distance": distance,
+                "vacancy": vacancy_status,
+                "lat": sh["lat"],
+                "lon": sh["lon"]
+            })
 
         nearest_shelters.sort(key=lambda x: x["distance"])
         top_shelters = nearest_shelters[:3]
 
         if not top_shelters:
-            reply_text = "📍 ไม่พบศูนย์พักพิงในรัศมี 20 กม. โปรดติดต่อ ปภ. 1784 ครับ"
+            reply_text = "📍 ไม่พบข้อมูลศูนย์พักพิงในระบบ โปรดติดต่อ ปภ. 1784 ครับ"
         else:
-            reply_text = "📍 ศูนย์พักพิงใกล้คุณ (รัศมี 20 กม.):\n\n"
+            reply_text = "📍 ศูนย์พักพิงใกล้คุณที่สุด:\n\n"
             for index, sh in enumerate(top_shelters, 1):
                 reply_text += (
                     f"{index}. {sh['name']}\n"
@@ -831,6 +870,22 @@ def handle_location_message(event):
             reply_text += "⚠️ โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน"
 
         bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+
+    # ===========================
+    # 12.1.1 ตรวจสอบสภาพอากาศ (Weather Only)
+    # ===========================
+    if state == "waiting_weather_location":
+        bot_config.show_loading_animation(user_id, loading_seconds=5)
+        weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
+        
+        reply_text = (
+            f"📍 รายงานสภาพอากาศพิกัด: {latitude:.4f}, {longitude:.4f}\n"
+            f"🕒 ข้อมูล ณ เวลา: {timestamp}\n\n"
+            f"{weather_info}\n\n"
+            "⚠️ ข้อมูลนี้เป็นการพยากรณ์เบื้องต้น โปรดสังเกตท้องฟ้าจริงประกอบด้วยครับ"
+        )
+        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        return
 
     # ===========================
     # 12.2 ตรวจสอบระดับน้ำ (Lazy Sync from Sheets)
@@ -863,19 +918,20 @@ def handle_location_message(event):
             except Exception as e:
                 print(f"[WaterLevel] API fallback failed: {e}")
 
-        weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
-        water_flow = bot_config.get_live_water_scraper(latitude, longitude)
+        # ไม่แสดงสภาพอากาศในส่วนของระดับน้ำตามคำสั่ง
+        # weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
+        # water_flow = bot_config.get_live_water_scraper(latitude, longitude)
 
         try:
             flex_msg = bot_config.build_water_level_flex_message(
-                latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
+                latitude, longitude, timestamp, thaiwater_stations
             )
             bot_config.line_bot_api.reply_message(event.reply_token, flex_msg)
             print("[WaterLevel] Sent Flex Message")
         except Exception as e:
             print(f"[WaterLevel] Flex failed: {e}, using text")
             text_report = bot_config.build_water_level_text_report(
-                latitude, longitude, timestamp, thaiwater_stations, weather_info, water_flow
+                latitude, longitude, timestamp, thaiwater_stations, None, None
             )
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=text_report))
 
@@ -979,15 +1035,12 @@ def _send_sos_summary(event, user_id):
     lat = data.get("latitude", "0")
     lon = data.get("longitude", "0")
     maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    photo_status = "📸 รูปภาพ: (แนบไฟล์)" if data.get("photo_url") not in [None, "-", ""] else "📸 รูปภาพ: ไม่มี"
-
     summary_text = (
         "📋 สรุปข้อมูลแจ้งเหตุ\n\n"
         f"📍 พิกัด: {maps_link}\n"
         f"👥 กลุ่ม: {', '.join(group_types)}\n"
         f"🌊 สถานการณ์: {urgency}\n"
         f"📝 รายละเอียด: {data.get('note', '-')}\n"
-        f"{photo_status}\n"
         f"📊 ระดับความเร่งด่วน: {priority_label}\n\n"
         f"ยืนยันการส่งข้อมูลแจ้งกู้ภัยหรือไม่?"
     )
