@@ -212,6 +212,95 @@ def handle_text_message(event):
         )
         return
 
+    # ===========================
+    # FEATURE: ดูศูนย์อพยพเพิ่มเติม (Pagination)
+    # ===========================
+    if user_text == "ดูศูนย์อพยพเพิ่มเติม":
+        SHELTER_PAGE_SIZE = 3
+        data = bot_config.USER_DATA.get(user_id, {})
+        shelter_results = data.get("shelter_results", [])
+        offset = data.get("shelter_offset", 0)
+
+        remaining = shelter_results[offset:offset + SHELTER_PAGE_SIZE]
+
+        if not remaining:
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="📍 ไม่มีศูนย์พักพิงเพิ่มเติมแล้วครับ")
+            )
+            return
+
+        bot_config.USER_DATA[user_id]["shelter_offset"] = offset + SHELTER_PAGE_SIZE
+
+        reply_text = "📍 ศูนย์พักพิงเพิ่มเติม:\n\n"
+        for index, sh in enumerate(remaining, offset + 1):
+            reply_text += (
+                f"{index}. {sh['name']}\n"
+                f"   ห่าง: {sh['distance']:.2f} กม.\n"
+                f"   สถานะ: {sh['vacancy']}\n"
+                f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
+            )
+
+        if offset + SHELTER_PAGE_SIZE < len(shelter_results):
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=MessageAction(label="📍 ดูเพิ่มเติม", text="ดูศูนย์อพยพเพิ่มเติม"))
+                ]
+            )
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=reply_text, quick_reply=quick_reply)
+            )
+        else:
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        return
+
+    # ===========================
+    # FEATURE: ดูสถานีน้ำเพิ่มเติม (Pagination)
+    # ===========================
+    if user_text == "ดูสถานีน้ำเพิ่มเติม":
+        WATER_PAGE_SIZE = 3
+        data = bot_config.USER_DATA.get(user_id, {})
+        water_results = data.get("water_results", [])
+        offset = data.get("water_offset", 0)
+        latlon = data.get("water_latlon")
+        water_ts = data.get("water_timestamp")
+
+        remaining = water_results[offset:offset + WATER_PAGE_SIZE]
+
+        if not remaining or not latlon:
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="🌊 ไม่มีสถานีน้ำเพิ่มเติมแล้วครับ")
+            )
+            return
+
+        bot_config.USER_DATA[user_id]["water_offset"] = offset + WATER_PAGE_SIZE
+        lat, lon = latlon
+        has_more = offset + WATER_PAGE_SIZE < len(water_results)
+
+        quick_reply = None
+        if has_more:
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=MessageAction(label="🌊 ดูเพิ่มเติม", text="ดูสถานีน้ำเพิ่มเติม"))
+                ]
+            )
+
+        try:
+            flex_msg = bot_config.build_water_level_flex_message(lat, lon, water_ts, remaining)
+            if quick_reply:
+                flex_msg.quick_reply = quick_reply
+            bot_config.line_bot_api.reply_message(event.reply_token, flex_msg)
+        except Exception as e:
+            print(f"[WaterLevel] Flex failed on pagination: {e}, using text")
+            text_report = bot_config.build_water_level_text_report(lat, lon, water_ts, remaining, None, None)
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=text_report, quick_reply=quick_reply)
+            )
+        return
+
 
 
     # ===========================
@@ -847,31 +936,6 @@ def handle_location_message(event):
     # 12.1 ค้นหาศูนย์อพยพใกล้ที่สุด
     # ===========================
     if state == "waiting_shelter_location":
-        # ... existing shelter logic ...
-    elif state == "sos_location":
-        # Store location for SOS
-        bot_config.USER_DATA[user_id]["sos_latitude"] = latitude
-        bot_config.USER_DATA[user_id]["sos_longitude"] = longitude
-        bot_config.USER_STATES[user_id] = "sos_step2" # Move to next step in SOS flow
-
-        quick_reply = QuickReply(
-            items=[
-                QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา")),
-                QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วย/พิการ", text="🚑 มีผู้ป่วยติดเตียง/พิการ")),
-                QuickReplyButton(action=MessageAction(label="🩸 ผู้บาดเจ็บ", text="🩸 มีผู้บาดเจ็บฉุกเฉิน")),
-                QuickReplyButton(action=MessageAction(label="👨‍👩‍👧 ผู้ใหญ่", text="👨‍👩‍👧 ผู้ใหญ่ทั่วไป")),
-                QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง")),
-                QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
-            ]
-        )
-        bot_config.line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="👥 โปรดเลือกกลุ่มผู้ประสบภัย (เลือกได้หลายข้อ) หรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
-                quick_reply=quick_reply
-            )
-        )
-        return
         shelter_list = []
         db_connected = False
 
@@ -914,22 +978,44 @@ def handle_location_message(event):
             })
 
         nearest_shelters.sort(key=lambda x: x["distance"])
-        top_shelters = nearest_shelters[:3]
 
-        if not top_shelters:
+        SHELTER_PAGE_SIZE = 3
+
+        if not nearest_shelters:
             reply_text = "📍 ไม่พบข้อมูลศูนย์พักพิงในระบบ โปรดติดต่อ ปภ. 1784 ครับ"
-        else:
-            reply_text = "📍 ศูนย์พักพิงใกล้คุณที่สุด:\n\n"
-            for index, sh in enumerate(top_shelters, 1):
-                reply_text += (
-                    f"{index}. {sh['name']}\n"
-                    f"   ห่าง: {sh['distance']:.2f} กม.\n"
-                    f"   สถานะ: {sh['vacancy']}\n"
-                    f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
-                )
-            reply_text += "⚠️ โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน"
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            return
 
-        bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        # เก็บรายการทั้งหมดไว้สำหรับปุ่ม "ดูเพิ่มเติม"
+        if user_id not in bot_config.USER_DATA:
+            bot_config.USER_DATA[user_id] = {}
+        bot_config.USER_DATA[user_id]["shelter_results"] = nearest_shelters
+        bot_config.USER_DATA[user_id]["shelter_offset"] = SHELTER_PAGE_SIZE
+
+        page_shelters = nearest_shelters[:SHELTER_PAGE_SIZE]
+
+        reply_text = "📍 ศูนย์พักพิงใกล้คุณที่สุด:\n\n"
+        for index, sh in enumerate(page_shelters, 1):
+            reply_text += (
+                f"{index}. {sh['name']}\n"
+                f"   ห่าง: {sh['distance']:.2f} กม.\n"
+                f"   สถานะ: {sh['vacancy']}\n"
+                f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
+            )
+        reply_text += "⚠️ โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน"
+
+        if len(nearest_shelters) > SHELTER_PAGE_SIZE:
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=MessageAction(label="📍 ดูเพิ่มเติม", text="ดูศูนย์อพยพเพิ่มเติม"))
+                ]
+            )
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=reply_text, quick_reply=quick_reply)
+            )
+        else:
+            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     # ===========================
     # 12.1.1 ตรวจสอบสภาพอากาศ (Weather Only)
@@ -972,7 +1058,7 @@ def handle_location_message(event):
         if not thaiwater_stations:
             try:
                 thaiwater_stations = bot_config.find_nearest_water_stations(
-                    latitude, longitude, max_stations=3, max_distance_km=50
+                    latitude, longitude, max_stations=15, max_distance_km=50
                 )
                 print(f"[WaterLevel] Fallback to API: {len(thaiwater_stations)} stations")
             except Exception as e:
@@ -982,18 +1068,58 @@ def handle_location_message(event):
         # weather_info = bot_config.get_live_weather_scraper(latitude, longitude)
         # water_flow = bot_config.get_live_water_scraper(latitude, longitude)
 
+        WATER_PAGE_SIZE = 3
+
+        if not thaiwater_stations:
+            try:
+                flex_msg = bot_config.build_water_level_flex_message(
+                    latitude, longitude, timestamp, thaiwater_stations
+                )
+                bot_config.line_bot_api.reply_message(event.reply_token, flex_msg)
+            except Exception as e:
+                print(f"[WaterLevel] Flex failed: {e}, using text")
+                text_report = bot_config.build_water_level_text_report(
+                    latitude, longitude, timestamp, thaiwater_stations, None, None
+                )
+                bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=text_report))
+            return
+
+        # เก็บรายการทั้งหมดไว้สำหรับปุ่ม "ดูเพิ่มเติม"
+        if user_id not in bot_config.USER_DATA:
+            bot_config.USER_DATA[user_id] = {}
+        bot_config.USER_DATA[user_id]["water_results"] = thaiwater_stations
+        bot_config.USER_DATA[user_id]["water_offset"] = WATER_PAGE_SIZE
+        bot_config.USER_DATA[user_id]["water_latlon"] = (latitude, longitude)
+        bot_config.USER_DATA[user_id]["water_timestamp"] = timestamp
+
+        page_stations = thaiwater_stations[:WATER_PAGE_SIZE]
+        has_more = len(thaiwater_stations) > WATER_PAGE_SIZE
+
+        quick_reply = None
+        if has_more:
+            quick_reply = QuickReply(
+                items=[
+                    QuickReplyButton(action=MessageAction(label="🌊 ดูเพิ่มเติม", text="ดูสถานีน้ำเพิ่มเติม"))
+                ]
+            )
+
         try:
             flex_msg = bot_config.build_water_level_flex_message(
-                latitude, longitude, timestamp, thaiwater_stations
+                latitude, longitude, timestamp, page_stations
             )
+            if quick_reply:
+                flex_msg.quick_reply = quick_reply
             bot_config.line_bot_api.reply_message(event.reply_token, flex_msg)
             print("[WaterLevel] Sent Flex Message")
         except Exception as e:
             print(f"[WaterLevel] Flex failed: {e}, using text")
             text_report = bot_config.build_water_level_text_report(
-                latitude, longitude, timestamp, thaiwater_stations, None, None
+                latitude, longitude, timestamp, page_stations, None, None
             )
-            bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=text_report))
+            bot_config.line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=text_report, quick_reply=quick_reply)
+            )
 
     # ===========================
     # 12.3 SOS Step 1: รับพิกัด GPS
