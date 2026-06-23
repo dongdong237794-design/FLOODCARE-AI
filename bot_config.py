@@ -657,7 +657,7 @@ def assess_water_level_status(water_level_value, bank_level_value=None, situatio
         wl = float(water_level_value) if water_level_value not in [None, "-", ""] else 0
         bl = float(bank_level_value) if bank_level_value not in [None, "-", ""] else 0
         diff = bl - wl
-        diff_text = f"{abs(diff):.2f}"
+        diff_text = f"{diff:.2f}"
     except (ValueError, TypeError):
         diff_text = "-"
 
@@ -689,9 +689,9 @@ def assess_water_level_status(water_level_value, bank_level_value=None, situatio
     
     status_map = {
         "ล้นตลิ่ง": {"status": t["ล้นตลิ่ง"], "bg_color": "#FEE2E2", "text_color": "#EF4444", "advice": t["advice_ล้นตลิ่ง"]},
-        "มาก": {"status": t["มาก"], "bg_color": "#DBEAFE", "text_color": "#3B82F6", "advice": t["advice_มาก"]},
+        "มาก": {"status": t["มาก"], "bg_color": "#DBEAFE", "text_color": "#1D4ED8", "advice": t["advice_มาก"]},
         "ปกติ": {"status": t["ปกติ"], "bg_color": "#D1FAE5", "text_color": "#10B981", "advice": t["advice_ปกติ"]},
-        "น้อย": {"status": t["น้อย"], "bg_color": "#FEF9C3", "text_color": "#F59E0B", "advice": t["advice_น้อย"]},
+        "น้อย": {"status": t["น้อย"], "bg_color": "#FEF9C3", "text_color": "#B45309", "advice": t["advice_น้อย"]},
         "น้อยวิกฤต": {"status": t["น้อยวิกฤต"], "bg_color": "#FFEDD5", "text_color": "#F97316", "advice": t["advice_น้อยวิกฤต"]}
     }
 
@@ -1502,15 +1502,15 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
     header_box = BoxComponent(
         layout="vertical",
         contents=[
-            TextComponent(text="🌊 ระดับน้ำใกล้คุณ", weight="bold", size="xl", color="#1F2937"),
-            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#6B7280"),
-            TextComponent(text=f"🕒 อัปเดตล่าสุด: {timestamp}", size="xs", color="#9CA3AF")
+            TextComponent(text="🌊 รายงานระดับน้ำจากสถานีใกล้คุณ", weight="bold", size="lg", color="#1F2937", wrap=True),
+            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#6B7280", margin="sm"),
+            TextComponent(text=f"🕒 อัปเดตวันนี้ {timestamp}", size="xs", color="#9CA3AF")
         ]
     )
 
     stations_box = BoxComponent(
         layout="vertical",
-        spacing="md",
+        spacing="lg",
         margin="lg",
         contents=[]
     )
@@ -1523,7 +1523,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
         for st in stations:
             wl = st.get("water_level")
             distance = st.get("distance_km", 0)
-            
+
             wl_value = "-"
             assessment = assess_water_level_status(None)
 
@@ -1531,24 +1531,31 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                 try:
                     wl_value = float(wl["value"])
                     bl = st.get("bank_level")
-                    situation = st.get("situation") # ดึงสถานะจากข้อมูลสถานี
+                    situation = st.get("situation")  # ดึงสถานะจากข้อมูลสถานี
                     assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None, situation)
                 except (ValueError, TypeError):
                     pass
 
+            # ทำให้เครื่องหมายลบ (น้ำล้นตลิ่ง) เด่นขึ้นด้วยสีแดง ส่วนกรณีปกติใช้สีตามสถานะ
+            try:
+                diff_is_negative = float(assessment["diff_text"]) < 0
+            except (ValueError, TypeError):
+                diff_is_negative = False
+            diff_color = "#EF4444" if diff_is_negative else assessment.get("text_color", "#1F2937")
+
             station_card = BoxComponent(
                 layout="vertical",
+                spacing="xs",
                 contents=[
-                    TextComponent(text=f"{st['stationName']} (ห่าง {distance:.2f} กม.)", weight="bold", size="sm", color="#1F2937"),
+                    TextComponent(text=f"{st['stationName']} (ห่าง {distance:.2f} กม.)", weight="bold", size="sm", color="#1F2937", wrap=True),
                     BoxComponent(
                         layout="horizontal",
-                        margin="sm",
                         spacing="sm",
                         contents=[
                             BoxComponent(
                                 layout="vertical",
                                 background_color=assessment.get("bg_color", "#9CA3AF"),
-                                corner_radius="xl", # Status Pill shape
+                                corner_radius="xl",  # Status Pill shape
                                 padding_start="md",
                                 padding_end="md",
                                 padding_top="xs",
@@ -1561,30 +1568,34 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                         ]
                     ),
                     TextComponent(
-                        text=f"ระดับน้ำ: {wl_value} ม. | ตลิ่ง: {st.get('bank_level', '-')} ม.", 
-                        size="xs", color="#4B5563", margin="sm"
+                        text=f"ระดับน้ำ: {wl_value} ม. | ตลิ่ง: {st.get('bank_level', '-')} ม.",
+                        size="xs", color="#4B5563"
                     ),
                     BoxComponent(
                         layout="horizontal",
                         contents=[
                             TextComponent(text="ต่ำกว่าตลิ่ง: ", size="xs", color="#4B5563"),
-                            TextComponent(text=f"{assessment['diff_text']} ม.", size="xs", color=assessment.get("text_color", "#1F2937"), weight="bold")
+                            TextComponent(text=f"{assessment['diff_text']} ม.", size="xs", color=diff_color, weight="bold")
                         ]
                     )
                 ]
             )
             stations_box.contents.append(station_card)
 
+            # เส้นแบ่งเบาๆ ระหว่างสถานี (ไม่ใช้กรอบทึบ)
+            if st is not stations[-1]:
+                stations_box.contents.append(SeparatorComponent(margin="md", color="#F3F4F6"))
+
     footer_box = BoxComponent(
         layout="vertical",
         margin="lg",
         contents=[
             SeparatorComponent(margin="md"),
-            TextComponent(text=t["ref"], size="xxs", color="#9CA3AF", margin="sm"),
+            TextComponent(text="📌 อ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)", size="xxs", color="#9CA3AF", margin="sm", wrap=True),
             ButtonComponent(
                 style="link",
                 height="sm",
-                action=URIAction(label=t["web"], uri=THAIWATER_WEB_URL),
+                action=URIAction(label="🔗 ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=THAIWATER_WEB_URL),
                 color="#2563EB"
             )
         ]
