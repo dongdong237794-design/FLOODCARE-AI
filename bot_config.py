@@ -15,8 +15,7 @@ except ImportError:
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import (
     FlexSendMessage, BubbleContainer, BoxComponent, TextComponent,
-    SeparatorComponent, ButtonComponent, URIAction, TextSendMessage,
-    MessageAction, LocationAction, BubbleStyle, BlockStyle
+    SeparatorComponent, ButtonComponent, URIAction, TextSendMessage
 )
 
 # =============================================================================
@@ -95,41 +94,43 @@ gemini_model = genai.GenerativeModel(
     system_instruction=(
         "คุณคือ FLOODCARE AI ผู้ช่วยกู้ภัยมืออาชีพประจำศูนย์ประสานงานภัยน้ำท่วมระดับชาติ\n"
         "บทบาท: ผู้นำในวิกฤตที่ใจดีแต่เด็ดขาด (Calm and Firm)\n"
-        "เป้าหมาย: ให้ข้อมูลที่แม่นยำ กระชับ และช่วยผู้ประสบภัยเอาตัวรอดได้จริง\n\n"
+        "เป้าหมาย: ให้ข้อมูลที่แม่นยำ กระชับ และช่วยผู้ประสบภัยเอาตัวรอดได้จริง โดยเน้นความปลอดภัยสูงสุดของผู้ใช้\n\n"
 
-        "[1] Data-Driven Response (ให้ความสำคัญกับข้อมูลระบบก่อนเสมอ):\n"
-        "- ข้อมูลระดับน้ำจาก ThaiWater, รายชื่อศูนย์พักพิง, เบอร์โทรในฐานข้อมูล คือข้อมูลหลัก\n"
-        "- หากผู้ใช้ถามสถานที่ที่ไม่มีในฐานข้อมูล ให้กล้ายอมรับว่า 'ไม่มีข้อมูลในระบบ'\n"
-        "- แนะนำให้ดูลิงก์แผนที่รวมแทนการเดาพิกัดเอง\n"
-        "- ห้ามแนะนำเส้นทางที่ไม่แน่ใจ หรือยืนยันว่าปลอดภัย 100%\n\n"
+        "[1] Emergency First (ตรวจจับความเร่งด่วนและตอบสนองทันที):\n"
+        "- หากพบคำสำคัญบ่งบอกอันตรายถึงชีวิต เช่น 'ช่วยด้วย' 'จะจมแล้ว' 'ไฟดูด' 'หายใจไม่ออก' 'จมน้ำ' 'ไฟฟ้าดูด' หรือคำที่แสดงถึงสถานการณ์ฉุกเฉินร้ายแรง\n"
+        "- หยุดการประมวลผลอื่นทั้งหมดทันที ส่ง 'ขั้นตอนเอาตัวรอดทันที' พร้อมเบอร์ 1784 หรือ 1669 เป็นอันดับแรก\n"
+        "- จากนั้นค่อยถามรายละเอียดเพิ่มเติมที่จำเป็นอย่างกระชับ\n\n"
 
-        "[2] Emergency Detection (ตรวจจับความเร่งด่วน):\n"
-        "- หากพบคำสำคัญบ่งบอกอันตรายถึงชีวิต เช่น 'ช่วยด้วย' 'จะจมแล้ว' 'ไฟดูด' 'หายใจไม่ออก' 'จมน้ำ' 'ไฟฟ้าดูด'\n"
-        "- หยุดการเกริ่นนำทันที ส่ง 'ขั้นตอนเอาตัวรอดทันที' พร้อมเบอร์ 1784 หรือ 1669 เป็นอันดับแรก\n"
-        "- จากนั้นค่อยถามรายละเอียดเพิ่มเติม\n\n"
+        "[2] Data-Driven & Honest Response (ให้ความสำคัญกับข้อมูลระบบและโปร่งใส):\n"
+        "- ข้อมูลระดับน้ำจาก ThaiWater, รายชื่อศูนย์พักพิง, เบอร์โทรในฐานข้อมูล คือข้อมูลหลักที่ต้องใช้ตอบ\n"
+        "- หากผู้ใช้ถามสถานที่/ข้อมูลที่ไม่มีในฐานข้อมูล ให้กล้ายอมรับว่า 'ไม่มีข้อมูลในระบบ' อย่างชัดเจน\n"
+        "- แนะนำให้ผู้ใช้ดูลิงก์แผนที่รวมหรือแหล่งข้อมูลทางการอื่น ๆ แทนการคาดเดาหรือสร้างข้อมูลเอง\n"
+        "- ห้ามแนะนำเส้นทางที่ไม่แน่ใจ หรือยืนยันว่าปลอดภัย 100% เด็ดขาด\n"
+        "- ต้องมีประโยคเตือนเสมอเมื่อแนะนำเส้นทางหรือศูนย์พักพิง: 'โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน'\n"
+        "- แนะนำให้โทรสอบถามศูนย์พักพิงก่อนออกเดินทางทุกครั้งเพื่อยืนยันสถานะ\n\n"
 
-        "[3] Tone of Voice (Calm and Authoritative):\n"
-        "- ใช้โทน 'ใจดีแต่เด็ดขาด' ไม่ผวา ไม่เยิ่นเย้อ\n"
-        "- เน้นการสั่งการเป็นขั้นตอน (1, 2, 3) แทนการพูดคลุมเครือ\n"
-        "- เช่น '1. ยกเบรกเกอร์ 2. ขึ้นที่สูง 3. เตรียมไฟฉาย' แทน 'แนะนำให้ลองทำแบบนี้ดูนะครับ'\n"
-        "- ใช้คำลงท้าย 'ครับ' หรือ 'นะครับ' เป็นหลัก\n\n"
+        "[3] User Needs Flow Integration (การจัดการความต้องการของผู้ประสบภัย):\n"
+        "- เมื่อผู้ใช้เข้าสู่ขั้นตอน 'แจ้งความต้องการ' (User Needs Flow) ให้เข้าใจว่าผู้ใช้อาจต้องการระบุหมวดหมู่และความต้องการโดยละเอียดในข้อความเดียว\n"
+        "- หากผู้ใช้พิมพ์รายละเอียดมาเลยโดยไม่เลือกหมวดหมู่จากปุ่ม ให้บันทึกรายละเอียดนั้นเป็น 'need_details' และกำหนดหมวดหมู่เป็น 'อื่นๆ' โดยอัตโนมัติ\n"
+        "- หากผู้ใช้เลือกหมวดหมู่แล้วกด 'เสร็จสิ้น' แต่ยังไม่ได้ระบุ 'need_details' ให้แจ้งให้ผู้ใช้ระบุรายละเอียดสั้นๆ และรอรับข้อมูลในขั้นตอนเดิม (needs_step2) โดยไม่ต้องเปลี่ยนสถานะ\n"
+        "- หลังจากได้รับ 'need_details' หรือหากมีข้อมูลครบถ้วนแล้ว ให้ดำเนินการไปยังขั้นตอน 'ความเร่งด่วน' (needs_step4) ต่อไป\n\n"
 
-        "[4] Shelter and Route Safety Rules:\n"
-        "- ห้ามยืนยันว่าเส้นทางปลอดภัย 100% เพราะระดับน้ำเปลี่ยนตลอดเวลา\n"
-        "- ต้องมีประโยคเตือนเสมอ: 'โปรดใช้ความระมัดระวังในการเดินทางและสังเกตระดับน้ำจริงหน้างาน'\n"
-        "- แนะนำให้โทรศูนย์พักพิงก่อนออกเดินทางทุกครั้ง\n\n"
+        "[4] Tone of Voice (Calm, Firm, and Action-Oriented):\n"
+        "- ใช้โทน 'ใจดีแต่เด็ดขาด' ไม่ผวา ไม่เยิ่นเย้อ แต่เน้นการให้ข้อมูลที่นำไปปฏิบัติได้จริง\n"
+        "- เน้นการสั่งการเป็นขั้นตอน (1, 2, 3) แทนการพูดคลุมเครือ เช่น '1. ยกเบรกเกอร์ 2. ขึ้นที่สูง 3. เตรียมไฟฉาย'\n"
+        "- ใช้คำลงท้าย 'ครับ' หรือ 'นะครับ' เป็นหลักเพื่อความสุภาพและเป็นกันเอง\n\n"
 
         "[5] Formatting for Crisis (อ่านง่ายบนมือถือ):\n"
-        "- กฎ 3 บรรทัดแรก: ข้อมูลสำคัญสุดต้องอยู่ใน 3 บรรทัดแรกเสมอ\n"
-        "- ห้ามใช้ตัวหนาเยอะ ให้ใช้การเว้นบรรทัดแยกหัวข้อแทน\n"
-        "- ห้ามใช้เครื่องหมายดอกจัน (*) ในการทำสัญลักษณ์\n"
-        "- ใช้อิโมจิที่จำเป็นเท่านั้น (เช่น ⚠️ 📞 🏃 🩹)\n"
-        "- ความยาวข้อความไม่เกิน 10 บรรทัดต่อกลุ่ม\n\n"
+        "- กฎ 3 บรรทัดแรก: ข้อมูลสำคัญที่สุดต้องอยู่ใน 3 บรรทัดแรกเสมอ เพื่อให้ผู้ใช้เห็นทันทีในสถานการณ์ฉุกเฉิน\n"
+        "- ห้ามใช้ตัวหนาเยอะเกินไป ให้ใช้การเว้นบรรทัดแยกหัวข้อ หรือใช้อิโมจิที่เหมาะสมแทนการเน้นด้วยตัวหนา\n"
+        "- ห้ามใช้เครื่องหมายดอกจัน (*) ในการทำสัญลักษณ์ เพราะอาจทำให้การแสดงผลผิดพลาดในบางแพลตฟอร์ม\n"
+        "- ใช้อิโมจิที่จำเป็นและสื่อความหมายชัดเจนเท่านั้น (เช่น ⚠️ 📞 🏃 🩹 📍 📦 🚨)\n"
+        "- ความยาวข้อความไม่เกิน 10 บรรทัดต่อกลุ่ม เพื่อให้อ่านง่ายบนหน้าจอขนาดเล็ก\n\n"
 
-        "[6] General Safety:\n"
-        "- ห้ามเดาข้อมูลหรือจินตนาการสิ่งที่ไม่เป็นความจริง\n"
-        "- หากข้อมูลไม่แน่ชิด ให้แสดงความห่วงใจ + แนะนำเบอร์สายด่วน\n"
-        "- ให้คำตอบเป็นภาษาไทยเสมอ"
+        "[6] General Safety & Language:\n"
+        "- ห้ามเดาข้อมูลหรือจินตนาการสิ่งที่ไม่เป็นความจริงเด็ดขาด\n"
+        "- หากข้อมูลไม่แน่ชัดหรือไม่สามารถให้ได้ ให้แสดงความห่วงใยและแนะนำเบอร์สายด่วนหรือช่องทางติดต่อทางการอื่น ๆ\n"
+        "- ให้คำตอบเป็นภาษาไทยเสมอ เว้นแต่ผู้ใช้จะระบุความต้องการภาษาอื่นอย่างชัดเจน (ซึ่งจะถูกจัดการโดยฟังก์ชันเปลี่ยนภาษา)
     )
 )
 
@@ -657,7 +658,7 @@ def assess_water_level_status(water_level_value, bank_level_value=None, situatio
         wl = float(water_level_value) if water_level_value not in [None, "-", ""] else 0
         bl = float(bank_level_value) if bank_level_value not in [None, "-", ""] else 0
         diff = bl - wl
-        diff_text = f"{diff:.2f}"
+        diff_text = f"{abs(diff):.2f}"
     except (ValueError, TypeError):
         diff_text = "-"
 
@@ -689,9 +690,9 @@ def assess_water_level_status(water_level_value, bank_level_value=None, situatio
     
     status_map = {
         "ล้นตลิ่ง": {"status": t["ล้นตลิ่ง"], "bg_color": "#FEE2E2", "text_color": "#EF4444", "advice": t["advice_ล้นตลิ่ง"]},
-        "มาก": {"status": t["มาก"], "bg_color": "#DBEAFE", "text_color": "#1D4ED8", "advice": t["advice_มาก"]},
+        "มาก": {"status": t["มาก"], "bg_color": "#DBEAFE", "text_color": "#3B82F6", "advice": t["advice_มาก"]},
         "ปกติ": {"status": t["ปกติ"], "bg_color": "#D1FAE5", "text_color": "#10B981", "advice": t["advice_ปกติ"]},
-        "น้อย": {"status": t["น้อย"], "bg_color": "#FEF9C3", "text_color": "#B45309", "advice": t["advice_น้อย"]},
+        "น้อย": {"status": t["น้อย"], "bg_color": "#FEF9C3", "text_color": "#F59E0B", "advice": t["advice_น้อย"]},
         "น้อยวิกฤต": {"status": t["น้อยวิกฤต"], "bg_color": "#FFEDD5", "text_color": "#F97316", "advice": t["advice_น้อยวิกฤต"]}
     }
 
@@ -1265,106 +1266,6 @@ def build_sos_form_flex(user_name="คุณ", lang="TH"):
         )
     )
 
-def _build_needs_summary_flex(user_id, user_data):
-    """สร้างการ์ดสรุปคำขอความช่วยเหลือ (ความต้องการสิ่งของบรรเทาทุกข์)
-    พร้อมปุ่ม 'ยืนยัน' / 'ยกเลิก' ฝังอยู่บนการ์ด กดได้ทันทีไม่ต้องพิมพ์"""
-    categories = user_data.get("need_categories", []) or []
-    category_text = ", ".join(categories) if categories else "-"
-    details_text = user_data.get("need_details", "-") or "-"
-    urgency_text = user_data.get("need_urgency", "-") or "-"
-    lat = user_data.get("need_latitude", "-")
-    lon = user_data.get("need_longitude", "-")
-
-    if "ด่วนมาก" in urgency_text:
-        urgency_color = "#EF4444"
-    elif "ปานกลาง" in urgency_text:
-        urgency_color = "#F59E0B"
-    else:
-        urgency_color = "#10B981"
-
-    return FlexSendMessage(
-        alt_text="📋 สรุปคำขอความช่วยเหลือ โปรดตรวจสอบและยืนยัน",
-        contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#2563EB")),
-            header=BoxComponent(
-                layout="vertical",
-                contents=[
-                    TextComponent(text="📋 สรุปคำขอความช่วยเหลือ", weight="bold", size="lg", color="#FFFFFF", align="center")
-                ]
-            ),
-            body=BoxComponent(
-                layout="vertical",
-                spacing="md",
-                contents=[
-                    TextComponent(text="โปรดตรวจสอบรายการก่อนยืนยันครับ", size="xs", color="#9CA3AF"),
-
-                    BoxComponent(
-                        layout="vertical",
-                        background_color="#EFF6FF",
-                        corner_radius="md",
-                        padding_all="md",
-                        spacing="sm",
-                        contents=[
-                            TextComponent(text="📦 หมวดหมู่", size="xs", color="#2563EB", weight="bold"),
-                            TextComponent(text=category_text, size="sm", color="#111827", wrap=True),
-                        ]
-                    ),
-
-                    BoxComponent(
-                        layout="vertical",
-                        background_color="#F3F4F6",
-                        corner_radius="md",
-                        padding_all="md",
-                        spacing="sm",
-                        margin="sm",
-                        contents=[
-                            TextComponent(text="📝 รายละเอียด", size="xs", color="#4B5563", weight="bold"),
-                            TextComponent(text=details_text, size="sm", color="#111827", wrap=True),
-                        ]
-                    ),
-
-                    BoxComponent(
-                        layout="horizontal",
-                        margin="sm",
-                        contents=[
-                            TextComponent(text="⏳ ความเร่งด่วน", size="xs", color="#4B5563", weight="bold", flex=1),
-                            TextComponent(text=urgency_text, size="xs", color=urgency_color, weight="bold", align="end", wrap=True, flex=2)
-                        ]
-                    ),
-
-                    SeparatorComponent(margin="md"),
-
-                    TextComponent(
-                        text=f"📍 พิกัด: {lat}, {lon}",
-                        size="xxs",
-                        color="#9CA3AF",
-                        margin="sm",
-                        wrap=True
-                    )
-                ]
-            ),
-            footer=BoxComponent(
-                layout="horizontal",
-                spacing="sm",
-                contents=[
-                    ButtonComponent(
-                        action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก"),
-                        style="secondary",
-                        height="sm",
-                        color="#F3F4F6"
-                    ),
-                    ButtonComponent(
-                        action=MessageAction(label="✅ ยืนยัน", text="ยืนยัน"),
-                        style="primary",
-                        height="sm",
-                        color="#10B981"
-                    )
-                ]
-            )
-        )
-    )
-
-
 def build_ai_response_flex(ai_text, original_question, lang="TH"):
     """สร้างกล่องคำตอบ AI พร้อมปุ่ม Research ข้อมูลเชิงลึก (รองรับหลายภาษา)"""
     translations = {
@@ -1449,7 +1350,7 @@ def build_language_selector_flex():
                         height="sm"
                     )
                 ]
-            )
+            }
         )
     )
 
@@ -1502,15 +1403,15 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
     header_box = BoxComponent(
         layout="vertical",
         contents=[
-            TextComponent(text="🌊 รายงานระดับน้ำจากสถานีใกล้คุณ", weight="bold", size="lg", color="#1F2937", wrap=True),
-            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#6B7280", margin="sm"),
-            TextComponent(text=f"🕒 อัปเดตวันนี้ {timestamp}", size="xs", color="#9CA3AF")
+            TextComponent(text="🌊 ระดับน้ำใกล้คุณ", weight="bold", size="xl", color="#1F2937"),
+            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#6B7280"),
+            TextComponent(text=f"🕒 อัปเดตล่าสุด: {timestamp}", size="xs", color="#9CA3AF")
         ]
     )
 
     stations_box = BoxComponent(
         layout="vertical",
-        spacing="lg",
+        spacing="md",
         margin="lg",
         contents=[]
     )
@@ -1523,7 +1424,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
         for st in stations:
             wl = st.get("water_level")
             distance = st.get("distance_km", 0)
-
+            
             wl_value = "-"
             assessment = assess_water_level_status(None)
 
@@ -1531,31 +1432,24 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                 try:
                     wl_value = float(wl["value"])
                     bl = st.get("bank_level")
-                    situation = st.get("situation")  # ดึงสถานะจากข้อมูลสถานี
+                    situation = st.get("situation") # ดึงสถานะจากข้อมูลสถานี
                     assessment = assess_water_level_status(wl_value, bl if bl not in [None, "-", ""] else None, situation)
                 except (ValueError, TypeError):
                     pass
 
-            # ทำให้เครื่องหมายลบ (น้ำล้นตลิ่ง) เด่นขึ้นด้วยสีแดง ส่วนกรณีปกติใช้สีตามสถานะ
-            try:
-                diff_is_negative = float(assessment["diff_text"]) < 0
-            except (ValueError, TypeError):
-                diff_is_negative = False
-            diff_color = "#EF4444" if diff_is_negative else assessment.get("text_color", "#1F2937")
-
             station_card = BoxComponent(
                 layout="vertical",
-                spacing="xs",
                 contents=[
-                    TextComponent(text=f"{st['stationName']} (ห่าง {distance:.2f} กม.)", weight="bold", size="sm", color="#1F2937", wrap=True),
+                    TextComponent(text=f"{st['stationName']} (ห่าง {distance:.2f} กม.)", weight="bold", size="sm", color="#1F2937"),
                     BoxComponent(
                         layout="horizontal",
+                        margin="sm",
                         spacing="sm",
                         contents=[
                             BoxComponent(
                                 layout="vertical",
                                 background_color=assessment.get("bg_color", "#9CA3AF"),
-                                corner_radius="xl",  # Status Pill shape
+                                corner_radius="xl", # Status Pill shape
                                 padding_start="md",
                                 padding_end="md",
                                 padding_top="xs",
@@ -1568,34 +1462,30 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weat
                         ]
                     ),
                     TextComponent(
-                        text=f"ระดับน้ำ: {wl_value} ม. | ตลิ่ง: {st.get('bank_level', '-')} ม.",
-                        size="xs", color="#4B5563"
+                        text=f"ระดับน้ำ: {wl_value} ม. | ตลิ่ง: {st.get('bank_level', '-')} ม.", 
+                        size="xs", color="#4B5563", margin="sm"
                     ),
                     BoxComponent(
                         layout="horizontal",
                         contents=[
                             TextComponent(text="ต่ำกว่าตลิ่ง: ", size="xs", color="#4B5563"),
-                            TextComponent(text=f"{assessment['diff_text']} ม.", size="xs", color=diff_color, weight="bold")
+                            TextComponent(text=f"{assessment['diff_text']} ม.", size="xs", color=assessment.get("text_color", "#1F2937"), weight="bold")
                         ]
                     )
                 ]
             )
             stations_box.contents.append(station_card)
 
-            # เส้นแบ่งเบาๆ ระหว่างสถานี (ไม่ใช้กรอบทึบ)
-            if st is not stations[-1]:
-                stations_box.contents.append(SeparatorComponent(margin="md", color="#F3F4F6"))
-
     footer_box = BoxComponent(
         layout="vertical",
         margin="lg",
         contents=[
             SeparatorComponent(margin="md"),
-            TextComponent(text="📌 อ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)", size="xxs", color="#9CA3AF", margin="sm", wrap=True),
+            TextComponent(text=t["ref"], size="xxs", color="#9CA3AF", margin="sm"),
             ButtonComponent(
                 style="link",
                 height="sm",
-                action=URIAction(label="🔗 ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=THAIWATER_WEB_URL),
+                action=URIAction(label=t["web"], uri=THAIWATER_WEB_URL),
                 color="#2563EB"
             )
         ]
