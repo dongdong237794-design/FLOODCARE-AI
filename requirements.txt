@@ -4,3 +4,4 @@ google-generativeai
 gspread
 requests
 urllib3
+gunicorn
