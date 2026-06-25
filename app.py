@@ -494,9 +494,8 @@ def handle_text_message(event):
         if user_id not in bot_config.USER_DATA:
             bot_config.USER_DATA[user_id] = {}
 
-        # ---- Step 2: เลือกหมวดหมู่ ----
         if state == "needs_step2":
-            categories = {
+            categories_map = {
                 "🍲 อาหาร/น้ำดื่ม": "อาหาร/น้ำดื่ม",
                 "💊 ยารักษาโรค/เวชภัณฑ์": "ยารักษาโรค/เวชภัณฑ์",
                 "👶 ของใช้เด็กอ่อน": "ของใช้เด็กอ่อน",
@@ -505,10 +504,33 @@ def handle_text_message(event):
                 "📝 อื่นๆ (ระบุเอง)": "อื่นๆ"
             }
 
-            if user_text in categories:
+            # ถ้าผู้ใช้พิมพ์รายละเอียดมาเลย (ไม่กดปุ่มหมวดหมู่)
+            if user_text not in categories_map and user_text not in ["เสร็จสิ้น", "➡️ เสร็จสิ้น"]:
+                bot_config.USER_DATA[user_id]["need_details"] = user_text
+                if not bot_config.USER_DATA[user_id].get("need_categories"):
+                    bot_config.USER_DATA[user_id]["need_categories"] = ["อื่นๆ"]
+                
+                # ข้ามไปขั้นตอนความเร่งด่วนทันที
+                bot_config.USER_STATES[user_id] = "needs_step4"
+                quick_reply = QuickReply(
+                    items=[
+                        QuickReplyButton(action=MessageAction(label="🔴 ด่วนมาก (หมดแล้ว)", text="🔴 ด่วนมาก (หมดแล้ว)")),
+                        QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง (รอได้ 24 ชม.)", text="🟡 ปานกลาง (รอได้ 24 ชม.)")),
+                        QuickReplyButton(action=MessageAction(label="🟢 ไม่ด่วน", text="🟢 ไม่ด่วน (แจ้งไว้ล่วงหน้า)"))
+                    ]
+                )
+                bot_config.line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:", quick_reply=quick_reply)
+                )
+                return
+
+            # ถ้าเลือกหมวดหมู่จากปุ่ม
+            if user_text in categories_map:
                 if "need_categories" not in bot_config.USER_DATA[user_id]:
                     bot_config.USER_DATA[user_id]["need_categories"] = []
-                bot_config.USER_DATA[user_id]["need_categories"].append(categories[user_text])
+                bot_config.USER_DATA[user_id]["need_categories"].append(categories_map[user_text])
+                bot_config.USER_DATA[user_id]["need_categories"] = list(set(bot_config.USER_DATA[user_id]["need_categories"]))
 
                 quick_reply = QuickReply(
                     items=[
@@ -517,7 +539,6 @@ def handle_text_message(event):
                         QuickReplyButton(action=MessageAction(label="👶 ของใช้เด็ก", text="👶 ของใช้เด็กอ่อน")),
                         QuickReplyButton(action=MessageAction(label="🧼 ของใช้ส่วนตัว", text="🧼 ของใช้ส่วนตัว")),
                         QuickReplyButton(action=MessageAction(label="🔦 ส่องสว่าง", text="🔦 อุปกรณ์ส่องสว่าง")),
-                        QuickReplyButton(action=MessageAction(label="📝 อื่นๆ", text="📝 อื่นๆ (ระบุเอง)")),
                         QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น"))
                     ]
                 )
@@ -525,58 +546,41 @@ def handle_text_message(event):
                 bot_config.line_bot_api.reply_message(
                     event.reply_token,
                     TextSendMessage(
-                        text=f"📦 หมวดหมู่ที่เลือก: {selected}\n\nเลือกเพิ่มหรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
+                        text=f"📦 เลือกหมวดหมู่เพิ่ม หรือพิมพ์รายละเอียดสิ่งที่ต้องการมาได้เลยครับ\n(เลือกแล้ว: {selected})",
                         quick_reply=quick_reply
                     )
                 )
                 return
-            elif user_text == "เสร็จสิ้น":
+
+            elif user_text in ["เสร็จสิ้น", "➡️ เสร็จสิ้น"]:
                 if not bot_config.USER_DATA[user_id].get("need_categories"):
+                    bot_config.USER_DATA[user_id]["need_categories"] = ["อื่นๆ"]
+                
+                # ถ้ายังไม่มีรายละเอียด ให้ถาม
+                if not bot_config.USER_DATA[user_id].get("need_details"):
+                    # Stay in needs_step2 to capture the details
                     bot_config.line_bot_api.reply_message(
                         event.reply_token,
-                        TextSendMessage(text="⚠️ กรุณาเลือกหมวดหมู่อย่างน้อย 1 รายการครับ")
+                        TextSendMessage(text="📝 โปรดระบุรายละเอียดสั้นๆ (เช่น 'ขอน้ำดื่ม 2 แพ็ค')")
                     )
-                    return
-                bot_config.USER_STATES[user_id] = "needs_step3"
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="📝 โปรดระบุรายละเอียดสั้นๆ\n\nเช่น จำนวนที่ต้องการ หรือยี่ห้อเฉพาะ\n(เช่น 'ขอน้ำดื่ม 2 แพ็ค และผ้าอนามัยครับ')"
+                    return # Important: return here to wait for user's detail input
+                else:
+                    # ถ้ามีรายละเอียดแล้ว ไปขั้นตอนความเร่งด่วน
+                    bot_config.USER_STATES[user_id] = "needs_step4"
+                    quick_reply = QuickReply(
+                        items=[
+                            QuickReplyButton(action=MessageAction(label="🔴 ด่วนมาก (หมดแล้ว)", text="🔴 ด่วนมาก (หมดแล้ว)")),
+                            QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง (รอได้ 24 ชม.)", text="🟡 ปานกลาง (รอได้ 24 ชม.)")),
+                            QuickReplyButton(action=MessageAction(label="🟢 ไม่ด่วน", text="🟢 ไม่ด่วน (แจ้งไว้ล่วงหน้า)"))
+                        ]
                     )
-                )
-                return
-            else:
-                if "need_categories" not in bot_config.USER_DATA[user_id]:
-                    bot_config.USER_DATA[user_id]["need_categories"] = []
-                bot_config.USER_DATA[user_id]["need_categories"].append(f"อื่นๆ: {user_text}")
-                bot_config.USER_STATES[user_id] = "needs_step3"
-                bot_config.line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(
-                        text="📝 โปรดระบุรายละเอียดสั้นๆ\n\nเช่น จำนวนที่ต้องการ หรือยี่หือเฉพาะ\n(เช่น 'ขอน้ำดื่ม 2 แพ็ค และผ้าอนามัยครับ')"
+                    bot_config.line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:", quick_reply=quick_reply)
                     )
-                )
                 return
 
-        # ---- Step 3: รายละเอียด ----
-        elif state == "needs_step3":
-            bot_config.USER_DATA[user_id]["need_details"] = user_text
-            bot_config.USER_STATES[user_id] = "needs_step4"
-            quick_reply = QuickReply(
-                items=[
-                    QuickReplyButton(action=MessageAction(label="🔴 ด่วนมาก (หมดแล้ว)", text="🔴 ด่วนมาก (หมดแล้ว)")),
-                    QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง (รอได้ 24 ชม.)", text="🟡 ปานกลาง (รอได้ 24 ชม.)")),
-                    QuickReplyButton(action=MessageAction(label="🟢 ไม่ด่วน", text="🟢 ไม่ด่วน (แจ้งไว้ล่วงหน้า)"))
-                ]
-            )
-            bot_config.line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(
-                    text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:",
-                    quick_reply=quick_reply
-                )
-            )
-            return
+
 
         # ---- Step 4: ความเร่งด่วน ----
         elif state == "needs_step4":
@@ -714,6 +718,7 @@ def handle_text_message(event):
             bot_config.line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         else:
             # ใช้ SOS Flex Form แบบใหม่ (สีแดงมินิมอล)
+            bot_config.USER_STATES[user_id] = "sos_location"
             sos_flex = bot_config.build_sos_form_flex(first_name)
             bot_config.line_bot_api.reply_message(event.reply_token, sos_flex)
 
