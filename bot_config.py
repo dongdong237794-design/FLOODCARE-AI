@@ -15,7 +15,8 @@ except ImportError:
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import (
     FlexSendMessage, BubbleContainer, BoxComponent, TextComponent,
-    SeparatorComponent, ButtonComponent, URIAction, TextSendMessage
+    SeparatorComponent, ButtonComponent, URIAction, TextSendMessage,
+    LocationAction, MessageAction, BubbleStyle, BlockStyle
 )
 
 # =============================================================================
@@ -43,20 +44,8 @@ USER_DATA = {}
 _supabase_client = None
 
 def get_supabase_client():
-    """เชื่อมต่อ Supabase Client (ใช้ Service Role Key สำหรับ backend)"""
-    global _supabase_client
-    if _supabase_client is not None:
-        return _supabase_client
-    if not SUPABASE_URL or not SUPABASE_KEY or create_client is None:
-        print("[Supabase] SUPABASE_URL / SUPABASE_KEY not configured or library missing")
-        return None
-    try:
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        print("[Supabase] Client initialized successfully")
-        return _supabase_client
-    except Exception as e:
-        print(f"[Supabase] Initialization error: {e}")
-        return None
+    """ปิดการใช้งาน Supabase และใช้ Google Sheets แทน 100%"""
+    return None
 
 # =============================================================================
 # 2. THAIWATER API CONFIGURATION (V3 + V1 Legacy)
@@ -130,7 +119,7 @@ gemini_model = genai.GenerativeModel(
         "[6] General Safety & Language:\n"
         "- ห้ามเดาข้อมูลหรือจินตนาการสิ่งที่ไม่เป็นความจริงเด็ดขาด\n"
         "- หากข้อมูลไม่แน่ชัดหรือไม่สามารถให้ได้ ให้แสดงความห่วงใยและแนะนำเบอร์สายด่วนหรือช่องทางติดต่อทางการอื่น ๆ\n"
-        "- ให้คำตอบเป็นภาษาไทยเสมอ เว้นแต่ผู้ใช้จะระบุความต้องการภาษาอื่นอย่างชัดเจน (ซึ่งจะถูกจัดการโดยฟังก์ชันเปลี่ยนภาษา)
+        "- ให้คำตอบเป็นภาษาไทยเสมอ เว้นแต่ผู้ใช้จะระบุความต้องการภาษาอื่นอย่างชัดเจน (ซึ่งจะถูกจัดการโดยฟังก์ชันเปลี่ยนภาษา)"
     )
 )
 
@@ -838,7 +827,7 @@ def sync_water_levels_to_sheets(sheets_client, sheet_id):
 
         try:
             ws = sheet.worksheet("Water_Levels")
-        except gspread.WorksheetNotFound:
+        except gspread.exceptions.WorksheetNotFound:
             print("[LazySync] Creating Water_Levels worksheet...")
             ws = sheet.add_worksheet(title="Water_Levels", rows="1000", cols="12")
 
@@ -1049,24 +1038,6 @@ def get_water_data_from_sheets(sheets_client, sheet_id, user_lat, user_lon):
 # 10. USER REGISTRATION (CHECK FROM SHEETS - PERSISTENT)
 # =============================================================================
 def is_user_registered(sheets_client, sheet_id, user_id):
-    supabase = get_supabase_client()
-    if supabase:
-        try:
-            response = supabase.table("users").select("first_name, last_name, phone").eq("user_id", str(user_id)).limit(1).execute()
-            if response.data and len(response.data) > 0:
-                row = response.data[0]
-                fn = row.get("first_name", "ผู้แจ้ง")
-                ln = row.get("last_name", "")
-                ph = row.get("phone", "-")
-                if user_id not in USER_DATA:
-                    USER_DATA[user_id] = {}
-                USER_DATA[user_id]["first_name"] = fn
-                USER_DATA[user_id]["last_name"] = ln
-                USER_DATA[user_id]["phone"] = ph
-                return True, fn, ln, ph
-        except Exception as e:
-            pass
-
     if not sheets_client or not sheet_id:
         if user_id in USER_DATA:
             d = USER_DATA[user_id]
@@ -1100,27 +1071,6 @@ def is_user_registered(sheets_client, sheet_id, user_id):
     return False, "", "", "-"
 
 def register_user_to_sheets(sheets_client=None, sheet_id=None, user_id=None, first_name=None, last_name=None, phone=None):
-    supabase = get_supabase_client()
-    if supabase and user_id:
-        try:
-            register_date = datetime.datetime.now().strftime("%Y-%m-%d")
-            supabase.table("users").upsert({
-                "user_id": str(user_id),
-                "first_name": first_name,
-                "last_name": last_name,
-                "phone": phone,
-                "register_date": register_date,
-                "status": "ACTIVE"
-            }, on_conflict="user_id").execute()
-            if user_id not in USER_DATA:
-                USER_DATA[user_id] = {}
-            USER_DATA[user_id]["first_name"] = first_name
-            USER_DATA[user_id]["last_name"] = last_name
-            USER_DATA[user_id]["phone"] = phone
-            return True
-        except Exception as e:
-            print(f"[Supabase UserReg] Error: {e}")
-
     if sheets_client and sheet_id and user_id:
         try:
             sheet = sheets_client.open_by_key(sheet_id)
@@ -1142,7 +1092,7 @@ def register_user_to_sheets(sheets_client=None, sheet_id=None, user_id=None, fir
         USER_DATA[user_id]["first_name"] = first_name or ""
         USER_DATA[user_id]["last_name"] = last_name or ""
         USER_DATA[user_id]["phone"] = phone or "-"
-    return supabase is not None
+    return False
 
 # =============================================================================
 # 11. WATER LEVEL REPORT BUILDERS
@@ -1350,7 +1300,7 @@ def build_language_selector_flex():
                         height="sm"
                     )
                 ]
-            }
+            )
         )
     )
 
@@ -1399,7 +1349,15 @@ def get_user_language(sheets_client, sheet_id, user_id):
         pass
     return "TH"
 
-def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weather_info=None, water_flow=None):
+def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, weather_info=None, water_flow=None, lang="TH"):
+    translations = {
+        "TH": {"ref": "📌 อ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)", "web": "🔗 ดูข้อมูลเพิ่มเติมที่ ThaiWater"},
+        "EN": {"ref": "📌 Source: Hydro Informatics Institute (ThaiWater)", "web": "🔗 View more at ThaiWater"},
+        "JP": {"ref": "📌 出典: 水資源情報研究所 (ThaiWater)", "web": "🔗 ThaiWaterで詳細を見る"},
+        "MY": {"ref": "📌 Sumber: Institut Maklumat Hidro (ThaiWater)", "web": "🔗 Lihat lebih lanjut di ThaiWater"}
+    }
+    t = translations.get(lang, translations["TH"])
+
     header_box = BoxComponent(
         layout="vertical",
         contents=[
@@ -1637,23 +1595,6 @@ def show_loading_animation(user_id, loading_seconds=10):
 # 13C. USER NEEDS MANAGEMENT
 # =============================================================================
 def save_user_need(sheets_client=None, sheet_id=None, user_id=None, timestamp=None, lat=None, lon=None, category=None, details=None, urgency=None):
-    supabase = get_supabase_client()
-    if supabase and user_id:
-        try:
-            supabase.table("user_needs").insert({
-                "timestamp": timestamp or datetime.datetime.now().isoformat(),
-                "user_id": str(user_id),
-                "latitude": float(lat) if lat else 0,
-                "longitude": float(lon) if lon else 0,
-                "category": category,
-                "details": details,
-                "urgency": urgency,
-                "status": "PENDING"
-            }).execute()
-            return True
-        except Exception as e:
-            print(f"[Supabase UserNeeds] Error: {e}")
-
     if sheets_client and sheet_id:
         try:
             sheet = sheets_client.open_by_key(sheet_id)
@@ -1670,15 +1611,6 @@ def save_user_need(sheets_client=None, sheet_id=None, user_id=None, timestamp=No
     return False
 
 def get_all_user_needs(sheets_client, sheet_id):
-    supabase = get_supabase_client()
-    if supabase:
-        try:
-            response = supabase.table("user_needs").select("*").order("timestamp", desc=True).limit(500).execute()
-            if response.data:
-                return response.data
-        except Exception as e:
-            pass
-
     if not sheets_client or not sheet_id:
         return []
     try:
@@ -1689,15 +1621,6 @@ def get_all_user_needs(sheets_client, sheet_id):
         return []
 
 def update_need_status(sheets_client, sheet_id, timestamp, user_id, new_status):
-    supabase = get_supabase_client()
-    if supabase:
-        try:
-            response = supabase.table("user_needs").update({"status": new_status}).eq("timestamp", timestamp).eq("user_id", str(user_id)).execute()
-            if response.data:
-                return True
-        except Exception as e:
-            pass
-
     if not sheets_client or not sheet_id:
         return False
     try:
