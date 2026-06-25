@@ -1,7 +1,7 @@
 import os
 import datetime
 from flask import Flask, request, abort
-import bot_config3 as bot_config
+import bot_config
 
 # LINE SDK
 from linebot import LineBotApi, WebhookHandler
