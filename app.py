@@ -1,8 +1,7 @@
 import os
 import datetime
 from flask import Flask, request, abort
-import bot_config
-from dashboard import dashboard_bp
+import bot_config3 as bot_config
 
 # LINE SDK
 from linebot import LineBotApi, WebhookHandler
@@ -14,9 +13,6 @@ from linebot.models import (
 )
 
 app = Flask(__name__)
-
-# ลงทะเบียน Blueprint Dashboard
-app.register_blueprint(dashboard_bp)
 
 # =============================================================================
 # AUTO-SYNC: ตรวจสอบความสดของข้อมูล Water_Levels ก่อนใช้งาน
