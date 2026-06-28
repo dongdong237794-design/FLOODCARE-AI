@@ -1,0 +1,501 @@
+
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ลงทะเบียนผู้ใช้งาน - FLOODCARE AI</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        /* ============================================
+           DESIGN SYSTEM - Elderly & Accessibility Optimized
+           (matches sos_liff.html / need_liff.html)
+           ============================================ */
+        :root {
+            --primary: #2563EB;
+            --primary-dark: #1D4ED8;
+            --primary-light: #DBEAFE;
+            --secondary: #2563EB;
+            --secondary-light: #DBEAFE;
+            --warning: #F59E0B;
+            --warning-light: #FEF3C7;
+            --danger: #DC2626;
+            --danger-light: #FEE2E2;
+            --gray-50: #F9FAFB;
+            --gray-100: #F3F4F6;
+            --gray-200: #E5E7EB;
+            --gray-300: #D1D5DB;
+            --gray-400: #9CA3AF;
+            --gray-500: #6B7280;
+            --gray-600: #4B5563;
+            --gray-700: #374151;
+            --gray-800: #1F2937;
+            --font-size-base: 20px;
+            --font-size-lg: 24px;
+            --font-size-xl: 28px;
+            --btn-height: 64px;
+            --btn-height-lg: 72px;
+            --spacing-xs: 8px;
+            --spacing-sm: 12px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            --spacing-xl: 32px;
+            --radius: 16px;
+            --radius-lg: 20px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Sukhumvit Set', 'Kanit', sans-serif;
+            font-size: var(--font-size-base);
+            line-height: 1.6;
+            color: var(--gray-800);
+            background: var(--gray-50);
+            min-height: 100vh;
+            padding-bottom: 40px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: var(--spacing-lg) var(--spacing-md);
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(37, 99, 235, 0.3);
+        }
+        .header h1 { font-size: var(--font-size-xl); font-weight: 700; margin-bottom: 4px; }
+        .header p { font-size: var(--font-size-base); opacity: 0.9; }
+
+        .progress-bar {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: var(--spacing-md);
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            gap: 4px;
+        }
+        .step { display: flex; align-items: center; gap: 4px; }
+        .step-dot {
+            width: 36px; height: 36px; border-radius: 50%;
+            background: var(--gray-300); color: white;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; font-weight: 700; transition: all 0.3s ease;
+        }
+        .step-dot.active { background: var(--primary); box-shadow: 0 0 0 4px var(--primary-light); }
+        .step-dot.completed { background: var(--primary); }
+        .step-line { width: 40px; height: 3px; background: var(--gray-300); border-radius: 2px; }
+        .step-line.completed { background: var(--primary); }
+
+        .container { max-width: 480px; margin: 0 auto; padding: var(--spacing-lg) var(--spacing-md); }
+
+        .card {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            margin-bottom: var(--spacing-lg);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            border: 1px solid var(--gray-200);
+        }
+        .card-title {
+            font-size: var(--font-size-lg); font-weight: 700; color: var(--gray-800);
+            margin-bottom: var(--spacing-sm); display: flex; align-items: center; gap: 8px;
+        }
+        .card-subtitle { font-size: var(--font-size-base); color: var(--gray-500); margin-bottom: var(--spacing-md); }
+
+        .btn {
+            width: 100%; height: var(--btn-height); font-size: var(--font-size-lg); font-weight: 600;
+            border: none; border-radius: var(--radius); cursor: pointer; transition: all 0.2s ease;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            margin-bottom: var(--spacing-sm); -webkit-appearance: none;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-primary:disabled { background: var(--gray-300); box-shadow: none; cursor: not-allowed; }
+        .btn-lg { height: var(--btn-height-lg); font-size: var(--font-size-xl); }
+        .btn-outline { background: white; color: var(--gray-700); border: 2px solid var(--gray-300); }
+        .btn-outline:hover { border-color: var(--primary); }
+
+        .form-group { margin-bottom: var(--spacing-lg); }
+        .form-label { display: block; font-size: var(--font-size-lg); font-weight: 600; color: var(--gray-700); margin-bottom: var(--spacing-sm); }
+        .form-label .opt { font-size: 14px; font-weight: 400; color: var(--gray-400); }
+        .form-input {
+            width: 100%; min-height: var(--btn-height); padding: var(--spacing-md);
+            font-size: var(--font-size-lg); border: 2px solid var(--gray-300); border-radius: var(--radius);
+            background: var(--gray-50); transition: border-color 0.2s; -webkit-appearance: none;
+        }
+        .form-input:focus { outline: none; border-color: var(--primary); background: white; }
+        .form-error { color: var(--danger); font-size: 16px; margin-top: 4px; display: none; }
+        .form-error.show { display: block; }
+        .helper-text { font-size: 16px; color: var(--gray-400); margin-top: 4px; }
+
+        .gps-status {
+            padding: var(--spacing-md); border-radius: var(--radius); text-align: center;
+            font-size: var(--font-size-base); margin-bottom: var(--spacing-md);
+        }
+        .gps-status.loading { background: var(--secondary-light); color: var(--secondary); }
+        .gps-status.success { background: #D1FAE5; color: #047857; }
+        .gps-status.error { background: var(--danger-light); color: var(--danger); }
+
+        .consent-box {
+            display: flex; align-items: flex-start; gap: var(--spacing-sm);
+            padding: var(--spacing-md); background: var(--gray-50); border: 2px solid var(--gray-200);
+            border-radius: var(--radius); margin-bottom: var(--spacing-md); cursor: pointer;
+        }
+        .consent-box input[type="checkbox"] { width: 28px; height: 28px; flex-shrink: 0; margin-top: 2px; }
+        .consent-box span { font-size: 16px; color: var(--gray-600); line-height: 1.5; }
+
+        .summary-item {
+            display: flex; justify-content: space-between; padding: var(--spacing-sm) 0;
+            border-bottom: 1px solid var(--gray-200); font-size: var(--font-size-base);
+        }
+        .summary-label { font-weight: 600; color: var(--gray-600); }
+        .summary-value { color: var(--gray-800); font-weight: 700; text-align: right; max-width: 60%; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.3s ease; }
+        .hidden { display: none !important; }
+
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid var(--gray-300); border-top-color: var(--primary);
+            border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .success-screen { text-align: center; padding: var(--spacing-xl) 0; }
+        .success-icon { font-size: 80px; margin-bottom: var(--spacing-md); }
+
+        @media (max-width: 360px) {
+            :root { --font-size-base: 18px; --font-size-lg: 20px; --font-size-xl: 24px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📝 ลงทะเบียนผู้ใช้งาน</h1>
+        <p>FLOODCARE AI - กรอกข้อมูลเบื้องต้นของคุณ</p>
+    </div>
+
+    <div class="progress-bar">
+        <div class="step"><div class="step-dot active" id="step1-dot">1</div></div>
+        <div class="step-line" id="line1"></div>
+        <div class="step"><div class="step-dot" id="step2-dot">2</div></div>
+        <div class="step-line" id="line2"></div>
+        <div class="step"><div class="step-dot" id="step3-dot">3</div></div>
+        <div class="step-line" id="line3"></div>
+        <div class="step"><div class="step-dot" id="step4-dot">4</div></div>
+    </div>
+
+    <div class="container">
+
+        <!-- ========== STEP 1: ชื่อ-นามสกุล ========== -->
+        <div id="step1" class="fade-in">
+            <div class="card">
+                <div class="card-title">👤 ขั้นตอนที่ 1: ข้อมูลส่วนตัว</div>
+                <div class="card-subtitle">กรอกชื่อ-นามสกุลของคุณ</div>
+
+                <div class="form-group">
+                    <label class="form-label">ชื่อ</label>
+                    <input type="text" class="form-input" id="firstName" placeholder="เช่น สมชาย">
+                    <div class="form-error" id="firstNameError">กรุณากรอกชื่อ</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">นามสกุล</label>
+                    <input type="text" class="form-input" id="lastName" placeholder="เช่น ใจดี">
+                    <div class="form-error" id="lastNameError">กรุณากรอกนามสกุล</div>
+                </div>
+            </div>
+            <button class="btn btn-primary btn-lg" onclick="goToStep(2)">ถัดไป ➜</button>
+        </div>
+
+        <!-- ========== STEP 2: เบอร์โทร ========== -->
+        <div id="step2" class="hidden">
+            <div class="card">
+                <div class="card-title">📞 ขั้นตอนที่ 2: เบอร์ติดต่อ</div>
+                <div class="card-subtitle">เพื่อให้ทีมงานติดต่อคุณได้เมื่อเกิดเหตุฉุกเฉิน</div>
+
+                <div class="form-group">
+                    <label class="form-label">เบอร์โทรศัพท์ของคุณ</label>
+                    <input type="tel" class="form-input" id="phone" placeholder="0812345678" maxlength="10">
+                    <div class="form-error" id="phoneError">กรุณากรอกเบอร์โทร 9-10 หลัก</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">เบอร์ผู้ติดต่อฉุกเฉิน <span class="opt">(ไม่บังคับ)</span></label>
+                    <input type="tel" class="form-input" id="emergencyContact" placeholder="เบอร์ญาติ/คนใกล้ชิด" maxlength="10">
+                </div>
+            </div>
+            <button class="btn btn-primary btn-lg" onclick="goToStep(3)">ถัดไป ➜</button>
+            <button class="btn btn-outline" onclick="goToStep(1)">⬅ ย้อนกลับ</button>
+        </div>
+
+        <!-- ========== STEP 3: ที่อยู่ ========== -->
+        <div id="step3" class="hidden">
+            <div class="card">
+                <div class="card-title">📍 ขั้นตอนที่ 3: ที่อยู่ปัจจุบัน</div>
+                <div class="card-subtitle">ช่วยให้ทีมงานหาตัวคุณได้รวดเร็วขึ้นเมื่อเกิดน้ำท่วม</div>
+
+                <button class="btn btn-outline" id="btnGetGPS" onclick="getGPS()">📍 ใช้ตำแหน่ง GPS ปัจจุบัน (แนะนำ)</button>
+                <div class="gps-status hidden" id="gpsStatus"></div>
+
+                <div class="form-group">
+                    <label class="form-label">จังหวัด</label>
+                    <input type="text" class="form-input" id="province" placeholder="เช่น สงขลา">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">อำเภอ</label>
+                    <input type="text" class="form-input" id="district" placeholder="เช่น หาดใหญ่">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">ตำบล/แขวง</label>
+                    <input type="text" class="form-input" id="subDistrict" placeholder="เช่น คอหงส์">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">จำนวนสมาชิกในบ้าน</label>
+                    <input type="number" class="form-input" id="memberCount" placeholder="1" min="1" value="1">
+                </div>
+            </div>
+            <button class="btn btn-primary btn-lg" onclick="goToStep(4)">ถัดไป ➜</button>
+            <button class="btn btn-outline" onclick="goToStep(2)">⬅ ย้อนกลับ</button>
+        </div>
+
+        <!-- ========== STEP 4: ยืนยัน + PDPA ========== -->
+        <div id="step4" class="hidden">
+            <div class="card">
+                <div class="card-title">✅ ขั้นตอนที่ 4: ตรวจสอบและยืนยัน</div>
+
+                <div class="summary-item"><span class="summary-label">ชื่อ-นามสกุล</span><span class="summary-value" id="sumName">-</span></div>
+                <div class="summary-item"><span class="summary-label">เบอร์โทร</span><span class="summary-value" id="sumPhone">-</span></div>
+                <div class="summary-item"><span class="summary-label">ที่อยู่</span><span class="summary-value" id="sumAddress">-</span></div>
+                <div class="summary-item"><span class="summary-label">จำนวนสมาชิก</span><span class="summary-value" id="sumMembers">-</span></div>
+            </div>
+
+            <div class="consent-box" onclick="toggleConsent()">
+                <input type="checkbox" id="consentCheck" onclick="event.stopPropagation()" onchange="updateSubmitState()">
+                <span>ฉันยินยอมให้ FLOODCARE AI เก็บและใช้ข้อมูลนี้เพื่อให้ความช่วยเหลือด้านภัยน้ำท่วม ตามพระราชบัญญัติคุ้มครองข้อมูลส่วนบุคคล (PDPA)</span>
+            </div>
+
+            <button class="btn btn-primary btn-lg" id="btnSubmit" onclick="submitRegistration()" disabled>📝 บันทึกข้อมูล</button>
+            <button class="btn btn-outline" onclick="goToStep(3)">⬅ ย้อนกลับ</button>
+        </div>
+
+        <!-- ========== SUCCESS SCREEN ========== -->
+        <div id="successScreen" class="hidden">
+            <div class="card success-screen">
+                <div class="success-icon">🎉</div>
+                <h2>ลงทะเบียนสำเร็จ!</h2>
+                <p style="margin-top: var(--spacing-sm); color: var(--gray-500);">
+                    ระบบบันทึกข้อมูลของคุณเรียบร้อยแล้ว<br>
+                    กรุณากลับไปที่แชท LINE — ระบบได้ส่งข้อความยืนยันให้คุณแล้วครับ
+                </p>
+                <button class="btn btn-primary btn-lg" style="margin-top: var(--spacing-lg);" onclick="closeLIFF()">กลับสู่แชท LINE</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const formData = {
+            userId: null,
+            idToken: null,
+            latitude: '0',
+            longitude: '0'
+        };
+
+        // ====== LIFF INIT ======
+        async function initLIFF() {
+            try {
+                await liff.init({ liffId: getLiffId() });
+                if (liff.isLoggedIn()) {
+                    const profile = await liff.getProfile();
+                    formData.userId = profile.userId;
+                    formData.idToken = liff.getIDToken();
+                    // Pre-fill name from LINE profile as a convenient starting point
+                    if (profile.displayName && !document.getElementById('firstName').value) {
+                        document.getElementById('firstName').placeholder = profile.displayName;
+                    }
+                }
+            } catch (err) {
+                console.error('LIFF init failed:', err);
+            }
+        }
+
+        function getLiffId() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('liffId') || '';
+        }
+
+        // ====== GPS (optional, auto-fills province/district/sub-district) ======
+        function getGPS() {
+            const statusEl = document.getElementById('gpsStatus');
+            statusEl.classList.remove('hidden', 'error', 'success');
+            statusEl.classList.add('loading');
+            statusEl.innerHTML = '<div class="spinner" style="display:inline-block;width:24px;height:24px;margin-right:8px;"></div> กำลังระบุตำแหน่ง...';
+
+            if (!navigator.geolocation) {
+                statusEl.className = 'gps-status error';
+                statusEl.innerHTML = '⚠️ อุปกรณ์นี้ไม่รองรับ GPS กรุณากรอกที่อยู่เอง';
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                formData.latitude = String(pos.coords.latitude);
+                formData.longitude = String(pos.coords.longitude);
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&zoom=14&addressdetails=1`);
+                    const json = await res.json();
+                    const addr = json.address || {};
+                    document.getElementById('province').value = addr.province || addr.state || '';
+                    document.getElementById('district').value = addr.county || addr.city || addr.town || '';
+                    document.getElementById('subDistrict').value = addr.suburb || addr.village || addr.quarter || '';
+                    statusEl.className = 'gps-status success';
+                    statusEl.innerHTML = '✅ ระบุตำแหน่งสำเร็จ — กรุณาตรวจสอบที่อยู่ด้านล่าง';
+                } catch (e) {
+                    statusEl.className = 'gps-status success';
+                    statusEl.innerHTML = '✅ บันทึกพิกัด GPS แล้ว — กรุณากรอกที่อยู่ด้านล่างด้วยตนเอง';
+                }
+            }, (err) => {
+                statusEl.className = 'gps-status error';
+                statusEl.innerHTML = '⚠️ ไม่สามารถระบุตำแหน่งได้ กรุณากรอกที่อยู่เอง';
+            }, { enableHighAccuracy: true, timeout: 10000 });
+        }
+
+        // ====== STEP NAVIGATION ======
+        let currentStep = 1;
+
+        function goToStep(step) {
+            if (step > currentStep && !validateStep(currentStep)) return;
+
+            document.getElementById('step' + currentStep).classList.add('hidden');
+            document.getElementById('step' + step).classList.remove('hidden');
+            document.getElementById('step' + step).classList.add('fade-in');
+
+            for (let i = 1; i <= 4; i++) {
+                const dot = document.getElementById('step' + i + '-dot');
+                dot.classList.remove('active', 'completed');
+                if (i < step) dot.classList.add('completed');
+                else if (i === step) dot.classList.add('active');
+            }
+            for (let i = 1; i <= 3; i++) {
+                const line = document.getElementById('line' + i);
+                if (line) line.classList.toggle('completed', i < step);
+            }
+
+            currentStep = step;
+            if (step === 4) updateSummary();
+        }
+
+        function validateStep(step) {
+            let valid = true;
+            if (step === 1) {
+                const fn = document.getElementById('firstName').value.trim();
+                const ln = document.getElementById('lastName').value.trim();
+                document.getElementById('firstNameError').classList.toggle('show', !fn);
+                document.getElementById('lastNameError').classList.toggle('show', !ln);
+                valid = !!fn && !!ln;
+            }
+            if (step === 2) {
+                const phone = document.getElementById('phone').value.replace(/\D/g, '');
+                const ok = phone.length >= 9 && phone.length <= 10;
+                document.getElementById('phoneError').classList.toggle('show', !ok);
+                valid = ok;
+            }
+            return valid;
+        }
+
+        function updateSummary() {
+            const fn = document.getElementById('firstName').value.trim();
+            const ln = document.getElementById('lastName').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            const province = document.getElementById('province').value.trim();
+            const district = document.getElementById('district').value.trim();
+            const subDistrict = document.getElementById('subDistrict').value.trim();
+            const members = document.getElementById('memberCount').value || '1';
+
+            document.getElementById('sumName').textContent = `${fn} ${ln}`;
+            document.getElementById('sumPhone').textContent = phone;
+            const addressParts = [subDistrict, district, province].filter(Boolean);
+            document.getElementById('sumAddress').textContent = addressParts.length ? addressParts.join(', ') : 'ไม่ระบุ';
+            document.getElementById('sumMembers').textContent = members + ' คน';
+        }
+
+        function toggleConsent() {
+            const cb = document.getElementById('consentCheck');
+            cb.checked = !cb.checked;
+            updateSubmitState();
+        }
+
+        function updateSubmitState() {
+            document.getElementById('btnSubmit').disabled = !document.getElementById('consentCheck').checked;
+        }
+
+        // ====== SUBMIT ======
+        async function submitRegistration() {
+            const btn = document.getElementById('btnSubmit');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width:28px;height:28px;border-width:3px;display:inline-block;margin-right:8px;"></div> กำลังบันทึก...';
+
+            const payload = {
+                user_id: formData.userId || 'unknown',
+                first_name: document.getElementById('firstName').value.trim(),
+                last_name: document.getElementById('lastName').value.trim(),
+                phone: document.getElementById('phone').value.trim(),
+                emergency_contact: document.getElementById('emergencyContact').value.trim() || '-',
+                province: document.getElementById('province').value.trim() || '-',
+                district: document.getElementById('district').value.trim() || '-',
+                sub_district: document.getElementById('subDistrict').value.trim() || '-',
+                latitude: formData.latitude,
+                longitude: formData.longitude,
+                member_count: document.getElementById('memberCount').value || '1',
+                consent_pdpa: document.getElementById('consentCheck').checked
+            };
+
+            try {
+                const response = await fetch('/api/register/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + (formData.idToken || '')
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    document.getElementById('step4').classList.add('hidden');
+                    document.getElementById('successScreen').classList.remove('hidden');
+                    document.getElementById('successScreen').classList.add('fade-in');
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                btn.disabled = false;
+                btn.innerHTML = '📝 ลองบันทึกใหม่';
+                updateSubmitState();
+                alert('❌ บันทึกข้อมูลไม่สำเร็จ: ' + error.message + '\n\nกรุณาลองใหม่อีกครั้ง');
+            }
+        }
+
+        // ====== CLOSE LIFF ======
+        function closeLIFF() {
+            if (liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                window.close();
+            }
+        }
+
+        // ====== INIT ON LOAD ======
+        window.addEventListener('DOMContentLoaded', initLIFF);
+    </script>
+</body>
+</html>
