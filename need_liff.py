@@ -1,0 +1,1165 @@
+"""
+FLOODCARE AI - Needs LIFF (LINE Front-end Framework)
+=====================================================
+Full-featured needs/supplies request form with:
+- Multi-category selection (food, water, medicine, etc.)
+- Halal food option
+- Custom details input
+- Urgency level selection
+- Summary and confirmation
+- Photo upload (optional)
+
+UX Design:
+- Large buttons for elderly users (min 60px height)
+- High contrast colors
+- Clear step-by-step flow
+- Font size 18px minimum
+- Voice-friendly labels
+
+Categories:
+🍱 อาหาร (Halal option)
+💧 น้ำดื่ม
+💊 ยา/เวชภัณฑ์
+🧼 ของใช้ส่วนตัว
+🛏️ เครื่องนอน
+👕 เสื้อผ้า
+🔦 ไฟฉาย
+🔋 Power Bank
+🍼 ของใช้เด็กอ่อน
+🐶 อาหารสัตว์เลี้ยง
+📝 อื่น ๆ
+
+Usage:
+1. Create LIFF app in LINE Developers Console
+2. Set endpoint URL to: https://your-app.herokuapp.com/liff/need
+3. Set NEED_LIFF_ID in environment variables
+"""
+
+NEEDS_LIFF_HTML = """
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>แจ้งความต้องการ - FLOODCARE AI</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        /* ============================================
+           DESIGN SYSTEM - Elderly & Accessibility Optimized
+           ============================================ */
+        :root {
+            --primary: #059669;
+            --primary-dark: #047857;
+            --primary-light: #D1FAE5;
+            --secondary: #2563EB;
+            --secondary-light: #DBEAFE;
+            --warning: #F59E0B;
+            --warning-light: #FEF3C7;
+            --danger: #DC2626;
+            --danger-light: #FEE2E2;
+            --food-halal: #059669;
+            --food-halal-light: #D1FAE5;
+            --gray-50: #F9FAFB;
+            --gray-100: #F3F4F6;
+            --gray-200: #E5E7EB;
+            --gray-300: #D1D5DB;
+            --gray-400: #9CA3AF;
+            --gray-500: #6B7280;
+            --gray-600: #4B5563;
+            --gray-700: #374151;
+            --gray-800: #1F2937;
+            --font-size-base: 20px;
+            --font-size-lg: 24px;
+            --font-size-xl: 28px;
+            --btn-height: 64px;
+            --btn-height-lg: 72px;
+            --spacing-xs: 8px;
+            --spacing-sm: 12px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            --spacing-xl: 32px;
+            --radius: 16px;
+            --radius-lg: 20px;
+        }
+
+        * { 
+            box-sizing: border-box; 
+            margin: 0; 
+            padding: 0; 
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Sukhumvit Set', 'Kanit', sans-serif;
+            font-size: var(--font-size-base);
+            line-height: 1.6;
+            color: var(--gray-800);
+            background: var(--gray-50);
+            min-height: 100vh;
+            padding-bottom: 40px;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            padding: var(--spacing-lg) var(--spacing-md);
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(5, 150, 105, 0.3);
+        }
+        .header h1 {
+            font-size: var(--font-size-xl);
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .header p {
+            font-size: var(--font-size-base);
+            opacity: 0.9;
+        }
+
+        /* Progress Steps */
+        .progress-bar {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: var(--spacing-md);
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            gap: 4px;
+        }
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .step-dot {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--gray-300);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 700;
+            transition: all 0.3s ease;
+        }
+        .step-dot.active {
+            background: var(--primary);
+            box-shadow: 0 0 0 4px var(--primary-light);
+        }
+        .step-dot.completed {
+            background: var(--primary);
+        }
+        .step-line {
+            width: 40px;
+            height: 3px;
+            background: var(--gray-300);
+            border-radius: 2px;
+        }
+        .step-line.completed {
+            background: var(--primary);
+        }
+        .step-label {
+            font-size: 12px;
+            color: var(--gray-500);
+            text-align: center;
+            margin-top: 4px;
+        }
+
+        /* Container */
+        .container {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: var(--spacing-lg) var(--spacing-md);
+        }
+
+        /* Cards */
+        .card {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            margin-bottom: var(--spacing-lg);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            border: 1px solid var(--gray-200);
+        }
+        .card-title {
+            font-size: var(--font-size-lg);
+            font-weight: 700;
+            color: var(--gray-800);
+            margin-bottom: var(--spacing-sm);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-subtitle {
+            font-size: var(--font-size-base);
+            color: var(--gray-500);
+            margin-bottom: var(--spacing-md);
+        }
+
+        /* Category Grid */
+        .category-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-sm);
+        }
+        .category-btn {
+            padding: var(--spacing-lg) var(--spacing-md);
+            border: 2px solid var(--gray-300);
+            border-radius: var(--radius);
+            background: white;
+            font-size: var(--font-size-base);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            min-height: 90px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .category-btn .icon {
+            font-size: 32px;
+        }
+        .category-btn.selected {
+            border-color: var(--primary);
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            box-shadow: 0 2px 8px rgba(5, 150, 105, 0.2);
+        }
+        .category-btn:active {
+            transform: scale(0.97);
+        }
+
+        /* Halal Options */
+        .halal-options {
+            margin-top: var(--spacing-md);
+            padding: var(--spacing-md);
+            background: var(--food-halal-light);
+            border-radius: var(--radius);
+            border: 2px solid var(--food-halal);
+        }
+        .halal-title {
+            font-size: var(--font-size-lg);
+            font-weight: 700;
+            color: var(--food-halal);
+            margin-bottom: var(--spacing-sm);
+            text-align: center;
+        }
+        .halal-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-sm);
+        }
+        .halal-btn {
+            padding: var(--spacing-md);
+            border: 2px solid var(--food-halal);
+            border-radius: var(--radius);
+            background: white;
+            font-size: var(--font-size-lg);
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            color: var(--food-halal);
+        }
+        .halal-btn.selected {
+            background: var(--food-halal);
+            color: white;
+        }
+
+        /* Buttons */
+        .btn {
+            width: 100%;
+            height: var(--btn-height);
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+            border: none;
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: var(--spacing-sm);
+            -webkit-appearance: none;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
+        }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-lg {
+            height: var(--btn-height-lg);
+            font-size: var(--font-size-xl);
+        }
+        .btn-outline {
+            background: white;
+            color: var(--gray-700);
+            border: 2px solid var(--gray-300);
+        }
+        .btn-outline:hover { border-color: var(--primary); }
+        .btn-warning {
+            background: var(--warning);
+            color: white;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: var(--spacing-lg);
+        }
+        .form-label {
+            display: block;
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: var(--spacing-sm);
+        }
+        .form-input {
+            width: 100%;
+            min-height: var(--btn-height);
+            padding: var(--spacing-md);
+            font-size: var(--font-size-lg);
+            border: 2px solid var(--gray-300);
+            border-radius: var(--radius);
+            background: var(--gray-50);
+            transition: border-color 0.2s;
+            -webkit-appearance: none;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: white;
+        }
+        textarea.form-input {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        /* Urgency Selection */
+        .urgency-grid {
+            display: grid;
+            gap: var(--spacing-sm);
+        }
+        .urgency-btn {
+            padding: var(--spacing-md) var(--spacing-lg);
+            border: 3px solid;
+            border-radius: var(--radius);
+            background: white;
+            font-size: var(--font-size-lg);
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-md);
+        }
+        .urgency-btn.critical {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+        .urgency-btn.critical.selected {
+            background: var(--danger);
+            color: white;
+        }
+        .urgency-btn.high {
+            border-color: var(--warning);
+            color: #92400E;
+        }
+        .urgency-btn.high.selected {
+            background: var(--warning);
+            color: white;
+        }
+        .urgency-btn.normal {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        .urgency-btn.normal.selected {
+            background: var(--primary);
+            color: white;
+        }
+
+        /* GPS Status */
+        .gps-status {
+            padding: var(--spacing-md);
+            border-radius: var(--radius);
+            text-align: center;
+            font-size: var(--font-size-base);
+            margin-bottom: var(--spacing-md);
+        }
+        .gps-status.loading {
+            background: var(--secondary-light);
+            color: var(--secondary);
+        }
+        .gps-status.success {
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+        .gps-status.error {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        /* Summary */
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            padding: var(--spacing-sm) 0;
+            border-bottom: 1px solid var(--gray-200);
+            font-size: var(--font-size-base);
+        }
+        .summary-label {
+            font-weight: 600;
+            color: var(--gray-600);
+        }
+        .summary-value {
+            color: var(--gray-800);
+            font-weight: 700;
+            text-align: right;
+            max-width: 60%;
+        }
+
+        /* Photo Upload */
+        .photo-upload {
+            border: 3px dashed var(--gray-300);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .photo-upload:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+        .photo-preview {
+            max-width: 100%;
+            border-radius: var(--radius);
+            margin-top: var(--spacing-sm);
+        }
+
+        /* Selected Tags */
+        .tags-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--spacing-xs);
+            margin-top: var(--spacing-sm);
+        }
+        .tag {
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .tag-warning {
+            background: var(--warning-light);
+            color: #92400E;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease;
+        }
+
+        /* Hidden */
+        .hidden { display: none !important; }
+
+        /* Loading */
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--gray-300);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Success Screen */
+        .success-screen {
+            text-align: center;
+            padding: var(--spacing-xl) 0;
+        }
+        .success-icon {
+            font-size: 80px;
+            margin-bottom: var(--spacing-md);
+        }
+        .need-number {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--primary);
+            background: var(--primary-light);
+            padding: var(--spacing-sm) var(--spacing-lg);
+            border-radius: var(--radius);
+            display: inline-block;
+            margin: var(--spacing-sm) 0;
+        }
+
+        /* Detail helper text */
+        .helper-text {
+            font-size: 16px;
+            color: var(--gray-400);
+            margin-top: 4px;
+        }
+
+        /* Responsive */
+        @media (max-width: 360px) {
+            :root {
+                --font-size-base: 18px;
+                --font-size-lg: 20px;
+                --font-size-xl: 24px;
+            }
+            .category-grid, .halal-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <h1>📦 แจ้งความต้องการ</h1>
+        <p>FLOODCARE AI - ระบบขอความช่วยเหลือสิ่งของ</p>
+    </div>
+
+    <!-- Progress Steps -->
+    <div class="progress-bar">
+        <div class="step">
+            <div class="step-dot active" id="step1-dot">1</div>
+            <div class="step-label">GPS</div>
+        </div>
+        <div class="step-line" id="line1"></div>
+        <div class="step">
+            <div class="step-dot" id="step2-dot">2</div>
+            <div class="step-label">หมวดหมู่</div>
+        </div>
+        <div class="step-line" id="line2"></div>
+        <div class="step">
+            <div class="step-dot" id="step3-dot">3</div>
+            <div class="step-label">รายละเอียด</div>
+        </div>
+        <div class="step-line" id="line3"></div>
+        <div class="step">
+            <div class="step-dot" id="step4-dot">4</div>
+            <div class="step-label">เร่งด่วน</div>
+        </div>
+        <div class="step-line" id="line4"></div>
+        <div class="step">
+            <div class="step-dot" id="step5-dot">5</div>
+            <div class="step-label">ยืนยัน</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container">
+
+        <!-- ========== STEP 1: GPS Location ========== -->
+        <div id="step1" class="fade-in">
+            <div class="card">
+                <div class="card-title">📍 ขั้นตอนที่ 1: ตำแหน่งของคุณ</div>
+                <div class="card-subtitle">ระบบจะดึงพิกัด GPS อัตโนมัติเพื่อส่งของให้ถูกต้อง</div>
+                
+                <div class="gps-status loading" id="gpsStatus">
+                    <div class="spinner" style="display:inline-block; width:24px; height:24px; margin-right:8px;"></div>
+                    กำลังระบุตำแหน่ง...
+                </div>
+                
+                <div id="gpsResult" class="hidden">
+                    <div class="summary-item">
+                        <span class="summary-label">ละติจูด</span>
+                        <span class="summary-value" id="latValue">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">ลองจิจูด</span>
+                        <span class="summary-value" id="lonValue">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">ที่อยู่โดยประมาณ</span>
+                        <span class="summary-value" id="addressValue">-</span>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary btn-lg" id="btnGetGPS" onclick="getGPS()">
+                    📍 ดึงพิกัด GPS
+                </button>
+                <button class="btn btn-success hidden" id="btnNext1" onclick="goToStep(2)">
+                    ถัดไป ➡️
+                </button>
+            </div>
+        </div>
+
+        <!-- ========== STEP 2: Category Selection ========== -->
+        <div id="step2" class="hidden">
+            <div class="card">
+                <div class="card-title">📦 ขั้นตอนที่ 2: เลือกหมวดหมู่</div>
+                <div class="card-subtitle">เลือกสิ่งของที่ต้องการ (เลือกได้หลายหมวดหมู่)</div>
+
+                <div class="category-grid">
+                    <button class="category-btn" id="cat-food" onclick="toggleCategory('food', '🍱 อาหาร')">
+                        <span class="icon">🍱</span>
+                        <div>อาหาร</div>
+                    </button>
+                    <button class="category-btn" id="cat-water" onclick="toggleCategory('water', '💧 น้ำดื่ม')">
+                        <span class="icon">💧</span>
+                        <div>น้ำดื่ม</div>
+                    </button>
+                    <button class="category-btn" id="cat-medicine" onclick="toggleCategory('medicine', '💊 ยา/เวชภัณฑ์')">
+                        <span class="icon">💊</span>
+                        <div>ยา/เวชภัณฑ์</div>
+                    </button>
+                    <button class="category-btn" id="cat-personal" onclick="toggleCategory('personal', '🧼 ของใช้ส่วนตัว')">
+                        <span class="icon">🧼</span>
+                        <div>ของใช้ส่วนตัว</div>
+                    </button>
+                    <button class="category-btn" id="cat-bedding" onclick="toggleCategory('bedding', '🛏️ เครื่องนอน')">
+                        <span class="icon">🛏️</span>
+                        <div>เครื่องนอน</div>
+                    </button>
+                    <button class="category-btn" id="cat-clothes" onclick="toggleCategory('clothes', '👕 เสื้อผ้า')">
+                        <span class="icon">👕</span>
+                        <div>เสื้อผ้า</div>
+                    </button>
+                    <button class="category-btn" id="cat-flashlight" onclick="toggleCategory('flashlight', '🔦 ไฟฉาย')">
+                        <span class="icon">🔦</span>
+                        <div>ไฟฉาย</div>
+                    </button>
+                    <button class="category-btn" id="cat-powerbank" onclick="toggleCategory('powerbank', '🔋 Power Bank')">
+                        <span class="icon">🔋</span>
+                        <div>Power Bank</div>
+                    </button>
+                    <button class="category-btn" id="cat-baby" onclick="toggleCategory('baby', '🍼 ของใช้เด็กอ่อน')">
+                        <span class="icon">🍼</span>
+                        <div>ของใช้เด็กอ่อน</div>
+                    </button>
+                    <button class="category-btn" id="cat-pet" onclick="toggleCategory('pet', '🐶 อาหารสัตว์เลี้ยง')">
+                        <span class="icon">🐶</span>
+                        <div>อาหารสัตว์เลี้ยง</div>
+                    </button>
+                    <button class="category-btn" id="cat-other" onclick="toggleCategory('other', '📝 อื่น ๆ')" style="grid-column: span 2;">
+                        <span class="icon">📝</span>
+                        <div>อื่น ๆ (ระบุเอง)</div>
+                    </button>
+                </div>
+
+                <!-- Selected tags display -->
+                <div class="tags-container" id="selectedTags"></div>
+
+                <!-- Halal options (show when food selected) -->
+                <div class="halal-options hidden" id="halalOptions">
+                    <div class="halal-title">🍱 อาหารประเภทใด?</div>
+                    <div class="halal-grid">
+                        <button class="halal-btn" id="halal-yes" onclick="selectHalal(true)">
+                            🟢 ฮาลาล
+                        </button>
+                        <button class="halal-btn" id="halal-no" onclick="selectHalal(false)">
+                            ⚪ ทั่วไป
+                        </button>
+                    </div>
+                </div>
+
+                <button class="btn btn-success btn-lg" style="margin-top:var(--spacing-lg);" id="btnNext2" onclick="goToStep(3)">
+                    ถัดไป ➡️
+                </button>
+                <button class="btn btn-outline" onclick="goToStep(1)">
+                    ⬅️ กลับ
+                </button>
+            </div>
+        </div>
+
+        <!-- ========== STEP 3: Details ========== -->
+        <div id="step3" class="hidden">
+            <div class="card">
+                <div class="card-title">📝 ขั้นตอนที่ 3: รายละเอียด</div>
+                <div class="card-subtitle">ระบุรายละเอียดสิ่งของที่ต้องการ</div>
+
+                <!-- Selected categories reminder -->
+                <div style="background: var(--primary-light); padding: var(--spacing-md); border-radius: var(--radius); margin-bottom: var(--spacing-md);">
+                    <div style="font-size: 16px; color: var(--gray-600); margin-bottom: 4px;">หมวดหมู่ที่เลือก:</div>
+                    <div class="tags-container" id="detailTags"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">📝 รายละเอียดที่ต้องการ</label>
+                    <textarea 
+                        class="form-input" 
+                        id="detailsInput" 
+                        placeholder="เช่น&#10;- ข้าวกล่อง 5 กล่อง&#10;- น้ำดื่ม 2 แพ็ค&#10;- ยาพาราเซตามอล 1 กล่อง&#10;- ผ้าห่ม 3 ผืน"
+                    ></textarea>
+                    <div class="helper-text">พิมพ์รายการที่ต้องการ พร้อมจำนวน</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">📷 รูปภาพ (ถ้ามี)</label>
+                    <div class="photo-upload" onclick="document.getElementById('photoInput').click()">
+                        <div style="font-size: 40px;">📷</div>
+                        <div>แตะเพื่อเลือกรูปภาพ</div>
+                    </div>
+                    <input type="file" id="photoInput" accept="image/*" style="display:none" onchange="handlePhoto(this)">
+                    <img id="photoPreview" class="photo-preview hidden">
+                </div>
+
+                <button class="btn btn-success btn-lg" onclick="goToStep(4)">
+                    ถัดไป ➡️
+                </button>
+                <button class="btn btn-outline" onclick="goToStep(2)">
+                    ⬅️ กลับ
+                </button>
+            </div>
+        </div>
+
+        <!-- ========== STEP 4: Urgency ========== -->
+        <div id="step4" class="hidden">
+            <div class="card">
+                <div class="card-title">⏳ ขั้นตอนที่ 4: ระดับความเร่งด่วน</div>
+                <div class="card-subtitle">เลือกระดับความเร่งด่วนของความต้องการนี้</div>
+
+                <div class="urgency-grid">
+                    <button class="urgency-btn critical" onclick="selectUrgency('critical', '🔴 ด่วนมาก - หมดแล้ว/ต้องการด่วนที่สุด')">
+                        <span style="font-size: 32px;">🔴</span>
+                        <div>
+                            <div style="font-size: 22px;">ด่วนมาก</div>
+                            <div style="font-size: 16px; font-weight: 400;">หมดแล้ว / ต้องการด่วนที่สุด</div>
+                        </div>
+                    </button>
+                    <button class="urgency-btn high" onclick="selectUrgency('high', '🟡 ปานกลาง - รอได้ 1-2 วัน')">
+                        <span style="font-size: 32px;">🟡</span>
+                        <div>
+                            <div style="font-size: 22px;">ปานกลาง</div>
+                            <div style="font-size: 16px; font-weight: 400;">รอได้ 1-2 วัน</div>
+                        </div>
+                    </button>
+                    <button class="urgency-btn normal" onclick="selectUrgency('normal', '🟢 ไม่ด่วน - แจ้งไว้ล่วงหน้า')">
+                        <span style="font-size: 32px;">🟢</span>
+                        <div>
+                            <div style="font-size: 22px;">ไม่ด่วน</div>
+                            <div style="font-size: 16px; font-weight: 400;">แจ้งไว้ล่วงหน้า</div>
+                        </div>
+                    </button>
+                </div>
+
+                <button class="btn btn-outline" style="margin-top:var(--spacing-md);" onclick="goToStep(3)">
+                    ⬅️ กลับ
+                </button>
+            </div>
+        </div>
+
+        <!-- ========== STEP 5: Summary & Confirm ========== -->
+        <div id="step5" class="hidden">
+            <div class="card">
+                <div class="card-title">📋 ขั้นตอนที่ 5: สรุปข้อมูล</div>
+                <div class="card-subtitle">ตรวจสอบข้อมูลก่อนส่งไปยังศูนย์อาสาสมัคร</div>
+
+                <div id="summaryContent">
+                    <div class="summary-item">
+                        <span class="summary-label">📍 พิกัด</span>
+                        <span class="summary-value" id="sumGPS">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">📦 หมวดหมู่</span>
+                        <span class="summary-value" id="sumCategories">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">🍱 ประเภทอาหาร</span>
+                        <span class="summary-value" id="sumHalal">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">📝 รายละเอียด</span>
+                        <span class="summary-value" id="sumDetails">-</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">⏳ ความเร่งด่วน</span>
+                        <span class="summary-value" id="sumUrgency">-</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: var(--warning-light); border-radius: var(--radius); font-size: var(--font-size-base);">
+                    <div style="font-weight: 700; color: #92400E; margin-bottom: var(--spacing-xs);">
+                        ⚠️ กรุณาตรวจสอบ:
+                    </div>
+                    <div style="color: var(--gray-700);">
+                        ข้อมูลจะถูกส่งไปยังศูนย์อาสาสมัครใกล้เคียงเพื่อจัดส่งสิ่งของให้
+                    </div>
+                </div>
+
+                <button class="btn btn-primary btn-lg" style="margin-top:var(--spacing-lg);" id="btnSubmit" onclick="submitNeed()">
+                    ✅ ยืนยันส่งข้อมูล
+                </button>
+                <button class="btn btn-outline" onclick="goToStep(4)">
+                    ⬅️ กลับแก้ไข
+                </button>
+            </div>
+        </div>
+
+        <!-- ========== SUCCESS SCREEN ========== -->
+        <div id="successScreen" class="hidden">
+            <div class="card success-screen">
+                <div class="success-icon">✅</div>
+                <h2 style="font-size: var(--font-size-xl); color: var(--primary); margin-bottom: var(--spacing-sm);">
+                    ส่งข้อมูลสำเร็จ!
+                </h2>
+                <p style="color: var(--gray-600); margin-bottom: var(--spacing-sm);">
+                    เลขรายการของคุณ:
+                </p>
+                <div class="need-number" id="needId">-</div>
+                <p style="color: var(--gray-600); margin-top: var(--spacing-md); line-height: 1.8;">
+                    ทีมอาสาสมัครจะดำเนินการจัดส่งให้<br>
+                    ตามลำดับความเร่งด่วน
+                </p>
+                <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: var(--primary-light); border-radius: var(--radius); text-align: left; font-size: var(--font-size-base);">
+                    <div style="font-weight: 700; color: var(--primary-dark); margin-bottom: var(--spacing-sm);">
+                        📞 ติดต่อสอบถาม:
+                    </div>
+                    <div style="color: var(--gray-700); line-height: 2;">
+                        ปภ. 1784<br>
+                        สพฉ. 1669<br>
+                        <strong>ประหยัดแบตเตอรี่มือถือ</strong>
+                    </div>
+                </div>
+                <button class="btn btn-outline" style="margin-top: var(--spacing-lg);" onclick="closeLIFF()">
+                    ❌ ปิดหน้าต่าง
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ====== STATE ======
+        let currentStep = 1;
+        let formData = {
+            latitude: null,
+            longitude: null,
+            address: '',
+            categories: [],
+            halal: null,
+            details: '',
+            photo: null,
+            urgency: null,
+            urgencyLabel: '',
+            userId: null
+        };
+
+        // Category definitions
+        const CATEGORY_MAP = {
+            'food': { icon: '🍱', label: 'อาหาร' },
+            'water': { icon: '💧', label: 'น้ำดื่ม' },
+            'medicine': { icon: '💊', label: 'ยา/เวชภัณฑ์' },
+            'personal': { icon: '🧼', label: 'ของใช้ส่วนตัว' },
+            'bedding': { icon: '🛏️', label: 'เครื่องนอน' },
+            'clothes': { icon: '👕', label: 'เสื้อผ้า' },
+            'flashlight': { icon: '🔦', label: 'ไฟฉาย' },
+            'powerbank': { icon: '🔋', label: 'Power Bank' },
+            'baby': { icon: '🍼', label: 'ของใช้เด็กอ่อน' },
+            'pet': { icon: '🐶', label: 'อาหารสัตว์เลี้ยง' },
+            'other': { icon: '📝', label: 'อื่น ๆ' }
+        };
+
+        // ====== LIFF INIT ======
+        async function initLIFF() {
+            try {
+                await liff.init({ liffId: getLiffId() });
+                if (liff.isLoggedIn()) {
+                    const profile = await liff.getProfile();
+                    formData.userId = profile.userId;
+                }
+                getGPS();
+            } catch (err) {
+                console.error('LIFF init failed:', err);
+                document.getElementById('gpsStatus').className = 'gps-status error';
+                document.getElementById('gpsStatus').innerHTML = '⚠️ กรุณาเปิดจากแอป LINE';
+            }
+        }
+
+        function getLiffId() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('liffId') || '';
+        }
+
+        // ====== GPS ======
+        function getGPS() {
+            const statusEl = document.getElementById('gpsStatus');
+            const btnGPS = document.getElementById('btnGetGPS');
+            
+            statusEl.className = 'gps-status loading';
+            statusEl.innerHTML = '<div class="spinner" style="display:inline-block;width:24px;height:24px;margin-right:8px;"></div> กำลังระบุตำแหน่ง...';
+            btnGPS.classList.add('hidden');
+
+            if (!navigator.geolocation) {
+                statusEl.className = 'gps-status error';
+                statusEl.innerHTML = '⚠️ เบราว์เซอร์ไม่รองรับ GPS';
+                btnGPS.classList.remove('hidden');
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    formData.latitude = position.coords.latitude.toFixed(6);
+                    formData.longitude = position.coords.longitude.toFixed(6);
+                    
+                    document.getElementById('latValue').textContent = formData.latitude;
+                    document.getElementById('lonValue').textContent = formData.longitude;
+                    
+                    getAddress(formData.latitude, formData.longitude);
+                    
+                    document.getElementById('gpsResult').classList.remove('hidden');
+                    statusEl.className = 'gps-status success';
+                    statusEl.innerHTML = '✅ ระบุตำแหน่งสำเร็จ';
+                    document.getElementById('btnNext1').classList.remove('hidden');
+                },
+                (error) => {
+                    let msg = 'ไม่สามารถดึงพิกัดได้';
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED: msg = '⛔ กรุณาอนุญาตให้เข้าถึงตำแหน่ง'; break;
+                        case error.POSITION_UNAVAILABLE: msg = '📡 ไม่พบสัญญาณ GPS'; break;
+                        case error.TIMEOUT: msg = '⏱️ หมดเวลารอ GPS'; break;
+                    }
+                    statusEl.className = 'gps-status error';
+                    statusEl.innerHTML = '⚠️ ' + msg;
+                    btnGPS.classList.remove('hidden');
+                    btnGPS.textContent = '📍 ลองใหม่';
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            );
+        }
+
+        async function getAddress(lat, lon) {
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
+                const data = await res.json();
+                const addr = data.address;
+                const display = addr ? 
+                    `${addr.subdistrict || ''} ${addr.district || ''} ${addr.city || addr.province || ''}` : 
+                    'ไม่สามารถระบุที่อยู่ได้';
+                document.getElementById('addressValue').textContent = display;
+                formData.address = display;
+            } catch (e) {
+                document.getElementById('addressValue').textContent = 'ไม่สามารถระบุที่อยู่ได้';
+            }
+        }
+
+        // ====== NAVIGATION ======
+        function goToStep(step) {
+            // Hide all steps
+            for (let i = 1; i <= 5; i++) {
+                document.getElementById('step' + i).classList.add('hidden');
+            }
+            document.getElementById('successScreen').classList.add('hidden');
+            
+            // Show target step
+            document.getElementById('step' + step).classList.remove('hidden');
+            document.getElementById('step' + step).classList.add('fade-in');
+            
+            // Update progress dots
+            for (let i = 1; i <= 5; i++) {
+                const dot = document.getElementById('step' + i + '-dot');
+                const line = document.getElementById('line' + i);
+                
+                dot.classList.remove('active', 'completed');
+                if (line) line.classList.remove('completed');
+                
+                if (i < step) {
+                    dot.classList.add('completed');
+                    dot.textContent = '✓';
+                    if (line) line.classList.add('completed');
+                } else if (i === step) {
+                    dot.classList.add('active');
+                    dot.textContent = i;
+                } else {
+                    dot.textContent = i;
+                }
+            }
+            
+            currentStep = step;
+            
+            if (step === 3) {
+                updateDetailTags();
+            }
+            if (step === 5) {
+                updateSummary();
+            }
+            
+            window.scrollTo(0, 0);
+        }
+
+        // ====== CATEGORY SELECTION ======
+        function toggleCategory(id, label) {
+            const btn = document.getElementById('cat-' + id);
+            const idx = formData.categories.findIndex(c => c.id === id);
+            
+            if (idx > -1) {
+                formData.categories.splice(idx, 1);
+                btn.classList.remove('selected');
+            } else {
+                formData.categories.push({ id, label });
+                btn.classList.add('selected');
+            }
+            
+            updateTags();
+            
+            // Show/hide halal options
+            const hasFood = formData.categories.some(c => c.id === 'food');
+            document.getElementById('halalOptions').classList.toggle('hidden', !hasFood);
+        }
+
+        function selectHalal(isHalal) {
+            formData.halal = isHalal;
+            document.getElementById('halal-yes').classList.toggle('selected', isHalal);
+            document.getElementById('halal-no').classList.toggle('selected', !isHalal);
+        }
+
+        function updateTags() {
+            const container = document.getElementById('selectedTags');
+            container.innerHTML = formData.categories.map(c => 
+                `<span class="tag">${c.label}</span>`
+            ).join('');
+        }
+
+        function updateDetailTags() {
+            const container = document.getElementById('detailTags');
+            container.innerHTML = formData.categories.map(c => 
+                `<span class="tag">${c.label}</span>`
+            ).join('');
+            
+            if (formData.halal !== null) {
+                container.innerHTML += `<span class="tag tag-warning">${formData.halal ? '🟢 ฮาลาล' : '⚪ ทั่วไป'}</span>`;
+            }
+        }
+
+        // ====== URGENCY ======
+        function selectUrgency(level, label) {
+            formData.urgency = level;
+            formData.urgencyLabel = label;
+            
+            document.querySelectorAll('.urgency-btn').forEach(btn => btn.classList.remove('selected'));
+            document.querySelector('.urgency-btn.' + level).classList.add('selected');
+            
+            setTimeout(() => goToStep(5), 300);
+        }
+
+        // ====== PHOTO ======
+        function handlePhoto(input) {
+            if (input.files && input.files[0]) {
+                formData.photo = input.files[0];
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const preview = document.getElementById('photoPreview');
+                    preview.src = e.target.result;
+                    preview.classList.remove('hidden');
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        // ====== SUMMARY ======
+        function updateSummary() {
+            formData.details = document.getElementById('detailsInput').value || '-';
+            
+            const catLabels = formData.categories.map(c => c.label).join(', ') || 'ไม่ระบุ';
+            const halalText = formData.halal === null ? '-' : (formData.halal ? '🟢 ฮาลาล' : '⚪ ทั่วไป');
+            
+            document.getElementById('sumGPS').textContent = 
+                formData.latitude ? `${formData.latitude}, ${formData.longitude}` : 'ไม่ระบุ';
+            document.getElementById('sumCategories').textContent = catLabels;
+            document.getElementById('sumHalal').textContent = halalText;
+            document.getElementById('sumDetails').textContent = formData.details;
+            document.getElementById('sumUrgency').textContent = formData.urgencyLabel || 'ไม่ระบุ';
+        }
+
+        // ====== SUBMIT ======
+        async function submitNeed() {
+            const btn = document.getElementById('btnSubmit');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width:28px;height:28px;border-width:3px;display:inline-block;margin-right:8px;"></div> กำลังส่งข้อมูล...';
+            
+            const payload = {
+                user_id: formData.userId || 'unknown',
+                latitude: formData.latitude,
+                longitude: formData.longitude,
+                categories: formData.categories.map(c => c.label).join(', '),
+                details: formData.details,
+                urgency: formData.urgency === 'critical' ? '🔴 ด่วนมาก' :
+                        formData.urgency === 'high' ? '🟡 ปานกลาง' : '🟢 ไม่ด่วน',
+                halal: formData.halal === null ? 'FALSE' : (formData.halal ? 'TRUE' : 'FALSE')
+            };
+            
+            try {
+                const response = await fetch('/api/need/submit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('needId').textContent = result.need_id;
+                    document.getElementById('step5').classList.add('hidden');
+                    document.getElementById('successScreen').classList.remove('hidden');
+                    document.getElementById('successScreen').classList.add('fade-in');
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                btn.disabled = false;
+                btn.innerHTML = '✅ ลองส่งใหม่';
+                alert('❌ ส่งข้อมูลไม่สำเร็จ: ' + error.message + '\n\nกรุณาลองใหม่');
+            }
+        }
+
+        // ====== CLOSE LIFF ======
+        function closeLIFF() {
+            if (liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                window.close();
+            }
+        }
+
+        // ====== INIT ======
+        document.addEventListener('DOMContentLoaded', initLIFF);
+    </script>
+</body>
+</html>
+"""
+
+
+# =============================================================================
+# STANDALONE FLASK ROUTE (for testing without app.py)
+# =============================================================================
+
+if __name__ == "__main__":
+    from flask import Flask, render_template_string
+    app = Flask(__name__)
+    
+    @app.route("/liff/need")
+    def need_page():
+        return render_template_string(NEEDS_LIFF_HTML)
+    
+    print("=" * 60)
+    print("FLOODCARE AI - Needs LIFF Test Server")
+    print("=" * 60)
+    print("Open: http://localhost:5002/liff/need")
+    print("=" * 60)
+    
+    app.run(host="0.0.0.0", port=5002, debug=True)
