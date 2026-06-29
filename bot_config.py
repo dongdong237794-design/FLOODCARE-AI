@@ -86,6 +86,10 @@ WATER_LEVEL_SOURCE_URL = os.environ.get(
 SNAKE_BITE_INFO_URL = "https://www.rama.mahidol.ac.th/poisoncenter/th"
 SNAKE_BITE_HOTLINE = "1367"  # สายด่วนศูนย์พิษวิทยารามาธิบดี (24 ชม.)
 
+# --- Staff dashboard (read-only admin view of Sheets data) ---
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
+FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
+
 # Performance Tuning
 WATER_DATA_MAX_AGE_MINUTES = int(os.environ.get("WATER_DATA_MAX_AGE_MINUTES", "10"))
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
@@ -1237,7 +1241,7 @@ def build_sos_form_flex(user_name="คุณ", lang="TH"):
     return FlexSendMessage(
         alt_text=t["title"],
         contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#DC2626")),
+            styles=BubbleStyle(header=BlockStyle(background_color="#C2452F")),
             header=BoxComponent(
                 layout="vertical",
                 contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
@@ -1251,7 +1255,7 @@ def build_sos_form_flex(user_name="คุณ", lang="TH"):
                     SeparatorComponent(margin="md"),
                     ButtonComponent(
                         action=URIAction(label=t["btn"], uri=liff_url),
-                        style="primary", color="#DC2626", height="lg"
+                        style="primary", color="#C2452F", height="lg"
                     )
                 ]
             ),
@@ -1282,7 +1286,7 @@ def build_need_form_flex(user_name="คุณ", lang="TH"):
     return FlexSendMessage(
         alt_text=t["title"],
         contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#2563EB")),
+            styles=BubbleStyle(header=BlockStyle(background_color="#2F6F8F")),
             header=BoxComponent(
                 layout="vertical",
                 contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
@@ -1296,7 +1300,7 @@ def build_need_form_flex(user_name="คุณ", lang="TH"):
                     SeparatorComponent(margin="md"),
                     ButtonComponent(
                         action=URIAction(label=t["btn"], uri=liff_url),
-                        style="primary", color="#2563EB", height="lg"
+                        style="primary", color="#2F6F8F", height="lg"
                     )
                 ]
             ),
@@ -1327,7 +1331,7 @@ def build_register_form_flex(user_name="คุณ", lang="TH"):
     return FlexSendMessage(
         alt_text=t["title"],
         contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#2563EB")),
+            styles=BubbleStyle(header=BlockStyle(background_color="#2F6F8F")),
             header=BoxComponent(
                 layout="vertical",
                 contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
@@ -1341,7 +1345,7 @@ def build_register_form_flex(user_name="คุณ", lang="TH"):
                     SeparatorComponent(margin="md"),
                     ButtonComponent(
                         action=URIAction(label=t["btn"], uri=liff_url),
-                        style="primary", color="#2563EB", height="lg"
+                        style="primary", color="#2F6F8F", height="lg"
                     )
                 ]
             ),
@@ -1373,7 +1377,7 @@ def build_snake_bite_flex(lang="TH"):
         "6. รีบนำส่งโรงพยาบาลที่ใกล้ที่สุดทันที หรือโทร 1669 ให้มารับ",
     ]
     body_contents = [
-        TextComponent(text="🐍 ถูกงูกัด — ทำตามนี้ทันที", weight="bold", size="lg", color="#DC2626"),
+        TextComponent(text="🐍 ถูกงูกัด — ทำตามนี้ทันที", weight="bold", size="lg", color="#C2452F"),
         SeparatorComponent(margin="md"),
     ]
     for s in steps:
@@ -1397,7 +1401,7 @@ def build_snake_bite_flex(lang="TH"):
                 contents=[
                     ButtonComponent(
                         action=URIAction(label=f"📞 โทร {SNAKE_BITE_HOTLINE} ศูนย์พิษวิทยา", uri=f"tel:{SNAKE_BITE_HOTLINE}"),
-                        style="primary", color="#DC2626", height="sm"
+                        style="primary", color="#C2452F", height="sm"
                     ),
                     ButtonComponent(
                         action=URIAction(label="📖 ข้อมูลเพิ่มเติม (รามาธิบดี)", uri=SNAKE_BITE_INFO_URL),
@@ -1506,7 +1510,7 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
             SeparatorComponent(margin="md"),
             TextComponent(
                 text=f"⚠️ {weather_data.get('error', 'ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้')}",
-                size="sm", color="#DC2626", wrap=True, margin="md"
+                size="sm", color="#C2452F", wrap=True, margin="md"
             ),
         ]
     else:
