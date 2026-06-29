@@ -1,4 +1,41 @@
+"""
+FLOODCARE AI - Needs LIFF (LINE Front-end Framework)
+=====================================================
+Full-featured needs/supplies request form with:
+- Multi-category selection (food, water, medicine, etc.)
+- Halal food option
+- Custom details input
+- Urgency level selection
+- Summary and confirmation
+- Photo upload (optional)
 
+UX Design:
+- Large buttons for elderly users (min 60px height)
+- High contrast colors
+- Clear step-by-step flow
+- Font size 18px minimum
+- Voice-friendly labels
+
+Categories:
+🍱 อาหาร (Halal option)
+💧 น้ำดื่ม
+💊 ยา/เวชภัณฑ์
+🧼 ของใช้ส่วนตัว
+🛏️ เครื่องนอน
+👕 เสื้อผ้า
+🔦 ไฟฉาย
+🔋 Power Bank
+🍼 ของใช้เด็กอ่อน
+🐶 อาหารสัตว์เลี้ยง
+📝 อื่น ๆ
+
+Usage:
+1. Create LIFF app in LINE Developers Console
+2. Set endpoint URL to: https://your-app.herokuapp.com/liff/need
+3. Set NEED_LIFF_ID in environment variables
+"""
+
+NEEDS_LIFF_HTML = """
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -468,27 +505,6 @@
             font-size: 80px;
             margin-bottom: var(--spacing-md);
         }
-        .checkmark-wrap {
-            width: 96px; height: 96px; margin: 0 auto var(--spacing-md);
-            animation: checkmark-pop 0.4s ease-out;
-        }
-        .checkmark-circle {
-            stroke: #10B981; stroke-width: 3; fill: none;
-            stroke-dasharray: 151; stroke-dashoffset: 151;
-            animation: checkmark-circle-draw 0.5s ease-out forwards;
-        }
-        .checkmark-check {
-            stroke: #10B981; stroke-width: 4; fill: none;
-            stroke-linecap: round; stroke-linejoin: round;
-            stroke-dasharray: 36; stroke-dashoffset: 36;
-            animation: checkmark-check-draw 0.35s ease-out 0.5s forwards;
-        }
-        @keyframes checkmark-pop {
-            0% { transform: scale(0.7); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-        @keyframes checkmark-circle-draw { to { stroke-dashoffset: 0; } }
-        @keyframes checkmark-check-draw { to { stroke-dashoffset: 0; } }
         .need-number {
             font-size: 32px;
             font-weight: 700;
@@ -798,12 +814,7 @@
         <!-- ========== SUCCESS SCREEN ========== -->
         <div id="successScreen" class="hidden">
             <div class="card success-screen">
-                <div class="checkmark-wrap">
-                    <svg viewBox="0 0 52 52" width="96" height="96">
-                        <circle class="checkmark-circle" cx="26" cy="26" r="24"/>
-                        <path class="checkmark-check" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
-                    </svg>
-                </div>
+                <div class="success-icon">✅</div>
                 <h2 style="font-size: var(--font-size-xl); color: var(--primary); margin-bottom: var(--spacing-sm);">
                     ส่งข้อมูลสำเร็จ!
                 </h2>
@@ -871,7 +882,6 @@
                 if (liff.isLoggedIn()) {
                     const profile = await liff.getProfile();
                     formData.userId = profile.userId;
-                    formData.idToken = liff.getIDToken();
                 }
                 getGPS();
             } catch (err) {
@@ -1096,10 +1106,7 @@
             try {
                 const response = await fetch('/api/need/submit', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + (formData.idToken || '')
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 
@@ -1134,3 +1141,25 @@
     </script>
 </body>
 </html>
+"""
+
+
+# =============================================================================
+# STANDALONE FLASK ROUTE (for testing without app.py)
+# =============================================================================
+
+if __name__ == "__main__":
+    from flask import Flask, render_template_string
+    app = Flask(__name__)
+    
+    @app.route("/liff/need")
+    def need_page():
+        return render_template_string(NEEDS_LIFF_HTML)
+    
+    print("=" * 60)
+    print("FLOODCARE AI - Needs LIFF Test Server")
+    print("=" * 60)
+    print("Open: http://localhost:5002/liff/need")
+    print("=" * 60)
+    
+    app.run(host="0.0.0.0", port=5002, debug=True)
