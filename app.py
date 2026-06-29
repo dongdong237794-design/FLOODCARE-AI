@@ -24,7 +24,7 @@ import json
 import time
 import datetime
 from typing import Optional
-from flask import Flask, request, abort, jsonify, render_template_string, g
+from flask import Flask, request, abort, jsonify, render_template_string, g, session, redirect, url_for
 
 import bot_config
 from bot_config import (
@@ -55,6 +55,7 @@ from bot_config import (
     SOS_LIFF_ID, NEED_LIFF_ID,
     REGISTER_LIFF_URL, REGISTER_LIFF_ID,
     WATER_LEVEL_SOURCE_URL, SNAKE_BITE_HOTLINE, SNAKE_BITE_INFO_URL, TMD_SOURCE_URL,
+    DASHBOARD_PASSWORD, FLASK_SECRET_KEY,
     LINE_CHANNEL_SECRET,
     WATER_DATA_MAX_AGE_MINUTES,
     GEMINI_API_KEY,
@@ -69,6 +70,10 @@ from linebot.models import (
 )
 
 app = Flask(__name__)
+app.secret_key = FLASK_SECRET_KEY or os.urandom(32)
+# ⚠️ ถ้าไม่ตั้ง FLASK_SECRET_KEY ใน environment variable ทุกครั้งที่ deploy ใหม่
+# (เช่น Render restart) session ของ dashboard จะหลุดหมด (ผู้ใช้ต้อง login ใหม่)
+# เพราะ key สุ่มใหม่ทุกครั้ง — ตั้งค่าให้คงที่ใน .env เพื่อให้ session อยู่ยาวขึ้น
 
 
 # =============================================================================
@@ -1384,6 +1389,134 @@ def register_liff_page():
     if html:
         return render_template_string(html)
     return "Register LIFF โหลดไม่สำเร็จ — ไม่พบไฟล์ templates/register_liff.html", 500
+
+
+# =============================================================================
+# STAFF DASHBOARD (read-only admin view — SOS / Needs / Users)
+# =============================================================================
+# Protected by a single shared password (DASHBOARD_PASSWORD env var) + Flask
+# session cookie. This is intentionally simple (no per-user accounts) since
+# it's meant for a small relief team — if you need per-user logins/roles
+# later, swap this for a proper auth system.
+
+def _dashboard_logged_in() -> bool:
+    return bool(session.get("dashboard_authed"))
+
+
+@app.route("/dashboard/login", methods=["GET", "POST"])
+def dashboard_login():
+    if not DASHBOARD_PASSWORD:
+        return (
+            "Dashboard ยังไม่ได้ตั้งค่า — กรุณาตั้ง environment variable "
+            "DASHBOARD_PASSWORD ก่อนใช้งานหน้านี้ (ดูวิธีตั้งค่าใน README หัวข้อ Dashboard)",
+            500,
+        )
+
+    error = None
+    if request.method == "POST":
+        if request.form.get("password") == DASHBOARD_PASSWORD:
+            session["dashboard_authed"] = True
+            return redirect(url_for("dashboard_home"))
+        error = "รหัสผ่านไม่ถูกต้อง"
+
+    return render_template_string(_DASHBOARD_LOGIN_HTML, error=error)
+
+
+@app.route("/dashboard/logout")
+def dashboard_logout():
+    session.pop("dashboard_authed", None)
+    return redirect(url_for("dashboard_login"))
+
+
+@app.route("/dashboard")
+def dashboard_home():
+    if not DASHBOARD_PASSWORD:
+        return (
+            "Dashboard ยังไม่ได้ตั้งค่า — กรุณาตั้ง environment variable "
+            "DASHBOARD_PASSWORD ก่อนใช้งานหน้านี้ (ดูวิธีตั้งค่าใน README หัวข้อ Dashboard)",
+            500,
+        )
+    if not _dashboard_logged_in():
+        return redirect(url_for("dashboard_login"))
+
+    html = _load_liff_template("dashboard.html")
+    if not html:
+        return "Dashboard โหลดไม่สำเร็จ — ไม่พบไฟล์ templates/dashboard.html", 500
+    return render_template_string(html)
+
+
+@app.route("/api/dashboard/data")
+def api_dashboard_data():
+    """JSON data feed for the dashboard page (table rows + map pins).
+    Re-checked on every load so staff always see current sheet data
+    (subject to the normal 5-minute Sheets cache in get_all_records)."""
+    if not _dashboard_logged_in():
+        return jsonify({"error": "unauthorized"}), 401
+
+    try:
+        sos_records = sheets_mgr.get_all_records("sos_requests") or []
+        need_records = sheets_mgr.get_all_records("user_needs") or []
+        user_records = sheets_mgr.get_all_records("users") or []
+    except Exception as e:
+        Logger.error("Dashboard", f"Sheets read error: {e}")
+        sos_records, need_records, user_records = [], [], []
+
+    def _is_pending(rec, status_field="status"):
+        s = str(rec.get(status_field, "")).strip().upper()
+        return s in ("", "PENDING", "NEW", "รอดำเนินการ")
+
+    sos_pending = sum(1 for r in sos_records if _is_pending(r))
+    need_pending = sum(1 for r in need_records if _is_pending(r))
+
+    # newest first; keep the dashboard light by capping rows sent to the browser
+    sos_sorted = list(reversed(sos_records))[:100]
+    need_sorted = list(reversed(need_records))[:100]
+
+    return jsonify({
+        "stats": {
+            "sos_total": len(sos_records),
+            "sos_pending": sos_pending,
+            "need_total": len(need_records),
+            "need_pending": need_pending,
+            "users_total": len(user_records),
+        },
+        "sos": sos_sorted,
+        "needs": need_sorted,
+    })
+
+
+_DASHBOARD_LOGIN_HTML = """
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>เข้าสู่ระบบ - FLOODCARE Dashboard</title>
+<style>
+  :root{--bg:#F6F4EF;--surface:#FFFFFF;--ink:#15151A;--muted:#8C8980;--line:#EAE6DF;--primary:#2F6F8F;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Sukhumvit Set',sans-serif;background:var(--bg);
+       min-height:100vh;display:flex;align-items:center;justify-content:center;color:var(--ink);}
+  .box{background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:40px 32px;width:320px;}
+  h1{font-size:20px;font-weight:700;margin-bottom:6px;}
+  p{font-size:13px;color:var(--muted);margin-bottom:24px;}
+  input{width:100%;height:48px;border:1px solid var(--line);border-radius:12px;padding:0 14px;font-size:16px;margin-bottom:14px;}
+  input:focus{outline:none;border-color:var(--primary);}
+  button{width:100%;height:48px;border:none;border-radius:12px;background:var(--primary);color:#fff;font-size:16px;font-weight:600;cursor:pointer;}
+  .error{color:#C2452F;font-size:13px;margin-bottom:14px;}
+</style>
+</head>
+<body>
+  <form class="box" method="post">
+    <h1>FLOODCARE Dashboard</h1>
+    <p>สำหรับเจ้าหน้าที่เท่านั้น</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <input type="password" name="password" placeholder="รหัสผ่าน" autofocus required>
+    <button type="submit">เข้าสู่ระบบ</button>
+  </form>
+</body>
+</html>
+"""
 
 
 @app.route("/api/sos/submit", methods=['POST'])
