@@ -36,7 +36,7 @@ except ImportError:
     requests = None
 
 try:
-    import google.generativeai as genai
+    import google as genai
 except ImportError:
     genai = None
 
@@ -726,7 +726,7 @@ def init_gemini():
         return False
     
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
+        client = genai.Client(api_key=GEMINI_API_KEY
         gemini_model = genai.GenerativeModel(
             model_name="gemini-2.5-flash",
             system_instruction=(
