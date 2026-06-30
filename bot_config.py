@@ -37,9 +37,10 @@ except ImportError:
 
 try:
     from google import genai
-from google.genai import types
+    from google.genai import types
 except ImportError:
     genai = None
+    types = None
 
 try:
     import gspread
