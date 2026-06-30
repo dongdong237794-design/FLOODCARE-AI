@@ -349,6 +349,7 @@ def handle_text_message(event):
     start_time = time.time()
     user_text = sanitize_text(event.message.text.strip())
     user_id = event.source.user_id
+    show_loading_animation(user_id, loading_seconds=10) # เพิ่ม Typing Indicator
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # Rate limiting
@@ -1648,7 +1649,13 @@ def api_sos_submit():
                 f"✅ บันทึกข้อมูลแจ้งเหตุเรียบร้อยแล้วครับ\n"
                 f"เลขเคส: {case_id}\n\n"
                 f"ทีมงานได้รับแจ้งเหตุแล้ว กรุณารอการติดต่อกลับ "
-                f"หากสถานการณ์เปลี่ยนแปลงหรือฉุกเฉินมากขึ้น พิมพ์ 'sos' เพื่อแจ้งซ้ำได้ครับ"
+                f"หากสถานการณ์เปลี่ยนแปลงหรือฉุกเฉินมากขึ้น พิมพ์ \'sos\' เพื่อแจ้งซ้ำได้ครับ"
+            )
+        else:
+            _push_save_confirmation(
+                user_id,
+                f"⚠️ ขออภัยครับ! ไม่สามารถบันทึกข้อมูลแจ้งเหตุได้ในขณะนี้\n"
+                f"กรุณาลองใหม่อีกครั้ง หรือติดต่อเจ้าหน้าที่โดยตรงที่เบอร์ 1784 (ปภ.) ครับ"
             )
 
         return jsonify({"success": success, "case_id": case_id})
@@ -1696,6 +1703,12 @@ def api_need_submit():
                 f"✅ บันทึกข้อมูลความต้องการเรียบร้อยแล้วครับ\n"
                 f"เลขที่รายการ: {need_id}\n\n"
                 f"ทีมงานจะประสานจัดส่งสิ่งของให้เร็วที่สุดครับ"
+            )
+        else:
+            _push_save_confirmation(
+                user_id,
+                f"⚠️ ขออภัยครับ! ไม่สามารถบันทึกข้อมูลความต้องการได้ในขณะนี้\n"
+                f"กรุณาลองใหม่อีกครั้ง หรือติดต่อเจ้าหน้าที่โดยตรงครับ"
             )
 
         return jsonify({"success": success, "need_id": need_id})
@@ -1754,7 +1767,13 @@ def api_register_submit():
                 user_id,
                 f"✅ บันทึกข้อมูลเรียบร้อยแล้วครับ\n"
                 f"ยินดีต้อนรับคุณ {first_name} {last_name} เข้าสู่ FLOODCARE AI\n\n"
-                f"พิมพ์ 'sos' เพื่อแจ้งเหตุฉุกเฉิน หรือ 'ขอของ' เพื่อแจ้งความต้องการสิ่งของได้ทันทีครับ"
+                f"พิมพ์ \'sos\' เพื่อแจ้งเหตุฉุกเฉิน หรือ \'ขอของ\' เพื่อแจ้งความต้องการสิ่งของได้ทันทีครับ"
+            )
+        else:
+            _push_save_confirmation(
+                user_id,
+                f"⚠️ ขออภัยครับ! ไม่สามารถบันทึกข้อมูลการลงทะเบียนได้ในขณะนี้\n"
+                f"กรุณาลองใหม่อีกครั้งครับ"
             )
 
         return jsonify({"success": success})
