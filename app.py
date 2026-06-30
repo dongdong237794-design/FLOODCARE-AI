@@ -26,6 +26,7 @@ import datetime
 from typing import Optional
 from flask import Flask, request, abort, jsonify, render_template_string, render_template, g, session, redirect, url_for
 
+# Imports configuration from bot_config (floodcare_ai_optimized_bot_config.py saved as bot_config.py)
 import bot_config
 from bot_config import (
     # Core systems
@@ -49,7 +50,7 @@ from bot_config import (
     calculate_sos_priority,
     # Services
     ask_gemini, ask_gemini_with_search, get_live_weather_scraper, get_live_weather_data, sheets_mgr,
-    assess_water_level_status, calculate_situation,
+    get_live_water_levels_from_api, assess_water_level_status, calculate_situation,
     # Legacy state
     USER_STATES, USER_DATA, update_legacy_state,
     # Config
@@ -115,7 +116,7 @@ def _push_save_confirmation(user_id: Optional[str], message: str) -> None:
 
 
 # =============================================================================
-# LIFF API AUTH
+# LIFF API AUTH (Robust and Fallback Friendly)
 # =============================================================================
 
 import urllib.request as _urllib_request
@@ -124,8 +125,9 @@ import hmac as _hmac
 def _verify_liff_token(id_token: str, liff_id: str) -> Optional[str]:
     if not id_token or not liff_id:
         return None
-    if id_token.lower() in ("null", "undefined", ""):
-        Logger.info("Auth", "id_token is null/undefined — LIFF may not be fully initialized")
+    # Filter out common string placeholders when LIFF is not initialized or runs on external browser
+    if id_token.lower() in ("null", "undefined", "", "bearer", "bearer null", "bearer undefined"):
+        Logger.info("Auth", "id_token has placeholder value — LIFF might be in standalone/test mode")
         return None
     try:
         channel_id = liff_id.split("-")[0] if "-" in liff_id else liff_id
@@ -144,7 +146,7 @@ def _verify_liff_token(id_token: str, liff_id: str) -> Optional[str]:
             body = json.loads(resp.read())
             return body.get("sub")
     except Exception as e:
-        Logger.info("Auth", f"LIFF token verify failed: {e}")
+        Logger.info("Auth", f"LIFF token verification failed on LINE API: {e}")
         return None
 
 
@@ -155,58 +157,60 @@ def _require_liff_auth(expected_liff_id: str):
     def decorator(fn):
         @wraps(fn)
         def wrapped(*args, **kwargs):
+            # Skip token validation if the LIFF ID is not configured in the system environment
             if not expected_liff_id:
                 Logger.info("Auth", f"LIFF_ID not configured — skipping token verify for {fn.__name__}")
-                g.verified_user_id = None
+                g.verified_user_id = "unknown"
                 return fn(*args, **kwargs)
 
             auth_header = request.headers.get("Authorization", "")
+            id_token = ""
+            
+            # Extract Bearer token safely
+            if auth_header.startswith("Bearer ") and len(auth_header) > 7:
+                id_token = auth_header[7:].strip()
 
-            if not auth_header.startswith("Bearer ") or auth_header == "Bearer ":
-                try:
-                    body_data = request.get_json(silent=True) or {}
-                    fallback_uid = body_data.get("user_id", "")
-                    if fallback_uid and fallback_uid != "unknown":
-                        Logger.info(
-                            "Auth",
-                            f"No valid Authorization header for {fn.__name__} — "
-                            f"accepting payload user_id (unverified)."
-                        )
-                        g.verified_user_id = fallback_uid
-                        if not check_rate_limit(fallback_uid):
-                            return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
-                        return fn(*args, **kwargs)
-                except Exception:
-                    pass
-                Logger.security("Auth", "Missing Authorization header and no user_id in body", "unknown", {})
-                return jsonify({"success": False, "error": "Unauthorized"}), 401
+            # Prevent passing literal placeholder strings to validation
+            if id_token.lower() in ("null", "undefined", ""):
+                id_token = ""
 
-            id_token = auth_header[len("Bearer "):]
-            user_id = _verify_liff_token(id_token, expected_liff_id)
-            if not user_id:
-                try:
-                    body_data = request.get_json(silent=True) or {}
-                    fallback_uid = body_data.get("user_id", "")
-                    if fallback_uid and fallback_uid != "unknown":
-                        Logger.info(
-                            "Auth",
-                            f"LIFF token verify failed for {fn.__name__} — "
-                            f"accepting payload user_id (unverified)."
-                        )
-                        g.verified_user_id = fallback_uid
-                        if not check_rate_limit(fallback_uid):
-                            return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
-                        return fn(*args, **kwargs)
-                except Exception:
-                    pass
-                Logger.security("Auth", "Invalid LIFF token and no fallback user_id", "unknown", {})
-                return jsonify({"success": False, "error": "Unauthorized"}), 401
+            user_id = None
+            if id_token:
+                user_id = _verify_liff_token(id_token, expected_liff_id)
 
-            if not check_rate_limit(user_id):
-                return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+            if user_id:
+                # Flow A: Verified User successfully validated through LINE Server
+                if not check_rate_limit(user_id):
+                    return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+                g.verified_user_id = user_id
+                return fn(*args, **kwargs)
 
-            g.verified_user_id = user_id
-            return fn(*args, **kwargs)
+            # Flow B: Token invalid/absent (Fallback checking request body)
+            try:
+                body_data = request.get_json(silent=True) or {}
+                fallback_uid = body_data.get("user_id", "")
+                
+                # Check for other potential parameters
+                if not fallback_uid:
+                    fallback_uid = body_data.get("userId", "")
+
+                # Validate and clean fallback User ID
+                if fallback_uid and str(fallback_uid).lower() not in ("null", "undefined", "", "unknown"):
+                    Logger.info(
+                        "Auth",
+                        f"LIFF validation bypassed/failed for {fn.__name__} — "
+                        f"accepting request body user_id: {fallback_uid} (unverified)."
+                    )
+                    g.verified_user_id = str(fallback_uid)
+                    if not check_rate_limit(g.verified_user_id):
+                        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+                    return fn(*args, **kwargs)
+            except Exception as e:
+                Logger.error("Auth", f"Fallback identification error: {e}")
+
+            # Flow C: Fully unauthorized access (No valid token, no valid body UID)
+            Logger.security("Auth", f"Denied access on {fn.__name__} - missing or invalid authorization keys", "unknown")
+            return jsonify({"success": False, "error": "Unauthorized"}), 401
         return wrapped
     return decorator
 
@@ -411,6 +415,10 @@ def handle_text_message(event):
 # =============================================================================
 # LOCATION MESSAGE HANDLER
 # =============================================================================
+
+@app.route("/callback/location", methods=['POST']) # Endpoint mapping placeholder if needed
+def handle_location_callback():
+    return 'OK', 200
 
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
@@ -669,9 +677,19 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
     session = sessions.get(user_id)
     show_loading_animation(user_id, loading_seconds=10)
     
-    records = sheets_mgr.get_all_records("Water_Levels")
-    stations = []
+    # 1. First attempt to pull manual override records from Google Sheets
+    records = []
+    try:
+        records = sheets_mgr.get_all_records("Water_Levels")
+    except Exception as e:
+        Logger.error("WaterLevel", f"Failed to retrieve data from Google Sheets: {e}")
+        
+    # 2. If Google Sheet has no records (empty sheet), fetch live telemetries directly from ThaiWater API
+    if not records:
+        Logger.info("WaterLevel", "Google Sheet is empty. Automatically fetching live data from official ThaiWater API...")
+        records = get_live_water_levels_from_api()
     
+    stations = []
     for r in records:
         try:
             st_lat = float(r.get("Lat", 0))
@@ -697,7 +715,7 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
                 "situation": situation,
                 "trend": trend,
                 "measure_time": r.get("Time", "-"),
-                "source": "sheets"
+                "source": "api" if "StationCode" in r else "sheets"
             })
         except (ValueError, TypeError):
             continue
@@ -918,7 +936,7 @@ def api_sos_submit():
             return jsonify({"success": False, "error": "No data"}), 400
 
         verified_uid = g.get("verified_user_id")
-        user_id = verified_uid or data.get("user_id", "unknown")
+        user_id = verified_uid or data.get("user_id") or data.get("userId") or "unknown"
 
         case_id = generate_case_id()
         timestamp = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
@@ -967,7 +985,7 @@ def api_need_submit():
             return jsonify({"success": False, "error": "No data"}), 400
 
         verified_uid = g.get("verified_user_id")
-        user_id = verified_uid or data.get("user_id", "unknown")
+        user_id = verified_uid or data.get("user_id") or data.get("userId") or "unknown"
 
         need_id = generate_need_id()
         timestamp = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
@@ -1011,7 +1029,7 @@ def api_register_submit():
             return jsonify({"success": False, "error": "No data"}), 400
 
         verified_uid = g.get("verified_user_id")
-        user_id = verified_uid or data.get("user_id", "unknown")
+        user_id = verified_uid or data.get("user_id") or data.get("userId") or "unknown"
 
         first_name = (data.get("first_name") or "ผู้แจ้ง").strip()
         last_name = (data.get("last_name") or "ทั่วไป").strip()
