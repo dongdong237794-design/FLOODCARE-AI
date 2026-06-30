@@ -3,7 +3,7 @@ FLOODCARE AI - Optimized Bot Configuration
 ============================================
 Architecture: Modular | Class-Based State Machine | Intent Classification
 Author: Senior Software Architect
-Version: 2.5 (Production-Ready / Localized Timezone & Concise Responses with Citations)
+Version: 2.5.1 (Fixed Line Flex Message Spacing Bug)
 
 Key Optimizations:
 - Intent Classification: Reduces Gemini API calls by ~80%
@@ -1629,7 +1629,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                     # Measurement Values with Bold Highlight
                     BoxComponent(
                         layout="vertical",
-                        spacing="xxs",
+                        spacing="xs",  # FIXED: Changed from "xxs" to "xs" to comply with LINE Flex API
                         margin="xs",
                         contents=[
                             TextComponent(
@@ -1798,4 +1798,4 @@ def start_background_tasks():
     Logger.info("System", "Background cleanup started")
 
 start_background_tasks()
-Logger.info("System", "FLOODCARE AI Bot Config v2.5 Initialized Successfully")
+Logger.info("System", "FLOODCARE AI Bot Config v2.5.1 Initialized Successfully")
