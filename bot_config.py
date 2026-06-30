@@ -729,7 +729,7 @@ _gemini_initialized = False
 FLOODCARE_SYSTEM_INSTRUCTION = (
     # ======================== IDENTITY ========================
     "คุณคือ FLOODCARE AI น้องบอทผู้ช่วยด้านภัยน้ำท่วมและเหตุฉุกเฉิน\n"
-    "สไตล์การตอบ: คุยแบบเพื่อน อบอุ่น เป็นกันเอง ไม่เป็นทางการจนเกิน แต่ข้อมูลต้องถูกต้องและมีแหล่งที่มาเสมอ\n"
+    "สไตล์การตอบ: กระชับ ชัดเจน อ่านง่าย เป็นกันเอง แต่ข้อมูลต้องถูกต้องและมีแหล่งที่มาเสมอ\n"
     "ตอบเป็นภาษาไทยเสมอ\n\n"
 
     # ====================== STEP 1: SEVERITY ======================
@@ -741,10 +741,9 @@ FLOODCARE_SYSTEM_INSTRUCTION = (
 
     # ====================== STEP 2: RESPONSE BY LEVEL ======================
     "[2] ตอบตามระดับ:\n"
-    "  NORMAL/WARNING: ตอบเป็นกันเองเหมือนเพื่อนที่รู้เรื่องน้ำท่วมดี อธิบายให้เข้าใจง่าย\n"
-    "  EMERGENCY: ตอบเป็นขั้นตอนชัดเจน แนะนำโทร 1784 (ปภ.) หรือ 1669 (การแพทย์ฉุกเฉิน) "
-    "และแนะนำให้พิมพ์ 'sos' เพื่อแจ้งทีมช่วยเหลือ\n"
-    "  SOS: ตอบคำแนะนำด่วนก่อนเลย ตามด้วยเบอร์ฉุกเฉินทันที ห้ามยืดเยื้อ\n\n"
+    "  NORMAL/WARNING: ตอบกระชับ ชัดเจน เข้าใจง่าย\n"
+    "  EMERGENCY: ตอบเป็นขั้นตอนชัดเจน แนะนำเบอร์ฉุกเฉิน (ปภ. 1784, สพฉ. 1669) และแนะนำให้พิมพ์ 'sos'\n"
+    "  SOS: ตอบคำแนะนำด่วนและเบอร์ฉุกเฉินทันที ห้ามยืดเยื้อ\n\n"
 
     # ====================== STEP 3: SCOPE ======================
     "[3] เรื่องที่ตอบได้ (ตอบได้หมดไม่ว่าจะพิมพ์ยังไง):\n"
@@ -822,7 +821,7 @@ def init_gemini():
         return False
 
 
-def ask_gemini(prompt: str, max_tokens: int = 2048) -> str:
+def ask_gemini(prompt: str, max_tokens: int = 300) -> str:
     """
     Optimized Gemini API call with caching (google-genai SDK).
     - Cache responses for identical prompts
@@ -877,7 +876,7 @@ def ask_gemini(prompt: str, max_tokens: int = 2048) -> str:
         return "⚠️ AI ขัดข้องชั่วคราว หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
 
 
-def ask_gemini_with_search(question: str, max_tokens: int = 2048) -> dict:
+def ask_gemini_with_search(question: str, max_tokens: int = 700) -> dict:
     """
     Gemini API call with Google Search grounding enabled (google-genai SDK).
     Returns dict: {"answer": str, "sources": list[{"title": str, "url": str}]}
@@ -1044,7 +1043,15 @@ class SheetsManager:
                 return self._client
             
             if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
-                self._last_error = "Environment variables not set"
+                if not GOOGLE_SERVICE_ACCOUNT_JSON:
+                    self._last_error = "GOOGLE_SERVICE_ACCOUNT_JSON not set"
+                    Logger.error("Sheets", "GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set.")
+                elif not GOOGLE_SHEET_ID:
+                    self._last_error = "GOOGLE_SHEET_ID not set"
+                    Logger.error("Sheets", "GOOGLE_SHEET_ID environment variable is not set.")
+                else:
+                    self._last_error = "Environment variables not set"
+                    Logger.error("Sheets", "Required Google Sheets environment variables are not set.")
                 self._initialized = True
                 return None
             
@@ -1323,11 +1330,11 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
     }
     
     status_map = {
-        "ล้นตลิ่ง": {"status": t["ล้นตลิ่ง"], "bg": "#FEE2E2", "text": "#EF4444", "advice": "อพยพทันที"},
-        "มาก": {"status": t["มาก"], "bg": "#DBEAFE", "text": "#3B82F6", "advice": "ระดับน้ำสูง"},
-        "ปกติ": {"status": t["ปกติ"], "bg": "#D1FAE5", "text": "#10B981", "advice": "ระดับน้ำปกติ"},
-        "น้อย": {"status": t["น้อย"], "bg": "#FEF9C3", "text": "#F59E0B", "advice": "ระดับน้ำน้อย"},
-        "น้อยวิกฤต": {"status": t["น้อยวิกฤต"], "bg": "#FFEDD5", "text": "#F97316", "advice": "น้อยวิกฤต"},
+        "ล้นตลิ่ง": {"status": t["ล้นตลิ่ง"], "bg": "#DC2626", "text": "#FFFFFF", "advice": "อพยพทันที"},
+        "มาก": {"status": t["มาก"], "bg": "#2563EB", "text": "#FFFFFF", "advice": "ระดับน้ำสูง"},
+        "ปกติ": {"status": t["ปกติ"], "bg": "#059669", "text": "#FFFFFF", "advice": "ระดับน้ำปกติ"},
+        "น้อย": {"status": t["น้อย"], "bg": "#F59E0B", "text": "#FFFFFF", "advice": "ระดับน้ำน้อย"},
+        "น้อยวิกฤต": {"status": t["น้อยวิกฤต"], "bg": "#DC2626", "text": "#FFFFFF", "advice": "น้อยวิกฤต"},
     }
     
     res = status_map.get(situation, {
