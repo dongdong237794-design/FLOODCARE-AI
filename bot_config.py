@@ -36,9 +36,11 @@ except ImportError:
     requests = None
 
 try:
-    import google as genai
+    from google import genai
+    from google.genai import types
 except ImportError:
     genai = None
+    types = None
 
 try:
     import gspread
