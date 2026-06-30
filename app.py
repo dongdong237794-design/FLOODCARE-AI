@@ -551,25 +551,31 @@ def _handle_weather_request(event, user_id):
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(
-            text="🌦️ ตรวจสอบสภาพอากาศปัจจุบัน\n\nโปรดกดแชร์พิกัดเพื่อรับรายงานสภาพอากาศจากกรมอุตุฯ:",
+            text="🌦️ ตรวจสอบสภาพอากาศปัจจุบัน\n\n"
+                 "โปรดกดแชร์พิกัดเพื่อรับรายงานสภาพอากาศจากกรมอุตุฯ:",
             quick_reply=quick_reply
         )
     )
 
 
 # =============================================================================
-# CHAT AI HANDLERS (With Typing Indicators)
+# CHAT AI HANDLERS (With Typing Indicators & Concise Citations)
 # =============================================================================
 
 def _handle_faq_query(event, user_id, user_text, timestamp):
     show_loading_animation(user_id, loading_seconds=30)
 
-    result = ask_gemini_with_search(user_text, max_tokens=8192)
+    # Enforces concise rule in the FAQ prompt level
+    result = ask_gemini_with_search(
+        f"วิเคราะห์ข้อมูลและตอบกลับคำถามนี้ให้กระชับมากที่สุด (ไม่เกิน 2-3 บรรทัด) "
+        f"พร้อมระบุชื่อแหล่งอ้างอิงไว้ในวงเล็บอย่างสั้นด้วยครับ:\n\n{user_text}",
+        max_tokens=8192
+    )
     answer = result.get("answer", "")
     sources = result.get("sources", [])
 
     if not answer:
-        answer = "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติหรือความปลอดภัยในคำถามนี้ กรุณาลองสอบถามใหม่อีกครั้งครับ"
+        answer = "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติในคำถามนี้ (ข้อมูลจาก: FLOODCARE AI)"
 
     flex_msg = build_faq_response_flex(answer, sources, user_text)
     line_bot_api.reply_message(event.reply_token, flex_msg)
@@ -586,10 +592,11 @@ def _handle_faq_query(event, user_id, user_text, timestamp):
 def _handle_ai_query(event, user_id, user_text, timestamp):
     show_loading_animation(user_id, loading_seconds=30)
 
+    # Strongly forces Gemini to yield a very brief response
     result = ask_gemini_with_search(
-        "ประเมินตามกฎและเงื่อนไข System Instruction (น้องบอท): ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ "
-        "ความปลอดภัย และสุขภาพของผู้เจ็บป่วยหรือเครียดเท่านั้น ปฏิเสธเรื่องนอกขอบเขตอย่างสุภาพและอบอุ่น "
-        "และตอบคำถามดังต่อไปนี้โดยไม่ใช้เครื่องหมายดอกจันเด็ดขาด:\n\n"
+        "ประเมินตามกฎเงื่อนไข System Instruction: ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ ความปลอดภัย "
+        "และสุขภาพอย่างเข้มงวด โดยปฏิเสธเรื่องนอกขอบเขตอย่างอบอุ่น "
+        "และ**สรุปคำตอบให้สั้นที่สุดไม่เกิน 2-3 บรรทัดเท่านั้น** พร้อมระบุแหล่งอ้างอิงสั้นๆ ในวงเล็บ:\n\n"
         f"คำถาม: {user_text}",
         max_tokens=8192
     )
@@ -597,7 +604,7 @@ def _handle_ai_query(event, user_id, user_text, timestamp):
     sources = result.get("sources", [])
 
     if not ai_response:
-        ai_response = "น้องบอทไม่พร้อมใช้งานชั่วคราวครับ หากฉุกเฉินรบกวนโทร ปภ. 1784 ได้ทันทีครับ"
+        ai_response = "น้องบอทไม่พร้อมใช้งานชั่วคราวครับ หากมีเหตุฉุกเฉินรบกวนโทร ปภ. 1784 ทันทีครับ"
 
     if sources:
         flex_msg = build_faq_response_flex(ai_response, sources, user_text)
@@ -771,7 +778,6 @@ def _process_weather(event, lat, lon, user_id, timestamp):
 
 def _render_liff_page(template_name: str, page_label: str):
     try:
-        # Dynamic LIFF ID injection to eliminate manual query parameter breaks
         liff_id = ""
         if "sos" in template_name:
             liff_id = SOS_LIFF_ID
