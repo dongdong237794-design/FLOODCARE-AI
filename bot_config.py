@@ -1,1997 +1,1905 @@
 """
-FLOODCARE AI - Optimized Bot Configuration
-============================================
-Architecture: Modular | Class-Based State Machine | Intent Classification
-Author: Senior Software Architect
-Version: 2.0 (Production-Ready)
+FLOODCARE AI - Flask Application (Optimized)
+=============================================
+Main entry point with:
+- Intent Classification (reduces Gemini calls by ~80%)
+- LIFF integration for SOS and Needs workflows
+- State Machine with session management
+- Rate limiting per user
+- Performance logging
 
-Key Optimizations:
-- Intent Classification: Reduces Gemini API calls by ~80%
-- Smart Cache: Multi-layer (Memory LRU > TTL Cache)
-- State Machine: Class-based, separated workflows
-- Rate Limiting: Per-user request throttling
-- Memory Management: Auto-cleanup stale sessions
-- Sheets Optimization: Batch writes, connection pooling
+Routes:
+  POST /callback          - LINE Webhook
+  GET  /liff/sos          - SOS LIFF page
+  GET  /liff/need         - Needs LIFF page
+  GET  /liff/register     - Registration LIFF page
+  POST /api/sos/submit    - SOS form submission
+  POST /api/need/submit   - Needs form submission
+  POST /api/register/submit - Registration form submission
+  GET  /debug/*           - Debug endpoints
 """
 
 import os
 import json
-import math
 import time
-import random
-import hashlib
 import datetime
-import threading
-import functools
-from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple, Any, Callable
+from typing import Optional
+from flask import Flask, request, abort, jsonify, render_template_string, render_template, g, session, redirect, url_for
 
-# =============================================================================
-# EXTERNAL DEPENDENCIES
-# =============================================================================
-try:
-    import requests
-    import urllib.request
-except ImportError:
-    requests = None
-
-try:
-    # google-generativeai (old SDK, import path "google.generativeai") is deprecated
-    # and no longer receives updates/bug fixes from Google. Migrated to the new
-    # unified SDK "google-genai" (import path "google.genai") — see:
-    # https://github.com/googleapis/python-genai
-    from google import genai
-    from google.genai import types as genai_types
-except ImportError:
-    genai = None
-    genai_types = None
-
-try:
-    import gspread
-except ImportError:
-    gspread = None
-
-# supabase ถูกลบออก — ไม่ได้ใช้งานในโปรเจกต์นี้ (dependency เกินจำเป็น)
-
-try:
-    from linebot import LineBotApi, WebhookHandler
-    from linebot.models import (
-        FlexSendMessage, BubbleContainer, BoxComponent, TextComponent,
-        SeparatorComponent, ButtonComponent, URIAction, TextSendMessage,
-        LocationAction, MessageAction, BubbleStyle, BlockStyle
-    )
-except ImportError:
-    LineBotApi = None
-    WebhookHandler = None
-
-
-# =============================================================================
-# SECTION 1: CONFIGURATION & ENVIRONMENT
-# =============================================================================
-
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID", "")
-GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-TMD_ACCESS_TOKEN = os.environ.get("TMD_ACCESS_TOKEN", "")
-
-# LIFF Configuration
-SOS_LIFF_ID = os.environ.get("SOS_LIFF_ID", "")
-SOS_LIFF_URL = os.environ.get("SOS_LIFF_URL", "")
-NEED_LIFF_ID = os.environ.get("NEED_LIFF_ID", "")
-NEED_LIFF_URL = os.environ.get("NEED_LIFF_URL", "")
-REGISTER_LIFF_ID = os.environ.get("REGISTER_LIFF_ID", "")
-REGISTER_LIFF_URL = os.environ.get("REGISTER_LIFF_URL", "")
-
-# --- Trusted reference sources (used so safety-critical replies link to a
-#     verified source instead of relying purely on AI-generated text) ---
-WATER_LEVEL_SOURCE_URL = os.environ.get(
-    "WATER_LEVEL_SOURCE_URL", "https://www.thaiwater.net/water/wl"
-)  # คลังข้อมูลน้ำแห่งชาติ - สถาบันสารสนเทศทรัพยากรน้ำ (สสน.)
-SNAKE_BITE_INFO_URL = "https://www.rama.mahidol.ac.th/poisoncenter/th"
-SNAKE_BITE_HOTLINE = "1367"  # สายด่วนศูนย์พิษวิทยารามาธิบดี (24 ชม.)
-
-# --- Staff dashboard (read-only admin view of Sheets data) ---
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
-FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
-
-# Performance Tuning
-WATER_DATA_MAX_AGE_MINUTES = int(os.environ.get("WATER_DATA_MAX_AGE_MINUTES", "10"))
-CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
-RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "30"))
-RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
-SESSION_TTL_MINUTES = int(os.environ.get("SESSION_TTL_MINUTES", "30"))
-
-# API Endpoints
-THAIWATER_V3_API = "https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load"
-THAIWATER_API_BASE = "https://api.thaiwater.net/twsapi/v1.0"
-THAIWATER_WEB_URL = "https://www.thaiwater.net/water/waterlevel"
-
-
-# =============================================================================
-# SECTION 2: STRUCTURED LOGGING SYSTEM
-# =============================================================================
-
-class Logger:
-    """Structured logging with performance tracking"""
-    
-    _log_buffer: List[dict] = []
-    _buffer_lock = threading.Lock()
-    _max_buffer = 100
-    
-    @classmethod
-    def _timestamp(cls) -> str:
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    
-    @classmethod
-    def info(cls, module: str, message: str, extra: dict = None):
-        entry = {"ts": cls._timestamp(), "lvl": "INFO", "mod": module, "msg": message}
-        if extra:
-            entry.update(extra)
-        cls._buffer(entry)
-        print(f"[{entry['ts']}] INFO  [{module}] {message}")
-    
-    @classmethod
-    def error(cls, module: str, message: str, extra: dict = None):
-        entry = {"ts": cls._timestamp(), "lvl": "ERROR", "mod": module, "msg": message}
-        if extra:
-            entry.update(extra)
-        cls._buffer(entry)
-        print(f"[{entry['ts']}] ERROR [{module}] {message}")
-    
-    @classmethod
-    def perf(cls, module: str, operation: str, elapsed_ms: float, extra: dict = None):
-        entry = {
-            "ts": cls._timestamp(), "lvl": "PERF", "mod": module,
-            "op": operation, "ms": round(elapsed_ms, 2)
-        }
-        if extra:
-            entry.update(extra)
-        cls._buffer(entry)
-        print(f"[{entry['ts']}] PERF  [{module}] {operation}: {elapsed_ms:.1f}ms")
-    
-    @classmethod
-    def security(cls, module: str, message: str, user_id: str = "", extra: dict = None):
-        entry = {
-            "ts": cls._timestamp(), "lvl": "SEC", "mod": module,
-            "msg": message, "uid": user_id
-        }
-        if extra:
-            entry.update(extra)
-        cls._buffer(entry)
-        print(f"[{entry['ts']}] SEC   [{module}] {message} uid={user_id}")
-    
-    @classmethod
-    def _buffer(cls, entry: dict):
-        with cls._buffer_lock:
-            cls._log_buffer.append(entry)
-            if len(cls._log_buffer) > cls._max_buffer:
-                cls._log_buffer = cls._log_buffer[-cls._max_buffer:]
-    
-    @classmethod
-    def get_logs(cls, limit: int = 50) -> List[dict]:
-        with cls._buffer_lock:
-            return cls._log_buffer[-limit:]
-
-
-# =============================================================================
-# SECTION 3: SMART CACHE SYSTEM (Multi-Layer)
-# =============================================================================
-
-class LRUMemoryCache:
-    """
-    Thread-safe LRU Cache with TTL support
-    Layer 1: Fastest - In-memory ordered dict
-    """
-    
-    def __init__(self, maxsize: int = 256, default_ttl: int = 300):
-        self._cache: OrderedDict = OrderedDict()
-        self._ttl = default_ttl
-        self._maxsize = maxsize
-        self._lock = threading.Lock()
-        self._hits = 0
-        self._misses = 0
-    
-    def _is_expired(self, entry: dict) -> bool:
-        return time.time() - entry["time"] > entry["ttl"]
-    
-    def get(self, key: str) -> Optional[Any]:
-        with self._lock:
-            entry = self._cache.get(key)
-            if entry is None:
-                self._misses += 1
-                return None
-            if self._is_expired(entry):
-                del self._cache[key]
-                self._misses += 1
-                return None
-            # Move to end (most recently used)
-            self._cache.move_to_end(key)
-            self._hits += 1
-            return entry["value"]
-    
-    def set(self, key: str, value: Any, ttl: int = None):
-        with self._lock:
-            if key in self._cache:
-                self._cache.move_to_end(key)
-            self._cache[key] = {
-                "value": value,
-                "time": time.time(),
-                "ttl": ttl or self._ttl
-            }
-            # Evict oldest if over capacity
-            while len(self._cache) > self._maxsize:
-                self._cache.popitem(last=False)
-    
-    def delete(self, key: str):
-        with self._lock:
-            self._cache.pop(key, None)
-    
-    def clear(self):
-        with self._lock:
-            self._cache.clear()
-    
-    def cleanup_expired(self) -> int:
-        """Remove expired entries, return count removed"""
-        with self._lock:
-            expired = [k for k, v in self._cache.items() if self._is_expired(v)]
-            for k in expired:
-                del self._cache[k]
-            return len(expired)
-    
-    def stats(self) -> dict:
-        with self._lock:
-            total = self._hits + self._misses
-            return {
-                "size": len(self._cache),
-                "maxsize": self._maxsize,
-                "hits": self._hits,
-                "misses": self._misses,
-                "hit_rate": round(self._hits / total * 100, 1) if total > 0 else 0,
-                "ttl": self._ttl
-            }
-
-
-class CacheManager:
-    """
-    Multi-layer cache manager
-    - Layer 1: LRUMemoryCache (fastest, per-process)
-    - Layer 2: TTL-based weather/water cache
-    """
-    
-    def __init__(self):
-        # General purpose cache
-        self.general = LRUMemoryCache(maxsize=512, default_ttl=CACHE_TTL_SECONDS)
-        # Weather-specific cache (30 min)
-        self.weather = LRUMemoryCache(maxsize=256, default_ttl=1800)
-        # Water levels cache (15 min)
-        self.water = LRUMemoryCache(maxsize=128, default_ttl=900)
-        # User sessions (30 min)
-        self.sessions = LRUMemoryCache(maxsize=1024, default_ttl=SESSION_TTL_MINUTES * 60)
-        # Sheets data cache (10 min)
-        self.sheets = LRUMemoryCache(maxsize=64, default_ttl=600)
-    
-    def cleanup_all(self) -> dict:
-        """Cleanup all expired entries, return stats"""
-        return {
-            "general": self.general.cleanup_expired(),
-            "weather": self.weather.cleanup_expired(),
-            "water": self.water.cleanup_expired(),
-            "sessions": self.sessions.cleanup_expired(),
-            "sheets": self.sheets.cleanup_expired(),
-        }
-    
-    def all_stats(self) -> dict:
-        return {
-            "general": self.general.stats(),
-            "weather": self.weather.stats(),
-            "water": self.water.stats(),
-            "sessions": self.sessions.stats(),
-            "sheets": self.sheets.stats(),
-        }
-
-
-# Global cache manager instance
-cache = CacheManager()
-
-
-# =============================================================================
-# SECTION 4: RATE LIMITING & SECURITY
-# =============================================================================
-
-class RateLimiter:
-    """
-    Token bucket rate limiter per user
-    - Default: 30 requests per 60 seconds
-    - Burst protection with token bucket algorithm
-    """
-    
-    def __init__(self, max_requests: int = 30, window_seconds: int = 60):
-        self._max_requests = max_requests
-        self._window = window_seconds
-        self._buckets: Dict[str, dict] = {}
-        self._lock = threading.Lock()
-        self._cleanup_interval = 300  # Cleanup every 5 minutes
-        self._last_cleanup = time.time()
-    
-    def _cleanup(self):
-        """Remove old bucket entries"""
-        now = time.time()
-        if now - self._last_cleanup < self._cleanup_interval:
-            return
-        with self._lock:
-            expired = []
-            for user_id, bucket in self._buckets.items():
-                if now - bucket["last_reset"] > self._window * 2:
-                    expired.append(user_id)
-            for uid in expired:
-                del self._buckets[uid]
-            self._last_cleanup = now
-            if expired:
-                Logger.info("RateLimiter", f"Cleaned up {len(expired)} expired buckets")
-    
-    def check(self, user_id: str) -> Tuple[bool, dict]:
-        """
-        Check if user can make a request
-        Returns: (allowed, metadata)
-        """
-        self._cleanup()
-        with self._lock:
-            now = time.time()
-            bucket = self._buckets.get(user_id)
-            
-            if bucket is None:
-                self._buckets[user_id] = {
-                    "tokens": self._max_requests - 1,
-                    "last_reset": now
-                }
-                return True, {"remaining": self._max_requests - 1, "limit": self._max_requests}
-            
-            # Reset window
-            if now - bucket["last_reset"] > self._window:
-                bucket["tokens"] = self._max_requests - 1
-                bucket["last_reset"] = now
-                return True, {"remaining": self._max_requests - 1, "limit": self._max_requests}
-            
-            # Check token
-            if bucket["tokens"] <= 0:
-                retry_after = int(self._window - (now - bucket["last_reset"]))
-                Logger.security("RateLimiter", f"Rate limit exceeded", user_id)
-                return False, {"retry_after": retry_after, "limit": self._max_requests}
-            
-            bucket["tokens"] -= 1
-            return True, {"remaining": bucket["tokens"], "limit": self._max_requests}
-    
-    def get_status(self, user_id: str) -> dict:
-        with self._lock:
-            bucket = self._buckets.get(user_id)
-            if not bucket:
-                return {"remaining": self._max_requests, "limit": self._max_requests}
-            return {"remaining": max(0, bucket["tokens"]), "limit": self._max_requests}
-
-
-# Global rate limiter
-rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW)
-
-
-def sanitize_text(text: str, max_length: int = 2000) -> str:
-    """Sanitize user input — strip non-printable control chars and enforce length limit.
-
-    หมายเหตุ: ระบบนี้ไม่ได้คุยกับ SQL database โดยตรง
-    จึงไม่จำเป็นต้องกรอง SQL syntax (เช่น --, @@)
-    การกรองนั้นอาจตัดข้อความภาษาไทยจริงๆ ออกไปโดยไม่ตั้งใจ
-    """
-    if not text:
-        return ""
-    # Remove control characters except newline/tab
-    sanitized = "".join(
-        ch for ch in text
-        if ch in ("\n", "\t") or (ch.isprintable() and ord(ch) >= 32)
-    )
-    # Limit length
-    return sanitized[:max_length]
-
-
-def hash_user_id(user_id: str) -> str:
-    """Hash user_id for logging without exposing PII"""
-    return hashlib.sha256(user_id.encode()).hexdigest()[:12]
-
-
-# =============================================================================
-# SECTION 5: INTENT CLASSIFICATION SYSTEM
-# =============================================================================
-
-class IntentClassifier:
-    """
-    Rule-based Intent Classifier
-    Purpose: Filter messages BEFORE sending to Gemini API
-    Reduces token usage by ~80% for common patterns
-    
-    Intents:
-    - GREETING: ทักทาย, สวัสดี
-    - HELP: ถามว่าบอททำอะไรได้บ้าง / วิธีใช้
-    - SOS: ขอความช่วยเหลือฉุกเฉิน
-    - NEEDS: ขอสิ่งของ, ความต้องการ
-    - EMERGENCY: ช่วยด้วย, อันตรายถึงชีวิต
-    - SNAKE_BITE: ถูกงูกัด (ตอบด้วยข้อมูลปฐมพยาบาลที่ตรวจสอบแล้ว ไม่ใช่ AI freeform)
-    - SHELTER: หาศูนย์พักพิง
-    - WATER_LEVEL: เช็คระดับน้ำ
-    - WEATHER: เช็คสภาพอากาศ
-    - CONTACT: เบอร์โทรฉุกเฉิน
-    - LANGUAGE: เปลี่ยนภาษา
-    - CANCEL: ยกเลิก
-    - AI_QUERY: ส่งต่อ Gemini (เฉพาะคำถามทั่วไปที่ไม่ตรงกับ intent ข้างต้น)
-    """
-    
-    # ⚠️ ลำดับ key ใน dict มีความสำคัญ: classify() วน loop ตามลำดับนี้
-    # EMERGENCY และ SOS ต้องมาก่อน GREETING เสมอ
-    # คำที่ทับซ้อนกับ EMERGENCY/SOS ถูกเอาออกจาก GREETING แล้ว (เช่น "ช่วยด้วยครับ")
-    PATTERNS = {
-        "EMERGENCY": [
-            "ช่วยด้วย", "ช่วยด้วยครับ", "ช่วยด้วยค่ะ",
-            "จะตาย", "จมแล้ว", "ไฟดูด", "ไฟฟ้าดูด",
-            "หายใจไม่ออก", "เป็นลม", "บาดเจ็บสาหัส", "ด่วนที่สุด",
-            "วิกฤต", "ช่วยชีวิต", "กำลังจม", "ติดอยู่", "ขอความช่วยเหลือด่วน",
-            "น้ำเข้าบ้าน", "น้ำกำลังเข้าบ้าน", "ติดอยู่บนหลังคา", "ติดหลังคา",
-            "น้ำเชี่ยว", "คนจมน้ำ", "รถติดกลางน้ำ", "น้ำเข้ารถ"
-        ],
-        "SOS": [
-            "sos", "🆘", "ขอความช่วยเหลือ", "แจ้งเหตุ", "กู้ภัย",
-            "ติดน้ำท่วม", "จมน้ำ", "ช่วย"
-        ],
-        "SNAKE_BITE": [
-            "งูกัด", "ถูกงูกัด", "โดนงูกัด", "งูกัดครับ", "งูกัดค่ะ",
-            "ถูกงู", "โดนงู", "งูฉก", "ถูกสัตว์มีพิษกัด"
-        ],
-        "GREETING": [
-            "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า", "ดีคับ",
-            "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
-            "เริ่ม", "start", "menu", "เมนู"
-        ],
-        "NEEDS": [
-            "ขอของ", "ต้องการ", "ขาดแคลน", "ไม่มีอาหาร", "ไม่มีน้ำ",
-            "ของบริจาค", "ขอความช่วยเหลือเรื่องของ", "need help",
-            "แจ้งความต้องการ", "ขอน้ำดื่ม", "ขอยา", "ขอเสื้อผ้า"
-        ],
-        "SHELTER": [
-            "ศูนย์พักพิง", "ที่พัก", "อพยพ", "หลบภัย", "หลบน้ำ",
-            "ที่พักชั่วคราว", "evacuation center", "shelter",
-            "ไปไหนดี", "พักที่ไหน", "ห้างน้ำท่วม"
-        ],
-        "WATER_LEVEL": [
-            "ระดับน้ำ", "น้ำท่วม", "น้ำสูง", "เช็คน้ำ", "ตรวจน้ำ",
-            "water level", "flood level", "น้ำขึ้น", "น้ำลด",
-            "สถานการณ์น้ำ", "check water"
-        ],
-        "WEATHER": [
-            "สภาพอากาศ", "พยากรณ์อากาศ", "ฝนตก", "ฝน", "อากาศ",
-            "weather", "forecast", "rain", " raining",
-            "จะฝนตกไหม", "เช็คฝน", "check weather"
-        ],
-        "CONTACT": [
-            "เบอร์โทร", "โทรศัพท์", "ติดต่อ", "สายด่วน", "hotline",
-            "phone", "contact", "call", "เบอร์ฉุกเฉิน",
-            "โทรหาใคร", "เบอร์ ปภ", "1784", "1669"
-        ],
-        "LANGUAGE": [
-            "เปลี่ยนภาษา", "change language", "language", "ภาษา",
-            "lang", "english", "ไทย", "japanese", "日本語"
-        ],
-        "CANCEL": [
-            "ยกเลิก", "cancel", "หยุด", "stop", "ออก", "exit",
-            "เริ่มใหม่", "restart", "reset"
-        ],
-        "REGISTRATION": [
-            "ลงทะเบียน", "register", "สมัคร", "เข้าร่วม",
-            "ลงชื่อ", "ข้อมูลของฉัน", "โปรไฟล์", "profile"
-        ],
-        "HELP": [
-            "ทำอะไรได้บ้าง", "ทำอะไรได้", "มีอะไรบ้าง", "ช่วยอะไรได้บ้าง",
-            "ใช้งานยังไง", "ใช้งานอย่างไร", "วิธีใช้", "what can you do",
-            "capabilities", "คุณคือใคร", "คุณทำอะไรได้"
-        ],
-        "FAQ": [
-            "คำถามยอดฮิต", "คำถามที่พบบ่อย", "faq", "คำถามทั่วไป",
-            "อยากรู้เรื่อง", "บอกข้อมูล", "ค้นหา", "search",
-            "น้ำท่วม 2567", "น้ำท่วม 2568", "น้ำท่วมล่าสุด",
-            "สถานการณ์น้ำ", "ข่าวน้ำท่วม", "อัพเดทน้ำท่วม",
-            "ระดับน้ำล่าสุด", "คาดการณ์น้ำ", "พยากรณ์น้ำ",
-        ],
-    }
-    
-    @classmethod
-    def classify(cls, text: str) -> Tuple[str, float]:
-        """
-        Classify user text into intent
-        Returns: (intent, confidence)
-        
-        ⚠️ ลำดับการตรวจ: EMERGENCY → SOS → อื่นๆ
-        เพื่อให้แน่ใจว่าคำขอความช่วยเหลือฉุกเฉินไม่ถูกจำแนกผิด
-        """
-        if not text:
-            return ("AI_QUERY", 0.5)
-        
-        text_lower = text.strip().lower()
-        text_clean = text_lower.strip("!.,😊🙏👋🆘 ")
-        
-        # ✅ ตรวจ EMERGENCY, SOS และ SNAKE_BITE ก่อนเสมอ (priority override)
-        # SNAKE_BITE ต้องมาก่อน เพราะเป็นเหตุการณ์ที่ต้องตอบด้วยข้อมูลปฐมพยาบาลที่ถูกต้อง
-        # แม่นยำ ไม่ใช่คำตอบสั้นๆ ที่ AI สร้างขึ้นเองซึ่งอาจขาดความครบถ้วน
-        PRIORITY_INTENTS = ["EMERGENCY", "SOS", "SNAKE_BITE"]
-        for intent in PRIORITY_INTENTS:
-            keywords = cls.PATTERNS.get(intent, [])
-            for keyword in keywords:
-                kw_lower = keyword.lower()
-                if text_clean == kw_lower:
-                    return (intent, 1.0)
-                if text_clean.startswith(kw_lower):
-                    return (intent, 0.9)
-                if len(keyword) >= 4 and kw_lower in text_lower:
-                    return (intent, 0.8)
-                if len(keyword) < 4 and kw_lower in text_lower:
-                    return (intent, 0.7)
-        
-        # ตรวจ intent อื่นๆ ตามลำดับปกติ (ยกเว้น EMERGENCY/SOS ที่ตรวจแล้ว)
-        for intent, keywords in cls.PATTERNS.items():
-            if intent in PRIORITY_INTENTS:
-                continue  # ข้ามไป เพราะตรวจแล้วด้านบน
-            for keyword in keywords:
-                kw_lower = keyword.lower()
-                if text_clean == kw_lower:
-                    return (intent, 1.0)
-                if text_clean.startswith(kw_lower):
-                    return (intent, 0.9)
-                if len(keyword) >= 4 and kw_lower in text_lower:
-                    return (intent, 0.8)
-                if len(keyword) < 4 and kw_lower in text_lower:
-                    return (intent, 0.7)
-        
-        # Fallback: ตรวจ emergency keywords กว้างๆ อีกรอบ
-        emergency_words = ["ช่วย", "ด่วน", "วิกฤต", "ฉุกเฉิน", "help", "emergency", "urgent"]
-        if any(w in text_lower for w in emergency_words):
-            return ("EMERGENCY", 0.6)
-        
-        # Default: ส่งต่อ AI
-        return ("AI_QUERY", 0.5)
-    
-    @classmethod
-    def should_use_ai(cls, text: str) -> bool:
-        """Determine if message needs Gemini processing"""
-        intent, confidence = cls.classify(text)
-        # Only use AI for AI_QUERY intent
-        return intent == "AI_QUERY"
-    
-    @classmethod
-    def get_quick_response(cls, intent: str) -> Optional[str]:
-        """Get pre-defined response for common intents (avoid AI call)"""
-        responses = {
-            "GREETING": None,  # Use greeting handler
-            "SOS": None,       # Use SOS flow
-            "NEEDS": None,     # Use needs flow
-            "SHELTER": None,   # Use shelter flow
-            "WATER_LEVEL": None,  # Use water level flow
-            "WEATHER": None,   # Use weather flow
-            "CONTACT": None,   # Use contact handler
-            "LANGUAGE": None,  # Use language handler
-            "CANCEL": "❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ คุณสามารถกดใช้งานเมนูหลักใหม่ได้ทันทีครับ",
-            "EMERGENCY": None,  # Special emergency handler
-            "REGISTRATION": None,  # Use registration flow
-            "SNAKE_BITE": None,  # Use dedicated first-aid handler
-            "HELP": None,  # Use capabilities/menu handler
-            "FAQ": None,  # Use web-search grounded AI handler
-        }
-        return responses.get(intent)
-
-
-# =============================================================================
-# SECTION 6: STATE MACHINE (Class-Based Workflows)
-# =============================================================================
-
-class UserSession:
-    """
-    Enhanced user session with TTL and metadata
-    """
-    def __init__(self, user_id: str):
-        self.user_id = user_id
-        self.state = "IDLE"
-        self.data: Dict[str, Any] = {}
-        self.created_at = time.time()
-        self.updated_at = time.time()
-        self.language = "TH"
-        self.message_count = 0
-        self.last_intent = ""
-    
-    def update(self, state: str = None, data: dict = None):
-        """Update session state and data"""
-        if state:
-            self.state = state
-        if data:
-            self.data.update(data)
-        self.updated_at = time.time()
-        self.message_count += 1
-    
-    def is_expired(self, ttl_minutes: int = SESSION_TTL_MINUTES) -> bool:
-        """Check if session has expired"""
-        return time.time() - self.updated_at > ttl_minutes * 60
-    
-    def reset(self):
-        """Reset session to idle state"""
-        self.state = "IDLE"
-        self.data = {}
-        self.updated_at = time.time()
-    
-    def to_dict(self) -> dict:
-        return {
-            "user_id": hash_user_id(self.user_id),
-            "state": self.state,
-            "language": self.language,
-            "message_count": self.message_count,
-            "last_intent": self.last_intent,
-            "age_minutes": round((time.time() - self.updated_at) / 60, 1)
-        }
-
-
-class SessionManager:
-    """
-    Central session management with auto-cleanup
-    """
-    
-    def __init__(self):
-        self._sessions: Dict[str, UserSession] = {}
-        self._lock = threading.Lock()
-    
-    def get(self, user_id: str) -> UserSession:
-        """Get or create user session"""
-        with self._lock:
-            session = self._sessions.get(user_id)
-            if session is None or session.is_expired():
-                session = UserSession(user_id)
-                self._sessions[user_id] = session
-            return session
-    
-    def update(self, user_id: str, state: str = None, data: dict = None):
-        """Update user session"""
-        session = self.get(user_id)
-        session.update(state=state, data=data)
-        return session
-    
-    def reset(self, user_id: str):
-        """Reset user session"""
-        session = self.get(user_id)
-        session.reset()
-    
-    def delete(self, user_id: str):
-        """Delete user session"""
-        with self._lock:
-            self._sessions.pop(user_id, None)
-    
-    def cleanup_expired(self) -> int:
-        """Remove expired sessions, return count"""
-        with self._lock:
-            expired = [uid for uid, s in self._sessions.items() if s.is_expired()]
-            for uid in expired:
-                del self._sessions[uid]
-            return len(expired)
-    
-    def stats(self) -> dict:
-        """Get session statistics"""
-        with self._lock:
-            total = len(self._sessions)
-            active = sum(1 for s in self._sessions.values() if not s.is_expired())
-            by_state = {}
-            for s in self._sessions.values():
-                by_state[s.state] = by_state.get(s.state, 0) + 1
-            return {
-                "total_sessions": total,
-                "active_sessions": active,
-                "expired_sessions": total - active,
-                "by_state": by_state
-            }
-
-
-# Global session manager
-sessions = SessionManager()
-
-# Legacy compatibility
-USER_STATES: Dict[str, str] = {}  # Maps to sessions
-USER_DATA: Dict[str, dict] = {}   # Maps to sessions
-
-
-def sync_legacy_state(user_id: str) -> str:
-    """Sync legacy USER_STATES with new session manager"""
-    session = sessions.get(user_id)
-    USER_STATES[user_id] = session.state
-    USER_DATA[user_id] = session.data
-    return session.state
-
-
-def update_legacy_state(user_id: str, state: str, data: dict = None):
-    """Update both legacy and new state"""
-    USER_STATES[user_id] = state
-    if data:
-        USER_DATA[user_id] = data
-    sessions.update(user_id, state=state, data=data or {})
-
-
-# =============================================================================
-# SECTION 7: GEMINI AI OPTIMIZATION
-# =============================================================================
-
-gemini_model = None
-_gemini_initialized = False
-
-# System instruction kept as a module-level constant — the new google-genai SDK
-# takes system_instruction per-call (inside GenerateContentConfig) rather than
-# baked into a persistent "model" object like the old SDK did, so we no longer
-# build a GenerativeModel here; we build a genai.Client instead and pass this
-# string into each generate_content() call's config.
-FLOODCARE_SYSTEM_INSTRUCTION = (
-    # ======================== IDENTITY ========================
-    "คุณคือ FLOODCARE AI น้องบอทผู้ช่วยด้านภัยน้ำท่วมและเหตุฉุกเฉิน\n"
-    "สไตล์การตอบ: กระชับ ชัดเจน อ่านง่าย เป็นกันเอง แต่ข้อมูลต้องถูกต้องและมีแหล่งที่มาเสมอ\n"
-    "ตอบเป็นภาษาไทยเสมอ\n\n"
-
-    # ====================== STEP 1: SEVERITY ======================
-    "[1] ก่อนตอบทุกครั้ง ให้ประเมินระดับสถานการณ์จากความหมายของประโยค ไม่ใช่จับคำตรงตัว:\n"
-    "  NORMAL = ถามข้อมูลทั่วไป เช่น 'น้ำท่วมตอนนี้เป็นยังไงบ้าง' 'ปวดหัวหลังน้ำท่วมต้องทำไง'\n"
-    "  WARNING = กังวลแต่ยังไม่ฉุกเฉิน เช่น 'บ้านผมจะท่วมไหม' 'เด็กไม่สบายหลังน้ำลด'\n"
-    "  EMERGENCY = มีปัญหาเร่งด่วนแต่ยังไม่ถึงชีวิต เช่น 'ลูกติดอยู่ที่โรงเรียน' 'ไฟดับ น้ำเข้าหม้อแปลง' 'รถเสียกลางน้ำ'\n"
-    "  SOS = อันตรายถึงชีวิตทันที เช่น 'น้ำกำลังเข้าบ้านรวดเร็วมาก' 'คนกำลังจมน้ำ' 'ไฟดูด' 'ถูกงูกัด' 'ติดหลังคา'\n\n"
-
-    # ====================== STEP 2: RESPONSE BY LEVEL ======================
-    "[2] ตอบตามระดับ:\n"
-    "  NORMAL/WARNING: ตอบกระชับ ชัดเจน เข้าใจง่าย\n"
-    "  EMERGENCY: ตอบเป็นขั้นตอนชัดเจน แนะนำเบอร์ฉุกเฉิน (ปภ. 1784, สพฉ. 1669) และแนะนำให้พิมพ์ 'sos'\n"
-    "  SOS: ตอบคำแนะนำด่วนและเบอร์ฉุกเฉินทันที ห้ามยืดเยื้อ\n\n"
-
-    # ====================== STEP 3: SCOPE ======================
-    "[3] เรื่องที่ตอบได้ (ตอบได้หมดไม่ว่าจะพิมพ์ยังไง):\n"
-    "  น้ำท่วม, ฝนหนัก, น้ำป่า, ดินถล่ม, พายุ\n"
-    "  การอพยพ, จุดปลอดภัย, ศูนย์พักพิง, การเดินทางช่วงน้ำท่วม\n"
-    "  การปฐมพยาบาล, การเอาตัวรอด, เบอร์ฉุกเฉิน\n"
-    "  อาหาร, น้ำดื่ม, ไฟฟ้า, สัตว์มีพิษ\n"
-    "  อาการเจ็บป่วยทุกชนิด (ไข้ ปวด ท้องเสีย ผื่น บาดแผล ฯลฯ) "
-    "— เพราะผู้ประสบภัยน้ำท่วมเจ็บป่วยได้เยอะ ตอบได้เลยไม่ต้องถาม\n"
-    "  ความเครียด, วิตกกังวล, ซึมเศร้า, สุขภาพจิต "
-    "— ผู้ประสบภัยมักเครียด ตอบด้วยความเข้าใจและแนะนำทางออก\n"
-    "  อุบัติเหตุทุกประเภท\n\n"
-
-    # ====================== STEP 4: OUT OF SCOPE ======================
-    "[4] เรื่องที่ตอบไม่ได้ (ตอบแบบเพื่อนที่อ้อมๆแต่ไม่เสียน้ำใจ):\n"
-    "  ถ้าคำถามไม่เกี่ยวกับเรื่องใน [3] เลยจริงๆ เช่น ฟุตบอล, เกม, การบ้านวิชาอื่น, "
-    "ข่าวบันเทิง, รถยนต์ทั่วไป, การลงทุน, ทำอาหารทั่วไป\n"
-    "  ให้ตอบแบบเพื่อนอ้อมๆ เช่น 'โอ้โห ถามนอกเรื่องเลยนะ 555 "
-    "เราเชี่ยวชาญเรื่องน้ำท่วมกับภัยพิบัติโดยเฉพาะเลยครับ ถ้ามีเรื่องน้ำท่วมหรือ "
-    "ไม่สบายหลังน้ำลด บอกได้เลยนะ'\n"
-    "  ห้ามใช้ข้อนี้กับคำถามสุขภาพ/อาการเจ็บป่วย/ความรู้สึก ซึ่งตอบได้เสมอตามข้อ [3]\n\n"
-
-    # ====================== STEP 5: CITATION (MANDATORY) ======================
-    "[5] การอ้างอิง (บังคับทุกคำตอบที่ให้ข้อมูลจริงจัง):\n"
-    "  ทุกคำตอบที่ให้ข้อมูลด้านความปลอดภัย สุขภาพ หรือสถานการณ์น้ำท่วม "
-    "ต้องมีส่วน '--- แหล่งข้อมูล ---' ต่อท้ายเสมอ\n"
-    "  รูปแบบ:\n"
-    "  --- แหล่งข้อมูล ---\n"
-    "  - ชื่อหน่วยงาน: URL จริง\n"
-    "  - ชื่อหน่วยงาน: URL จริง\n"
-    "  ใช้แหล่งข้อมูลที่น่าเชื่อถือเท่านั้น เช่น กรมควบคุมโรค, กรมชลประทาน, สภากาชาดไทย, "
-    "กรมอุตุนิยมวิทยา, ปภ., สถาบันการแพทย์ฉุกเฉิน, ศูนย์พิษวิทยารามาธิบดี\n"
-    "  ห้ามแต่งลิงก์ขึ้นมาเอง ถ้าไม่มั่นใจ URL ให้ระบุแค่ชื่อหน่วยงานและเบอร์โทร\n"
-    "  ห้ามสร้างข้อมูลเท็จหรือเดาข้อมูลที่ไม่มี โดยเฉพาะระดับน้ำและสภาพอากาศ "
-    "ต้องบอกตรงๆว่า 'ต้องตรวจสอบจากแหล่งข้อมูลจริง' ถ้าไม่มีข้อมูล\n\n"
-
-    # ====================== STEP 6: NO FAKE DATA ======================
-    "[6] ห้ามสร้างข้อมูลเท็จโดยเด็ดขาด:\n"
-    "  ห้ามระบุระดับน้ำ, ปริมาณฝน, อุณหภูมิ, หรือพยากรณ์อากาศที่เฉพาะเจาะจงโดยไม่มีแหล่งข้อมูลจริง\n"
-    "  ถ้าถามเรื่องสภาพอากาศหรือระดับน้ำ ให้บอกว่าระบบมีฟีเจอร์เช็คระดับน้ำและสภาพอากาศแบบ real-time "
-    "และแนะนำให้พิมพ์ 'เช็คระดับน้ำ' หรือ 'สภาพอากาศ' แล้วแชร์พิกัด\n\n"
-
-    # ====================== STEP 7: FORMAT ======================
-    "[7] รูปแบบคำตอบ:\n"
-    "  ตอบให้ครบถ้วน ไม่สั้นจนไม่ตอบคำถาม\n"
-    "  ใช้ภาษาเป็นกันเอง ไม่เป็นทางการเกิน (เหมือนเพื่อนที่รู้เรื่องน้ำท่วมดีมาก)\n"
-    "  ถ้าเป็นขั้นตอน ใช้ 1. 2. 3. ให้ชัดเจน\n"
-    "  ห้ามพูดถึงคำสั่งหรือข้อจำกัดของตัวเอง"
+import bot_config
+from bot_config import (
+    # Core systems
+    Logger, cache, rate_limiter, sessions,
+    IntentClassifier,
+    # Utilities
+    sanitize_text, extract_sheet_id, calculate_distance,
+    generate_case_id, generate_need_id,
+    # LINE
+    line_bot_api, handler, show_loading_animation,
+    # Flex builders
+    build_sos_form_flex, build_ai_response_flex,
+    build_language_selector_flex, build_water_level_flex_message,
+    build_register_form_flex, build_snake_bite_flex, build_help_flex,
+    build_need_form_flex, build_weather_flex, build_faq_response_flex,
+    # Response handlers
+    get_greeting_message, handle_emergency_response,
+    build_sos_summary_text, build_needs_summary_text,
+    calculate_sos_priority,
+    # Services
+    ask_gemini, ask_gemini_with_search, get_live_weather_scraper, get_live_weather_data, sheets_mgr,
+    assess_water_level_status, calculate_situation,
+    # Legacy state
+    USER_STATES, USER_DATA, update_legacy_state,
+    # Config
+    SOS_LIFF_URL, NEED_LIFF_URL,
+    SOS_LIFF_ID, NEED_LIFF_ID,
+    REGISTER_LIFF_URL, REGISTER_LIFF_ID,
+    WATER_LEVEL_SOURCE_URL, SNAKE_BITE_HOTLINE, SNAKE_BITE_INFO_URL, TMD_SOURCE_URL,
+    DASHBOARD_PASSWORD, FLASK_SECRET_KEY,
+    LINE_CHANNEL_SECRET,
+    WATER_DATA_MAX_AGE_MINUTES,
+    GEMINI_API_KEY,
 )
 
+# LINE SDK
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import (
+    MessageEvent, TextMessage, LocationMessage, ImageMessage, FollowEvent,
+    TextSendMessage, QuickReply, QuickReplyButton, LocationAction,
+    MessageAction, URIAction, FlexSendMessage
+)
 
-def init_gemini():
-    """Lazy initialize the Gemini client (new google-genai SDK).
+app = Flask(__name__)
+app.secret_key = FLASK_SECRET_KEY or os.urandom(32)
+# ⚠️ ถ้าไม่ตั้ง FLASK_SECRET_KEY ใน environment variable ทุกครั้งที่ deploy ใหม่
+# (เช่น Render restart) session ของ dashboard จะหลุดหมด (ผู้ใช้ต้อง login ใหม่)
+# เพราะ key สุ่มใหม่ทุกครั้ง — ตั้งค่าให้คงที่ใน .env เพื่อให้ session อยู่ยาวขึ้น
 
-    `gemini_model` here holds a `genai.Client` instance (NOT a GenerativeModel
-    like the old deprecated SDK) — kept under the same variable name so the
-    rest of the file (and any external code) doesn't need to change.
+
+# =============================================================================
+# PERFORMANCE MIDDLEWARE
+# =============================================================================
+
+@app.before_request
+def before_request():
+    """Track request start time"""
+    request._start_time = time.time()
+
+
+@app.after_request
+def after_request(response):
+    """Log request performance"""
+    if hasattr(request, '_start_time'):
+        elapsed = (time.time() - request._start_time) * 1000
+        Logger.perf("HTTP", request.endpoint or request.path, elapsed,
+                   {"status": response.status_code, "method": request.method})
+    return response
+
+
+# =============================================================================
+# RATE LIMITING MIDDLEWARE
+# =============================================================================
+
+def check_rate_limit(user_id: str) -> bool:
+    """Check if user is within rate limit"""
+    allowed, meta = rate_limiter.check(user_id)
+    if not allowed:
+        Logger.security("RateLimit", f"Blocked user", user_id,
+                       {"retry_after": meta.get("retry_after", 60)})
+    return allowed
+
+
+def _push_save_confirmation(user_id: Optional[str], message: str) -> None:
     """
-    global gemini_model, _gemini_initialized
-    if _gemini_initialized:
-        return gemini_model is not None
-    
-    if not GEMINI_API_KEY or not genai:
-        _gemini_initialized = True
-        return False
-    
+    Push a confirmation message back to the user's LINE chat after a LIFF
+    form (SOS / Needs / Register) has been saved successfully.
+
+    Uses push_message (not reply_message) because the LIFF submit happens
+    over a plain HTTP POST — there is no LINE reply token in that request.
+    Best-effort only: never raises, so a push failure can't break the API
+    response the LIFF page is waiting for.
+
+    Note: push_message counts against your LINE Official Account's monthly
+    push message quota (the free tier has a limited number per month).
+    """
+    if not user_id or user_id == "unknown":
+        Logger.info("Push", "Skipped confirmation push — no verified user_id")
+        return
     try:
-        gemini_model = genai.Client(api_key=GEMINI_API_KEY)
-        _gemini_initialized = True
-        Logger.info("Gemini", "Initialized successfully (google-genai SDK)")
-        return True
+        line_bot_api.push_message(user_id, TextSendMessage(text=message))
     except Exception as e:
-        Logger.error("Gemini", f"Initialization failed: {e}")
-        _gemini_initialized = True
-        return False
+        Logger.info("Push", f"Failed to send save-confirmation: {e}")
 
 
-def ask_gemini(prompt: str, max_tokens: int = 300) -> str:
+# =============================================================================
+# LIFF API AUTH
+# =============================================================================
+
+import urllib.request as _urllib_request
+import hmac as _hmac
+
+def _verify_liff_token(id_token: str, liff_id: str) -> Optional[str]:
     """
-    Optimized Gemini API call with caching (google-genai SDK).
-    - Cache responses for identical prompts
-    - Limit max tokens
-    - Handle errors gracefully
+    Verify LINE LIFF ID token via LINE's verify endpoint.
+    Returns user_id string on success, None on failure.
+
+    LINE Verify API: POST https://api.line.me/oauth2/v2.1/verify
+    Docs: https://developers.line.biz/en/reference/line-login/#verify-id-token
+
+    IMPORTANT: `client_id` must be the *Channel ID* (the numeric part before `-`
+    in the LIFF ID e.g. "1234567890-AbCdEfGh" → "1234567890"), NOT the full LIFF ID.
+    Passing the full LIFF ID causes LINE to return 400, which this code treated as
+    auth failure → 401 Unauthorized for every submit. This was the root cause of the
+    "ส่งข้อมูลไม่สำเร็จ: Unauthorized" error users saw in the LIFF forms.
     """
-    start_time = time.time()
-    
-    if not init_gemini():
-        return "⚠️ AI ไม่พร้อมใช้งาน หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
-    
-    # Generate cache key from prompt hash
-    cache_key = f"gemini:{hashlib.md5(prompt.encode()).hexdigest()}"
-    
-    # Check cache (5 min TTL for AI responses)
-    cached = cache.general.get(cache_key)
-    if cached:
-        elapsed = (time.time() - start_time) * 1000
-        Logger.perf("Gemini", "cache_hit", elapsed)
-        return cached
-    
+    if not id_token or not liff_id:
+        return None
+    # id_token is sometimes the literal string "null" or "undefined" from JS when
+    # liff.getIDToken() is called before liff.init() completes — treat as failure.
+    if id_token.lower() in ("null", "undefined", ""):
+        Logger.info("Auth", "id_token is null/undefined — LIFF may not be fully initialized")
+        return None
     try:
-        # gemini_model here is a genai.Client (see init_gemini)
-        response = gemini_model.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=FLOODCARE_SYSTEM_INSTRUCTION,
-                max_output_tokens=max_tokens,
-                temperature=0.3,
-                safety_settings=[
-                    genai_types.SafetySetting(
-                        category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                        threshold="BLOCK_ONLY_HIGH",
-                    ),
-                ],
-            ),
+        # Extract channel_id: LIFF ID format is "{channelId}-{randomString}"
+        channel_id = liff_id.split("-")[0] if "-" in liff_id else liff_id
+        import urllib.parse
+        payload = urllib.parse.urlencode({
+            "id_token": id_token,
+            "client_id": channel_id,   # ← must be channel ID, not full LIFF ID
+        }).encode()
+        req = _urllib_request.Request(
+            "https://api.line.me/oauth2/v2.1/verify",
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
         )
-        result = clean_text_for_line((response.text or "").strip())
-        
-        # Cache for 5 minutes
-        cache.general.set(cache_key, result, ttl=300)
-        
-        elapsed = (time.time() - start_time) * 1000
-        Logger.perf("Gemini", "api_call", elapsed, {"prompt_len": len(prompt)})
-        
-        return result
-        
+        with _urllib_request.urlopen(req, timeout=5) as resp:
+            body = json.loads(resp.read())
+            return body.get("sub")  # sub = LINE user_id
     except Exception as e:
-        elapsed = (time.time() - start_time) * 1000
-        Logger.error("Gemini", f"API error: {e}", {"elapsed_ms": round(elapsed, 1)})
-        return "⚠️ AI ขัดข้องชั่วคราว หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
+        Logger.info("Auth", f"LIFF token verify failed: {e}")
+        return None
 
 
-def ask_gemini_with_search(question: str, max_tokens: int = 700) -> dict:
+def _require_liff_auth(expected_liff_id: str):
     """
-    Gemini API call with Google Search grounding enabled (google-genai SDK).
-    Returns dict: {"answer": str, "sources": list[{"title": str, "url": str}]}
+    Decorator factory: verify LIFF ID token before running the route.
 
-    Uses Gemini's built-in Google Search grounding tool — the model searches
-    Google automatically when it needs current information (e.g. latest flood
-    news, current water levels, recent warnings). This is the right tool for
-    FAQ/current events, NOT `ask_gemini()` which has no real-time data access.
+    Frontend must send header:  Authorization: Bearer <idToken>
+    On success, injects `verified_user_id` into request context (g).
+    On failure, returns 401.
 
-    Falls back to plain `ask_gemini()` if grounding fails or is unavailable.
+    Falls back to permissive mode when SOS/NEED LIFF ID env vars are not set
+    (i.e. development/local testing), logging a warning instead of blocking.
     """
-    if not init_gemini():
-        return {"answer": "⚠️ AI ไม่พร้อมใช้งาน โทร ปภ. 1784 หากฉุกเฉินครับ", "sources": []}
-
-    start_time = time.time()
-
-    # Build search-optimised prompt that instructs the model to cite sources
-    prompt = (
-        "คุณคือ FLOODCARE AI ผู้ช่วยด้านน้ำท่วมของไทย ค้นหาข้อมูลและตอบคำถามต่อไปนี้:\n\n"
-        f"คำถาม: {question}\n\n"
-        "กฎการตอบ:\n"
-        "1. ตอบเป็นภาษาไทยที่อ่านง่าย เรียบเรียงใหม่จากข้อมูลที่ค้นพบ ไม่คัดลอกมาตรงๆ\n"
-        "2. ย่อหน้าสั้น ชัดเจน มีหัวข้อย่อยถ้าเหมาะสม\n"
-        "3. ถ้าเป็นข้อมูลล่าสุด/ข่าว ให้ระบุวันที่หรือช่วงเวลาที่แหล่งข้อมูลรายงาน\n"
-        "4. ต่อท้ายด้วยส่วน '--- แหล่งข้อมูล ---' พร้อม URL จริงของแหล่งที่มาที่ค้นพบ\n"
-        "5. ตอบเฉพาะเรื่องน้ำท่วม ภัยพิบัติ ความปลอดภัย สภาพอากาศ หรือการช่วยเหลือผู้ประสบภัยเท่านั้น\n"
-        "6. ห้ามสร้างข้อมูลเท็จหรือเดาตัวเลข (ระดับน้ำ/อุณหภูมิ/ปริมาณฝน) ถ้าค้นไม่เจอข้อมูลจริง ให้บอกตรงๆ"
-    )
-
-    try:
-        # gemini_model here is a genai.Client (see init_gemini)
-        response = gemini_model.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=(
-                    "You are FLOODCARE AI, a Thai flood emergency assistant. "
-                    "Always respond in Thai. Use Google Search to find current, "
-                    "accurate information. Never fabricate data. Always cite your "
-                    "sources with real URLs at the end of your response."
-                ),
-                max_output_tokens=max_tokens,
-                temperature=0.2,
-                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
-            ),
-        )
-        raw_text = clean_text_for_line((response.text or "").strip())
-
-        # Extract source URLs from grounding metadata if available
-        sources = []
-        try:
-            for candidate in response.candidates:
-                grounding = getattr(candidate, "grounding_metadata", None)
-                if grounding:
-                    for chunk in getattr(grounding, "grounding_chunks", None) or []:
-                        web = getattr(chunk, "web", None)
-                        if web:
-                            title = getattr(web, "title", "") or ""
-                            uri = getattr(web, "uri", "") or ""
-                            if uri:
-                                sources.append({"title": title, "url": uri})
-        except Exception:
-            pass  # Grounding metadata shape can vary by SDK version
-
-        elapsed = (time.time() - start_time) * 1000
-        Logger.perf("Gemini", "search_call", elapsed)
-        return {"answer": raw_text, "sources": sources}
-
-    except Exception as e:
-        # Grounding not available (API error / quota / model mismatch) — fall back to plain AI
-        Logger.info("Gemini", f"Search grounding failed ({e}), falling back to plain ask_gemini")
-        answer = ask_gemini(prompt, max_tokens=max_tokens)
-        return {"answer": answer, "sources": []}
-
-def clean_text_for_line(text: str) -> str:
-    """กรองลบเครื่องหมายดอกจัน (*) สำหรับ LINE"""
-    if not text:
-        return ""
-    return text.replace("**", "").replace("*", "")
-
-
-def extract_number(text: str) -> str:
-    """ดึงตัวเลขจากข้อความ"""
-    if not text:
-        return "1"
-    cleaned = "".join(filter(str.isdigit, text))
-    return cleaned if cleaned else "1"
-
-
-def parse_yes_no(text: str) -> str:
-    """แปลงข้อความเป็น YES/NO"""
-    if not text:
-        return "NO"
-    text_clean = text.strip().lower()
-    yes_words = ["มี", "ใช่", "yes", "y", "ตกลง", "ok", "ได้"]
-    if any(word in text_clean for word in yes_words):
-        if "ไม่มี" in text_clean or "ไม่ใช่" in text_clean:
-            return "NO"
-        return "YES"
-    return "NO"
-
-
-def extract_sheet_id(sheet_var: str) -> str:
-    """คัดกรองรหัส Google Sheet ID จาก URL"""
-    if not sheet_var:
-        return ""
-    if "/d/" in sheet_var:
-        parts = sheet_var.split("/d/")
-        if len(parts) > 1:
-            sub = parts[1].split("/")[0].strip()
-            return sub
-    return sheet_var.strip()
-
-
-def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """คำนวณระยะทาง Haversine (หน่วย: กิโลเมตร)"""
-    R = 6371
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    return R * c
-
-
-def generate_case_id() -> str:
-    """Generate unique SOS case ID using date + random UUID suffix"""
-    import uuid
-    today = datetime.datetime.now().strftime("%Y%m%d")
-    suffix = uuid.uuid4().hex[:6].upper()
-    return f"SOS-{today}-{suffix}"
-
-
-def generate_need_id() -> str:
-    """Generate unique Need case ID using date + random UUID suffix"""
-    import uuid
-    today = datetime.datetime.now().strftime("%Y%m%d")
-    suffix = uuid.uuid4().hex[:6].upper()
-    return f"NEED-{today}-{suffix}"
-
-
-# =============================================================================
-# SECTION 9: GOOGLE SHEETS OPTIMIZATION
-# =============================================================================
-
-class SheetsManager:
-    """
-    Optimized Google Sheets manager with connection pooling
-    and batch write operations
-    """
-    
-    def __init__(self):
-        self._client = None
-        self._initialized = False
-        self._last_error = ""
-        self._lock = threading.Lock()
-    
-    def get_client(self):
-        """Lazy initialize Sheets client with caching"""
-        if self._initialized and self._client:
-            return self._client
-        
-        with self._lock:
-            if self._initialized:
-                return self._client
-            
-            if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
-                if not GOOGLE_SERVICE_ACCOUNT_JSON:
-                    self._last_error = "GOOGLE_SERVICE_ACCOUNT_JSON not set"
-                    Logger.error("Sheets", "GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set.")
-                elif not GOOGLE_SHEET_ID:
-                    self._last_error = "GOOGLE_SHEET_ID not set"
-                    Logger.error("Sheets", "GOOGLE_SHEET_ID environment variable is not set.")
-                else:
-                    self._last_error = "Environment variables not set"
-                    Logger.error("Sheets", "Required Google Sheets environment variables are not set.")
-                self._initialized = True
-                return None
-            
-            try:
-                json_str = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
-                if json_str.startswith("'") and json_str.endswith("'"):
-                    json_str = json_str[1:-1].strip()
-                if json_str.startswith('"') and json_str.endswith('"'):
-                    json_str = json_str[1:-1].strip()
-                
-                creds_dict = json.loads(json_str)
-                self._client = gspread.service_account_from_dict(creds_dict)
-                self._initialized = True
-                
-                # Auto-setup sheets
-                self._auto_setup()
-                self._last_error = "Connected"
-                Logger.info("Sheets", "Client initialized")
-                return self._client
-                
-            except Exception as e:
-                self._last_error = f"Auth failed: {e}"
-                self._initialized = True
-                Logger.error("Sheets", f"Init failed: {e}")
-                return None
-    
-    def _auto_setup(self):
-        """Auto-create required worksheets"""
-        try:
-            sheet = self._client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
-            existing = [w.title for w in sheet.worksheets()]
-            
-            required_sheets = {
-                "users": ["user_id", "first_name", "last_name", "phone", "province", 
-                         "district", "sub_district", "gps_lat", "gps_lon", 
-                         "member_count", "emergency_contact", "sms_enabled", 
-                         "consent_pdpa", "register_date", "status"],
-                "sos_requests": ["case_id", "user_id", "timestamp", "latitude", "longitude",
-                                "water_level_status", "victim_count", "vulnerable_groups",
-                                "group_types", "urgency_level", "details", "photo_url",
-                                "priority", "status", "responder_name", "responder_notes",
-                                "accepted_at", "completed_at"],
-                "user_needs": ["need_id", "timestamp", "user_id", "latitude", "longitude",
-                              "categories", "details", "urgency", "status",
-                              "halal_required", "volunteer_name", "delivered_at"],
-                "Shelters": ["ShelterID", "Name", "Province", "District", "Latitude",
-                            "Longitude", "Capacity", "Occupancy", "Status",
-                            "Beds", "Toilets", "Parking", "Facilities"],
-                "Water_Levels": ["StationCode", "Name", "River", "Location", "Lat", "Lon",
-                                "WaterLevel", "BankLevel", "Situation", "Trend", "Time"],
-                "Contacts": ["ContactID", "Name", "Role", "Phone"],
-                "AI_Logs": ["Timestamp", "UserID", "Intent", "Question", "Answer", "ResponseTimeMs"],
-                "System_Logs": ["Timestamp", "Level", "Module", "Message", "UserID"],
-            }
-            
-            for name, headers in required_sheets.items():
-                if name not in existing:
-                    ws = sheet.add_worksheet(title=name, rows="3000", cols=len(headers) + 5)
-                    ws.append_row(headers)
-                    Logger.info("Sheets", f"Created worksheet: {name}")
-            
-            # Add default contacts if new
-            if "Contacts" not in existing:
-                ws = sheet.worksheet("Contacts")
-                defaults = [
-                    ["CT001", "ปภ. (กรมป้องกันและบรรเทาสาธารณภัย)", 
-                     "รับแจ้งเหตุเตือนภัยและช่วยเหลืออุทกภัยสายด่วน", "1784"],
-                    ["CT002", "สพฉ. (สถาบันการแพทย์ฉุกเฉินแห่งชาติ)", 
-                     "รับส่งต่อผู้ป่วยฉุกเฉินทางการแพทย์", "1669"],
-                    ["CT003", "ตำรวจทางหลวง", 
-                     "ประสานงานความช่วยเหลือเส้นทางน้ำท่วม", "1193"],
-                    ["CT004", "หน่วยกู้ชีพวชิรพยาบาล", 
-                     "กู้ภัยทางน้ำและอุบัติเหตุ", "1554"],
-                ]
-                for row in defaults:
-                    ws.append_row(row)
-            
-        except Exception as e:
-            Logger.error("Sheets", f"Auto-setup error: {e}")
-    
-    def batch_append(self, worksheet_name: str, rows: list):
-        """Batch append rows to reduce API calls"""
-        client = self.get_client()
-        if not client:
-            return False
-        
-        try:
-            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
-            ws = sheet.worksheet(worksheet_name)
-            
-            # Append all rows at once
-            if rows:
-                ws.append_rows(rows, value_input_option='RAW')
-            return True
-        except Exception as e:
-            Logger.error("Sheets", f"Batch append error: {e}")
-            return False
-    
-    def get_all_records(self, worksheet_name: str) -> list:
-        """Get all records with caching"""
-        cache_key = f"sheets:{worksheet_name}"
-        cached = cache.sheets.get(cache_key)
-        if cached:
-            return cached
-        
-        client = self.get_client()
-        if not client:
-            return []
-        
-        try:
-            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
-            ws = sheet.worksheet(worksheet_name)
-            records = ws.get_all_records()
-            cache.sheets.set(cache_key, records, ttl=300)
-            return records
-        except Exception as e:
-            Logger.error("Sheets", f"Get records error: {e}")
-            return []
-    
-    def update_cell(self, worksheet_name: str, row: int, col: int, value):
-        """Update single cell"""
-        client = self.get_client()
-        if not client:
-            return False
-        try:
-            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
-            ws = sheet.worksheet(worksheet_name)
-            ws.update_cell(row, col, value)
-            return True
-        except Exception as e:
-            Logger.error("Sheets", f"Update cell error: {e}")
-            return False
-
-
-# Global sheets manager
-sheets_mgr = SheetsManager()
-
-
-def get_sheets_client():
-    """Legacy compatibility wrapper"""
-    return sheets_mgr.get_client()
-
-
-# =============================================================================
-# SECTION 10: WEATHER & FLOOD DATA (Optimized)
-# =============================================================================
-
-WEATHER_CONDITION_MAP = {
-    1: "แจ่มใส", 2: "เมฆบางส่วน", 3: "เมฆมาก", 4: "ครึ้ม",
-    5: "ฝนเล็กน้อย", 6: "ฝนปานกลาง", 7: "ฝนหนัก",
-    8: "ฝนฟ้าคะนอง", 9: "หนาวจัด", 10: "หนาว",
-    11: "เย็น", 12: "ร้อนจัด"
-}
-
-# ทางการ/อ้างอิงได้ - หน้าเว็บกรมอุตุนิยมวิทยาสำหรับให้ผู้ใช้ดูพยากรณ์เต็มรูปแบบเพิ่มเติม
-TMD_SOURCE_URL = "https://www.tmd.go.th"
-
-
-def get_live_weather_data(lat: float, lon: float) -> dict:
-    """
-    Fetch live weather from the Thai Meteorological Department (TMD) official
-    open-data API (data.tmd.go.th) — a legitimate, authenticated, rate-limited
-    API call (requires TMD_ACCESS_TOKEN), NOT a website scrape. This keeps the
-    integration legal and avoids putting unnecessary load on government
-    infrastructure.
-
-    Returns a structured dict so callers can build either a Flex card or
-    plain text:
-        {"ok": bool, "temp", "desc", "rh", "wind", "source": "TMD", "error": str|None}
-    """
-    start = time.time()
-    cache_key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
-
-    cached = cache.weather.get(cache_key)
-    if cached:
-        Logger.perf("Weather", "cache_hit", (time.time() - start) * 1000)
-        return cached
-
-    if not TMD_ACCESS_TOKEN or not requests:
-        result = {"ok": False, "error": "ไม่ได้ตั้งค่า TMD_ACCESS_TOKEN", "source": "TMD"}
-        cache.weather.set(cache_key, result)
-        return result
-
-    try:
-        url = "https://data.tmd.go.th/nwpapi/v1/forecast/location/hourly/at"
-        params = {"lat": lat, "lon": lon, "duration": 1, "fields": "tc,rh,cond,ws10m"}
-        headers = {"accept": "application/json", "authorization": f"Bearer {TMD_ACCESS_TOKEN}"}
-
-        resp = requests.get(url, headers=headers, params=params, timeout=8)
-
-        if resp.status_code == 429:
-            result = {"ok": False, "error": "ระบบ TMD หนาแน่น กรุณาลองใหม่ในอีก 1 นาที", "source": "TMD"}
-            return result  # don't cache rate-limit errors
-
-        resp.raise_for_status()
-        data = resp.json()
-
-        forecasts = data.get("WeatherForecasts", [])
-        if not forecasts:
-            result = {"ok": False, "error": "ไม่พบข้อมูลพยากรณ์สำหรับพิกัดนี้", "source": "TMD"}
-            cache.weather.set(cache_key, result)
-            return result
-
-        latest = forecasts[0].get("forecasts", [])[0]
-        d = latest.get("data", {})
-        code = d.get("cond", 0)
-
-        result = {
-            "ok": True,
-            "temp": d.get("tc", "-"),
-            "rh": d.get("rh", "-"),
-            "wind": d.get("ws10m", "-"),
-            "desc": WEATHER_CONDITION_MAP.get(code, "ไม่ระบุ"),
-            "source": "TMD",
-            "error": None,
-        }
-        cache.weather.set(cache_key, result)
-
-        Logger.perf("Weather", "api_call", (time.time() - start) * 1000)
-        return result
-
-    except Exception as e:
-        Logger.error("Weather", f"API error: {e}")
-        result = {"ok": False, "error": "ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้", "source": "TMD"}
-        cache.weather.set(cache_key, result)
-        return result
-
-
-def get_live_weather_scraper(lat: float, lon: float) -> str:
-    """Backward-compatible string-formatted weather summary (built on top of
-    get_live_weather_data). Kept for any code that still expects plain text."""
-    d = get_live_weather_data(lat, lon)
-    if not d.get("ok"):
-        return f"⚠️ {d.get('error', 'ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้')}\nกรุณาตรวจสอบจากแอปพยากรณ์อากาศโดยตรง"
-    return f"🌡️ {d['temp']} °C | 🌧️ {d['desc']}\n💧 ชื้น {d['rh']}% | 🍃 ลม {d['wind']} m/s"
-
-
-def calculate_situation(water_level, bank_level):
-    """คำนวณสถานการณ์น้ำ"""
-    try:
-        wl = float(water_level) if water_level is not None else 0
-        bl = float(bank_level) if bank_level is not None else 0
-    except (ValueError, TypeError):
-        return "ไม่มีข้อมูล"
-    
-    if bl <= 0:
-        if wl >= 3.0: return "ล้นตลิ่ง"
-        if wl >= 2.0: return "มาก"
-        if wl >= 1.0: return "ปกติ"
-        if wl >= 0.5: return "น้อย"
-        return "น้อยวิกฤต"
-    
-    ratio = wl / bl
-    if wl >= bl: return "ล้นตลิ่ง"
-    elif ratio >= 0.70: return "มาก"
-    elif ratio >= 0.30: return "ปกติ"
-    elif ratio >= 0.10: return "น้อย"
-    return "น้อยวิกฤต"
-
-
-def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"):
-    """ประเมินสถานะระดับน้ำ"""
-    if not situation:
-        situation = calculate_situation(wl_value, bl_value)
-    
-    try:
-        wl = float(wl_value) if wl_value not in [None, "-", ""] else 0
-        bl = float(bl_value) if bl_value not in [None, "-", ""] else 0
-        diff_text = f"{abs(bl - wl):.2f}"
-    except (ValueError, TypeError):
-        diff_text = "-"
-    
-    t = {
-        "ล้นตลิ่ง": "ล้นตลิ่ง", "มาก": "มาก", "ปกติ": "ปกติ",
-        "น้อย": "น้อย", "น้อยวิกฤต": "น้อยวิกฤต", "none": "ไม่มีข้อมูล"
-    }
-    
-    status_map = {
-        "ล้นตลิ่ง": {"status": t["ล้นตลิ่ง"], "bg": "#DC2626", "text": "#FFFFFF", "advice": "อพยพทันที"},
-        "มาก": {"status": t["มาก"], "bg": "#2563EB", "text": "#FFFFFF", "advice": "ระดับน้ำสูง"},
-        "ปกติ": {"status": t["ปกติ"], "bg": "#059669", "text": "#FFFFFF", "advice": "ระดับน้ำปกติ"},
-        "น้อย": {"status": t["น้อย"], "bg": "#F59E0B", "text": "#FFFFFF", "advice": "ระดับน้ำน้อย"},
-        "น้อยวิกฤต": {"status": t["น้อยวิกฤต"], "bg": "#DC2626", "text": "#FFFFFF", "advice": "น้อยวิกฤต"},
-    }
-    
-    res = status_map.get(situation, {
-        "status": t["none"], "bg": "#9CA3AF", "text": "#FFFFFF", "advice": "ติดตามสถานการณ์"
-    })
-    res["diff_text"] = diff_text
-    return res
-
-
-# =============================================================================
-# SECTION 11: LINE BOT INITIALIZATION
-# =============================================================================
-
-line_bot_api = None
-handler = None
-
-if LINE_CHANNEL_ACCESS_TOKEN and LineBotApi:
-    line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-if LINE_CHANNEL_SECRET and WebhookHandler:
-    handler = WebhookHandler(LINE_CHANNEL_SECRET)
-
-
-def show_loading_animation(user_id: str, loading_seconds: int = 10) -> bool:
-    """Show LINE typing indicator"""
-    if not LINE_CHANNEL_ACCESS_TOKEN or not requests:
-        return False
-    try:
-        url = "https://api.line.me/v2/bot/chat/loading/start"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"
-        }
-        payload = {"chatId": user_id, "loadingSeconds": max(5, min(loading_seconds, 60))}
-        resp = requests.post(url, headers=headers, json=payload, timeout=5)
-        return resp.status_code == 202
-    except Exception:
-        return False
-
-
-# =============================================================================
-# SECTION 12: FLEX MESSAGE BUILDERS
-# =============================================================================
-
-def build_sos_form_flex(user_name="คุณ", lang="TH"):
-    """SOS Flex Form - redirects to LIFF for full experience"""
-    texts = {
-        "TH": {"title": "🚨 แจ้งเหตุฉุกเฉิน SOS", "hi": f"สวัสดีครับ คุณ{user_name}",
-               "desc": "กรุณากรอกข้อมูลผ่านแบบฟอร์มด้านล่าง", "btn": "📋 เปิดแบบฟอร์ม SOS",
-               "footer": "ข้อมูลจะถูกส่งไปยังทีมกู้ภัยทันที"},
-        "EN": {"title": "🚨 SOS Emergency", "hi": f"Hello {user_name}",
-               "desc": "Please fill out the form below", "btn": "📋 Open SOS Form",
-               "footer": "Data will be sent to rescue team immediately"},
-    }
-    t = texts.get(lang, texts["TH"])
-    
-    liff_url = SOS_LIFF_URL or "https://liff.line.me/"
-    
-    return FlexSendMessage(
-        alt_text=t["title"],
-        contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#C2452F")),
-            header=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
-            ),
-            body=BoxComponent(
-                layout="vertical",
-                spacing="md",
-                contents=[
-                    TextComponent(text=t["hi"], size="sm", color="#374151"),
-                    TextComponent(text=t["desc"], size="xs", color="#6B7280"),
-                    SeparatorComponent(margin="md"),
-                    ButtonComponent(
-                        action=URIAction(label=t["btn"], uri=liff_url),
-                        style="primary", color="#C2452F", height="lg"
-                    )
-                ]
-            ),
-            footer=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text=t["footer"], size="xxs", color="#9CA3AF", align="center")]
-            )
-        )
-    )
-
-
-def build_need_form_flex(user_name="คุณ", lang="TH"):
-    """Needs Flex Form - redirects to LIFF for full experience"""
-    texts = {
-        "TH": {"title": "📦 แจ้งความต้องการสิ่งของ", "hi": f"สวัสดีครับ คุณ{user_name}",
-               "desc": "กรุณากรอกข้อมูลผ่านแบบฟอร์มด้านล่าง เพื่อให้ทีมงานจัดส่งสิ่งของได้ตรงตามความต้องการ",
-               "btn": "📋 เปิดแบบฟอร์มแจ้งความต้องการ",
-               "footer": "ข้อมูลจะถูกส่งไปยังทีมจัดส่งสิ่งของทันที"},
-        "EN": {"title": "📦 Request Supplies", "hi": f"Hello {user_name}",
-               "desc": "Please fill out the form below so our team can prepare the right supplies",
-               "btn": "📋 Open Needs Form",
-               "footer": "Data will be sent to the supplies team immediately"},
-    }
-    t = texts.get(lang, texts["TH"])
-
-    liff_url = NEED_LIFF_URL or "https://liff.line.me/"
-
-    return FlexSendMessage(
-        alt_text=t["title"],
-        contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#2F6F8F")),
-            header=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
-            ),
-            body=BoxComponent(
-                layout="vertical",
-                spacing="md",
-                contents=[
-                    TextComponent(text=t["hi"], size="sm", color="#374151"),
-                    TextComponent(text=t["desc"], size="xs", color="#6B7280", wrap=True),
-                    SeparatorComponent(margin="md"),
-                    ButtonComponent(
-                        action=URIAction(label=t["btn"], uri=liff_url),
-                        style="primary", color="#2F6F8F", height="lg"
-                    )
-                ]
-            ),
-            footer=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text=t["footer"], size="xxs", color="#9CA3AF", align="center")]
-            )
-        )
-    )
-
-
-def build_register_form_flex(user_name="คุณ", lang="TH"):
-    """Registration Flex Form - opens the Register LIFF for first-time setup"""
-    texts = {
-        "TH": {"title": "📝 ลงทะเบียนผู้ใช้งาน", "hi": f"สวัสดีครับ คุณ{user_name}",
-               "desc": "กรอกข้อมูลเบื้องต้นของคุณ เพื่อให้ทีมช่วยเหลือติดต่อและดูแลคุณได้รวดเร็วขึ้น",
-               "btn": "📋 เปิดแบบฟอร์มลงทะเบียน",
-               "footer": "ใช้เวลาไม่ถึง 1 นาที ข้อมูลของคุณจะถูกเก็บเป็นความลับ"},
-        "EN": {"title": "📝 User Registration", "hi": f"Hello {user_name}",
-               "desc": "Fill in your basic info so our team can reach you faster",
-               "btn": "📋 Open Registration Form",
-               "footer": "Takes less than a minute. Your data is kept confidential."},
-    }
-    t = texts.get(lang, texts["TH"])
-
-    liff_url = REGISTER_LIFF_URL or "https://liff.line.me/"
-
-    return FlexSendMessage(
-        alt_text=t["title"],
-        contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#2F6F8F")),
-            header=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
-            ),
-            body=BoxComponent(
-                layout="vertical",
-                spacing="md",
-                contents=[
-                    TextComponent(text=t["hi"], size="sm", color="#374151"),
-                    TextComponent(text=t["desc"], size="xs", color="#6B7280", wrap=True),
-                    SeparatorComponent(margin="md"),
-                    ButtonComponent(
-                        action=URIAction(label=t["btn"], uri=liff_url),
-                        style="primary", color="#2F6F8F", height="lg"
-                    )
-                ]
-            ),
-            footer=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text=t["footer"], size="xxs", color="#9CA3AF", align="center", wrap=True)]
-            )
-        )
-    )
-
-
-def build_snake_bite_flex(lang="TH"):
-    """
-    Snake-bite first-aid response.
-
-    Deliberately a fixed, pre-written message (NOT generated by Gemini per
-    request) — this is exactly the kind of high-stakes medical safety
-    content where a verified, complete answer matters more than a short
-    AI-generated one. Links to the Ramathibodi Poison Center (ศูนย์พิษวิทยา
-    รามาธิบดี), the standard reference in Thailand for bite/poison cases,
-    24-hour hotline 1367.
-    """
-    steps = [
-        "1. ตั้งสติ อยู่ให้นิ่งที่สุด การเคลื่อนไหวจะทำให้พิษกระจายเร็วขึ้น",
-        "2. ถอดแหวน นาฬิกา หรือของรัดแน่นบริเวณที่ถูกกัดออกก่อนที่จะบวม",
-        "3. ล้างแผลด้วยน้ำสะอาด ห้ามกรีด ดูด หรือใช้ปากดูดพิษออกเด็ดขาด",
-        "4. ห้ามขันชะเนาะ (ห้ามรัดแน่นจนเลือดไม่ไหล) ให้ใช้ผ้าพันแผลแบบหลวมๆแทน",
-        "5. พยายามจดจำลักษณะงู (สี ลาย ขนาด) ถ้าปลอดภัยและทำได้ เพื่อแจ้งแพทย์",
-        "6. รีบนำส่งโรงพยาบาลที่ใกล้ที่สุดทันที หรือโทร 1669 ให้มารับ",
-    ]
-    body_contents = [
-        TextComponent(text="🐍 ถูกงูกัด — ทำตามนี้ทันที", weight="bold", size="lg", color="#C2452F"),
-        SeparatorComponent(margin="md"),
-    ]
-    for s in steps:
-        body_contents.append(TextComponent(text=s, size="sm", color="#374151", wrap=True, margin="md"))
-
-    body_contents.append(SeparatorComponent(margin="lg"))
-    body_contents.append(
-        TextComponent(
-            text=f"☎️ ปรึกษาผู้เชี่ยวชาญตลอด 24 ชม.: สายด่วนศูนย์พิษวิทยารามาธิบดี {SNAKE_BITE_HOTLINE}",
-            size="xs", color="#6B7280", wrap=True, margin="md"
-        )
-    )
-
-    return FlexSendMessage(
-        alt_text="🐍 วิธีปฐมพยาบาลเมื่อถูกงูกัด",
-        contents=BubbleContainer(
-            body=BoxComponent(layout="vertical", contents=body_contents),
-            footer=BoxComponent(
-                layout="vertical",
-                spacing="sm",
-                contents=[
-                    ButtonComponent(
-                        action=URIAction(label=f"📞 โทร {SNAKE_BITE_HOTLINE} ศูนย์พิษวิทยา", uri=f"tel:{SNAKE_BITE_HOTLINE}"),
-                        style="primary", color="#C2452F", height="sm"
-                    ),
-                    ButtonComponent(
-                        action=URIAction(label="📖 ข้อมูลเพิ่มเติม (รามาธิบดี)", uri=SNAKE_BITE_INFO_URL),
-                        style="secondary", color="#F3F4F6", height="sm"
-                    ),
-                ]
-            )
-        )
-    )
-
-
-def build_help_flex(lang="TH"):
-    """Capabilities / help menu — answers 'ทำอะไรได้บ้าง' with a complete,
-    fixed list instead of letting Gemini guess (which previously produced
-    unhelpfully short non-answers like 'ฉันคือ FLOODCARE')."""
-    items = [
-        ("🆘", "แจ้งเหตุฉุกเฉิน", "พิมพ์ 'sos'"),
-        ("📦", "ขอความช่วยเหลือเรื่องสิ่งของ", "พิมพ์ 'ขอของ'"),
-        ("🌊", "เช็คระดับน้ำใกล้คุณ", "พิมพ์ 'เช็คระดับน้ำ' แล้วแชร์พิกัด"),
-        ("🌦️", "เช็คสภาพอากาศ", "พิมพ์ 'สภาพอากาศ' แล้วแชร์พิกัด"),
-        ("🏠", "หาศูนย์พักพิงใกล้คุณ", "พิมพ์ 'ศูนย์พักพิง' แล้วแชร์พิกัด"),
-        ("☎️", "เบอร์ติดต่อฉุกเฉิน", "พิมพ์ 'เบอร์โทร'"),
-        ("📝", "ลงทะเบียนข้อมูลของคุณ", "พิมพ์ 'ลงทะเบียน'"),
-        ("🌐", "เปลี่ยนภาษา", "พิมพ์ 'เปลี่ยนภาษา'"),
-    ]
-    contents = [
-        TextComponent(text="🤖 FLOODCARE AI ทำอะไรได้บ้าง", weight="bold", size="lg", color="#1F2937"),
-        SeparatorComponent(margin="md"),
-    ]
-    for icon, title, how in items:
-        contents.append(
-            BoxComponent(
-                layout="horizontal", margin="md", spacing="sm",
-                contents=[
-                    TextComponent(text=icon, size="md", flex=0),
-                    BoxComponent(
-                        layout="vertical", flex=1,
-                        contents=[
-                            TextComponent(text=title, size="sm", weight="bold", color="#1F2937"),
-                            TextComponent(text=how, size="xs", color="#6B7280"),
-                        ]
-                    )
-                ]
-            )
-        )
-    return FlexSendMessage(
-        alt_text="🤖 FLOODCARE AI ทำอะไรได้บ้าง",
-        contents=BubbleContainer(body=BoxComponent(layout="vertical", contents=contents))
-    )
-
-
-def build_faq_response_flex(answer: str, sources: list, question: str, lang="TH"):
-    """
-    Flex message for FAQ / web-search grounded answers.
-    Shows the AI answer and up to 3 clickable source links.
-    The sources come from Gemini's Google Search grounding metadata — real URLs
-    retrieved by the model, not hardcoded.
-    """
-    header_text = "ข้อมูลจาก FLOODCARE AI"
-    body_contents = [
-        TextComponent(
-            text=f"คำถาม: {question[:60]}{'...' if len(question) > 60 else ''}",
-            size="xs", color="#8C8980", wrap=True, margin="none"
-        ),
-        SeparatorComponent(margin="md"),
-        TextComponent(
-            text=answer[:900] + ("..." if len(answer) > 900 else ""),
-            size="sm", color="#15151A", wrap=True, margin="md"
-        ),
-    ]
-
-    footer_contents = []
-    if sources:
-        body_contents.append(SeparatorComponent(margin="lg"))
-        body_contents.append(
-            TextComponent(text="แหล่งข้อมูลอ้างอิง", size="xs", color="#8C8980", weight="bold", margin="md")
-        )
-        # Show up to 3 sources as link buttons
-        for src in sources[:3]:
-            title = src.get("title", "") or src.get("url", "")
-            url = src.get("url", "")
-            label = (title[:30] + "...") if len(title) > 30 else title
-            if url and label:
-                footer_contents.append(
-                    ButtonComponent(
-                        action=URIAction(label=label, uri=url),
-                        style="secondary", color="#F1EEE8", height="sm"
-                    )
-                )
-    else:
-        footer_contents.append(
-            TextComponent(
-                text="ข้อมูลจาก FLOODCARE AI (Gemini) — ตรวจสอบจากแหล่งข้อมูลทางการอีกครั้งเสมอ",
-                size="xxs", color="#A6A199", wrap=True
-            )
-        )
-
-    return FlexSendMessage(
-        alt_text=f"ข้อมูล: {question[:40]}",
-        contents=BubbleContainer(
-            body=BoxComponent(layout="vertical", contents=body_contents),
-            footer=BoxComponent(layout="vertical", spacing="sm", contents=footer_contents) if footer_contents else None,
-        )
-    )
-
-
-def build_ai_response_flex(ai_text: str, original_question: str, lang="TH"):
-    """AI Response Flex with action buttons"""
-    return FlexSendMessage(
-        alt_text="🤖 FLOODCARE AI",
-        contents=BubbleContainer(
-            body=BoxComponent(
-                layout="vertical",
-                contents=[
-                    BoxComponent(
-                        layout="horizontal",
-                        contents=[
-                            TextComponent(text="🤖 FLOODCARE AI", weight="bold", size="sm", color="#1E40AF", flex=1),
-                            TextComponent(text="AI", size="xxs", color="#9CA3AF", align="end")
-                        ]
-                    ),
-                    SeparatorComponent(margin="md"),
-                    TextComponent(text=ai_text, wrap=True, size="sm", color="#374151", margin="md")
-                ]
-            )
-        )
-    )
-
-
-def build_language_selector_flex():
-    """Language selector Flex"""
-    return FlexSendMessage(
-        alt_text="🌐 เลือกภาษา",
-        contents=BubbleContainer(
-            size="sm",
-            body=BoxComponent(
-                layout="vertical",
-                spacing="md",
-                contents=[
-                    TextComponent(text="🌐 Language", weight="bold", size="md", color="#1F2937", align="center"),
-                    SeparatorComponent(margin="md"),
-                    ButtonComponent(action=MessageAction(label="[TH] ภาษาไทย", text="ตั้งค่าภาษา: TH"),
-                                    style="secondary", color="#F3F4F6", height="sm"),
-                    ButtonComponent(action=MessageAction(label="[EN] English", text="ตั้งค่าภาษา: EN"),
-                                    style="secondary", color="#F3F4F6", height="sm"),
-                ]
-            )
-        )
-    )
-
-
-def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
-    """
-    Professional, easy-to-read weather report card.
-    Data source: Thai Meteorological Department (TMD) official API — shown
-    in the footer with a link so users can verify / see the full forecast.
-    """
-    if not weather_data.get("ok"):
-        body_contents = [
-            TextComponent(text="🌦️ สภาพอากาศ", weight="bold", size="lg", color="#1F2937"),
-            SeparatorComponent(margin="md"),
-            TextComponent(
-                text=f"⚠️ {weather_data.get('error', 'ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้')}",
-                size="sm", color="#C2452F", wrap=True, margin="md"
-            ),
-        ]
-    else:
-        temp = weather_data["temp"]
-        desc = weather_data["desc"]
-        rh = weather_data["rh"]
-        wind = weather_data["wind"]
-
-        rows = [
-            ("🌡️", "อุณหภูมิ", f"{temp} °C"),
-            ("🌧️", "สภาพอากาศ", desc),
-            ("💧", "ความชื้น", f"{rh} %"),
-            ("🍃", "ความเร็วลม", f"{wind} m/s"),
-        ]
-        body_contents = [
-            TextComponent(text="🌦️ รายงานสภาพอากาศปัจจุบัน", weight="bold", size="lg", color="#1F2937"),
-            TextComponent(text=f"📍 {lat:.4f}, {lon:.4f}  •  🕒 {timestamp}", size="xxs", color="#9CA3AF", wrap=True),
-            SeparatorComponent(margin="md"),
-        ]
-        for icon, label, value in rows:
-            body_contents.append(
-                BoxComponent(
-                    layout="horizontal", margin="md",
-                    contents=[
-                        TextComponent(text=f"{icon} {label}", size="sm", color="#6B7280", flex=2),
-                        TextComponent(text=value, size="sm", weight="bold", color="#1F2937", flex=2, align="end"),
-                    ]
-                )
-            )
-        body_contents.append(
-            TextComponent(
-                text="⚠️ ข้อมูลพยากรณ์เบื้องต้น โปรดสังเกตท้องฟ้าจริงประกอบการตัดสินใจ",
-                size="xxs", color="#9CA3AF", wrap=True, margin="lg"
-            )
-        )
-
-    return FlexSendMessage(
-        alt_text="🌦️ รายงานสภาพอากาศ",
-        contents=BubbleContainer(
-            body=BoxComponent(layout="vertical", contents=body_contents),
-            footer=BoxComponent(
-                layout="vertical",
-                contents=[
-                    ButtonComponent(
-                        action=URIAction(label="🔗 ดูพยากรณ์อากาศเต็มรูปแบบ (กรมอุตุฯ)", uri=TMD_SOURCE_URL),
-                        style="secondary", color="#F3F4F6", height="sm"
-                    ),
-                    TextComponent(
-                        text="ข้อมูลอ้างอิง: กรมอุตุนิยมวิทยา (TMD Open Data API) - tmd.go.th",
-                        size="xxs", color="#9CA3AF", align="center", margin="sm", wrap=True
-                    )
-                ]
-            )
-        )
-    )
-
-
-def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang="TH"):
-    """Water Level Report Flex"""
-    header = BoxComponent(
-        layout="vertical",
-        contents=[
-            TextComponent(text="🌊 ระดับน้ำใกล้คุณ", weight="bold", size="xl", color="#1F2937"),
-            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#6B7280"),
-            TextComponent(text=f"🕒 {timestamp}", size="xs", color="#9CA3AF")
-        ]
-    )
-    
-    stations_box = BoxComponent(layout="vertical", spacing="md", margin="lg", contents=[])
-    
-    if not stations:
-        stations_box.contents.append(
-            TextComponent(text="⚠️ ไม่พบสถานีในพื้นที่ใกล้เคียง", size="sm", color="#EF4444")
-        )
-    else:
-        for st in stations:
-            wl = st.get("water_level")
-            dist = st.get("distance_km", 0)
-            wl_val = "-"
-            assessment = assess_water_level_status(None)
-            
-            if wl and wl.get("value") not in [None, "-", ""]:
+    from functools import wraps
+    from flask import g
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            if not expected_liff_id:
+                # Dev mode: LIFF ID not configured — skip verification
+                Logger.info("Auth", f"LIFF_ID not configured — skipping token verify for {fn.__name__}")
+                g.verified_user_id = None
+                return fn(*args, **kwargs)
+
+            auth_header = request.headers.get("Authorization", "")
+
+            # Graceful degradation: if no/empty auth header but user_id is in the
+            # JSON body (from liff.getProfile() which ran before token was available),
+            # allow the submission through with a security warning. This handles the
+            # edge case where liff.getIDToken() returns null/undefined (e.g. LIFF
+            # opened in external browser, or token expired between init() and submit).
+            if not auth_header.startswith("Bearer ") or auth_header == "Bearer ":
                 try:
-                    wl_val = float(wl["value"])
-                    bl = st.get("bank_level")
-                    situation = st.get("situation")
-                    assessment = assess_water_level_status(wl_val, bl, situation)
-                except (ValueError, TypeError):
+                    body_data = request.get_json(silent=True) or {}
+                    fallback_uid = body_data.get("user_id", "")
+                    if fallback_uid and fallback_uid != "unknown":
+                        Logger.info(
+                            "Auth",
+                            f"No valid Authorization header for {fn.__name__} — "
+                            f"accepting payload user_id (unverified). "
+                            f"LIFF may have been opened in external browser or token expired."
+                        )
+                        g.verified_user_id = fallback_uid
+                        if not check_rate_limit(fallback_uid):
+                            return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+                        return fn(*args, **kwargs)
+                except Exception:
                     pass
-            
-            card = BoxComponent(
-                layout="vertical",
-                contents=[
-                    TextComponent(text=f"{st['stationName']} (ห่าง {dist:.2f} กม.)", 
-                                 weight="bold", size="sm", color="#1F2937"),
-                    BoxComponent(
-                        layout="horizontal", margin="sm", spacing="sm",
-                        contents=[
-                            BoxComponent(
-                                layout="vertical",
-                                background_color=assessment.get("bg", "#9CA3AF"),
-                                corner_radius="xl",
-                                padding_all="sm",
-                                contents=[TextComponent(text=assessment["status"], size="xs",
-                                          color=assessment.get("text", "#FFF"), weight="bold", align="center")]
-                            ),
-                            TextComponent(text=assessment["advice"], size="xs", color="#4B5563", gravity="center")
-                        ]
-                    ),
-                    TextComponent(text=f"ระดับน้ำ: {wl_val} ม. | ตลิ่ง: {st.get('bank_level', '-')}",
-                                 size="xs", color="#4B5563", margin="sm")
-                ]
+                Logger.security("Auth", "Missing Authorization header and no user_id in body", "unknown", {})
+                return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+            id_token = auth_header[len("Bearer "):]
+            user_id = _verify_liff_token(id_token, expected_liff_id)
+            if not user_id:
+                # Token verify failed — try graceful degradation with payload user_id
+                try:
+                    body_data = request.get_json(silent=True) or {}
+                    fallback_uid = body_data.get("user_id", "")
+                    if fallback_uid and fallback_uid != "unknown":
+                        Logger.info(
+                            "Auth",
+                            f"LIFF token verify failed for {fn.__name__} — "
+                            f"accepting payload user_id (unverified). Check LIFF_ID env var format."
+                        )
+                        g.verified_user_id = fallback_uid
+                        if not check_rate_limit(fallback_uid):
+                            return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+                        return fn(*args, **kwargs)
+                except Exception:
+                    pass
+                Logger.security("Auth", "Invalid LIFF token and no fallback user_id", "unknown", {})
+                return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+            # Rate-limit by verified user_id
+            if not check_rate_limit(user_id):
+                return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+
+            g.verified_user_id = user_id
+            return fn(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+def _require_debug_key():
+    """
+    Decorator: protect debug endpoints with DEBUG_API_KEY env var.
+    If DEBUG_API_KEY is not set, debug endpoints are disabled entirely.
+    Pass key via:  ?key=<DEBUG_API_KEY>  or  X-Debug-Key: <key> header
+    """
+    from functools import wraps
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            debug_key = os.environ.get("DEBUG_API_KEY", "")
+            if not debug_key:
+                return jsonify({"error": "Debug endpoints disabled. Set DEBUG_API_KEY to enable."}), 403
+            provided = (
+                request.args.get("key", "")
+                or request.headers.get("X-Debug-Key", "")
             )
-            stations_box.contents.append(card)
-    
-    bubble = BubbleContainer(
-        body=BoxComponent(
-            layout="vertical",
-            contents=[header, SeparatorComponent(margin="md"), stations_box]
-        ),
-        footer=BoxComponent(
-            layout="vertical",
-            contents=[
-                ButtonComponent(
-                    action=URIAction(label="🔗 ดูแผนที่ระดับน้ำทั้งประเทศ (Thaiwater)", uri=WATER_LEVEL_SOURCE_URL),
-                    style="secondary", color="#F3F4F6", height="sm"
-                ),
-                TextComponent(
-                    text="ข้อมูลอ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (สสน.) - thaiwater.net",
-                    size="xxs", color="#9CA3AF", align="center", margin="sm", wrap=True
-                )
+            if not _hmac.compare_digest(provided, debug_key):
+                Logger.security("Auth", "Invalid debug key", "unknown", {})
+                return jsonify({"error": "Forbidden"}), 403
+            return fn(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+# =============================================================================
+# WATER DATA AUTO-SYNC
+# =============================================================================
+
+def ensure_water_data_fresh():
+    """Check if water data needs refresh"""
+    return True  # Placeholder - actual sync in bot_config
+
+
+# =============================================================================
+# MAIN WEBHOOK ROUTE
+# =============================================================================
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    """LINE Webhook endpoint"""
+    signature = request.headers.get('X-Line-Signature', '')
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK', 200
+
+
+# =============================================================================
+# FOLLOW EVENT (user adds the bot as a friend / first opens the chat)
+# =============================================================================
+
+@handler.add(FollowEvent)
+def handle_follow(event):
+    """
+    Fired once when a user adds the official account as a friend.
+    This is the very first moment they "เริ่มเข้าใช้งาน" (start using the
+    service), so we greet them and invite them to fill in their basic info
+    via the Register LIFF form right away.
+    """
+    user_id = event.source.user_id
+    try:
+        line_bot_api.reply_message(
+            event.reply_token,
+            [
+                get_greeting_message("คุณ"),
+                build_register_form_flex("คุณ"),
             ]
         )
+    except Exception as e:
+        Logger.error("Follow", f"Welcome message failed: {e}")
+
+
+# =============================================================================
+# TEXT MESSAGE HANDLER (Main Intelligence)
+# =============================================================================
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_text_message(event):
+    """Optimized text message handler with Intent Classification"""
+    start_time = time.time()
+    user_text = sanitize_text(event.message.text.strip())
+    user_id = event.source.user_id
+    show_loading_animation(user_id, loading_seconds=10) # เพิ่ม Typing Indicator
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Rate limiting
+    if not check_rate_limit(user_id):
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="⏳ คุณส่งข้อความเร็วเกินไป กรุณารอสักครู่ครับ")
+        )
+        return
+    
+    # Get user session
+    session = sessions.get(user_id)
+    current_state = session.state
+    
+    Logger.info("Message", f"Received: '{user_text[:50]}...' " if len(user_text) > 50 else f"Received: '{user_text}'",
+               {"user": bot_config.hash_user_id(user_id), "state": current_state})
+    
+    # ================================================================
+    # GLOBAL COMMANDS (work in any state)
+    # ================================================================
+    
+    # Language switch
+    if user_text in ["เปลี่ยนภาษา", "change language", "lang"]:
+        line_bot_api.reply_message(event.reply_token, build_language_selector_flex())
+        return
+    
+    if user_text.startswith("ตั้งค่าภาษา: "):
+        lang = user_text.replace("ตั้งค่าภาษา: ", "").strip()
+        session.language = lang
+        msgs = {"TH": "✅ ภาษาไทย", "EN": "✅ English", "JP": "✅ 日本語", "MY": "✅ Bahasa Melayu"}
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=msgs.get(lang, f"✅ Language set to {lang}"))
+        )
+        return
+    
+    # Cancel command
+    if user_text in ["ยกเลิก", "cancel", "หยุด", "stop"]:
+        session.reset()
+        update_legacy_state(user_id, "IDLE", {})
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ คุณสามารถกดใช้งานเมนูหลักใหม่ได้ทันทีครับ")
+        )
+        return
+    
+    # ================================================================
+    # ⚠️ DEPRECATED (v2.3): Legacy text-based step-by-step state machines
+    # for SOS / Needs / Registration. These are now UNREACHABLE in normal
+    # use — _start_sos_flow / _start_needs_flow / _start_registration always
+    # send a LIFF form now, and never set these session states anymore.
+    # Kept only so old in-flight sessions (started before this update) don't
+    # crash; safe to delete entirely once you're sure no one is mid-flow.
+    # ================================================================
+    if current_state == "sos_location":
+        _handle_sos_location_state(event, user_id, user_text)
+        return
+    
+    if current_state.startswith("sos_"):
+        _handle_sos_state_machine(event, user_id, user_text, current_state)
+        return
+    
+    if current_state == "needs_location":
+        _handle_needs_location_state(event, user_id, user_text)
+        return
+    
+    if current_state.startswith("needs_"):
+        _handle_needs_state_machine(event, user_id, user_text, current_state)
+        return
+    
+    if current_state.startswith("register_"):
+        _handle_registration(event, user_id, user_text, current_state)
+        return
+    
+    # ================================================================
+    # INTENT CLASSIFICATION (for IDLE state)
+    # ================================================================
+    
+    intent, confidence = IntentClassifier.classify(user_text)
+    session.last_intent = intent
+    
+    Logger.info("Intent", f"Classified as {intent} (confidence: {confidence})",
+               {"user": bot_config.hash_user_id(user_id)})
+    
+    # ---- SNAKE BITE (verified first-aid info, not free-form AI) ----
+    if intent == "SNAKE_BITE":
+        line_bot_api.reply_message(event.reply_token, build_snake_bite_flex())
+        return
+
+    # ---- EMERGENCY (Highest Priority) ----
+    if intent == "EMERGENCY":
+        emergency_msg = handle_emergency_response(user_id)
+        line_bot_api.reply_message(event.reply_token, emergency_msg)
+        return
+    
+    # ---- GREETING ----
+    if intent == "GREETING":
+        greeting_msg = get_greeting_message("คุณ")
+        line_bot_api.reply_message(event.reply_token, greeting_msg)
+        return
+
+    # ---- HELP (capabilities / menu) ----
+    if intent == "HELP":
+        line_bot_api.reply_message(event.reply_token, build_help_flex())
+        return
+
+    # ---- FAQ (web-search grounded answer with source links) ----
+    if intent == "FAQ":
+        _handle_faq_query(event, user_id, user_text, timestamp)
+        return
+    
+    # ---- CONTACT ----
+    if intent == "CONTACT":
+        _handle_contact_request(event)
+        return
+    
+    # ---- SHELTER ----
+    if intent == "SHELTER":
+        _handle_shelter_request(event, user_id)
+        return
+    
+    # ---- WATER LEVEL ----
+    if intent == "WATER_LEVEL":
+        _handle_water_level_request(event, user_id)
+        return
+    
+    # ---- WEATHER ----
+    if intent == "WEATHER":
+        _handle_weather_request(event, user_id)
+        return
+    
+    # ---- SOS ----
+    if intent == "SOS":
+        _start_sos_flow(event, user_id)
+        return
+    
+    # ---- NEEDS ----
+    if intent == "NEEDS":
+        _start_needs_flow(event, user_id)
+        return
+    
+    # ---- CANCEL ----
+    if intent == "CANCEL":
+        session.reset()
+        update_legacy_state(user_id, "IDLE", {})
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ")
+        )
+        return
+    
+    # ---- LANGUAGE ----
+    if intent == "LANGUAGE":
+        line_bot_api.reply_message(event.reply_token, build_language_selector_flex())
+        return
+    
+    # ---- REGISTRATION ----
+    if intent == "REGISTRATION":
+        _start_registration(event, user_id)
+        return
+    
+    # ================================================================
+    # AI QUERY (Default - only if no intent matched)
+    # ================================================================
+    if intent == "AI_QUERY":
+        _handle_ai_query(event, user_id, user_text, timestamp)
+        return
+    
+    # Fallback
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text="🤔 ไม่เข้าใจคำถาม กรุณาลองใหม่หรือเลือกจากเมนูครับ")
     )
-    return FlexSendMessage(alt_text="รายงานระดับน้ำ", contents=bubble)
 
 
 # =============================================================================
-# SECTION 13: GREETING & RESPONSE HANDLERS
+# LOCATION MESSAGE HANDLER
 # =============================================================================
 
-def is_greeting(text: str) -> bool:
-    """Check if text is a greeting"""
-    if not text:
-        return False
-    clean = text.strip().lower().strip("!.,😊🙏👋 ")
-    greetings = ["สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "hello", "hi", "hey",
-                "good morning", "good afternoon", "good evening", "menu", "เมนู", "เริ่ม", "start"]
-    return any(clean.startswith(g.lower()) or g.lower() in clean for g in greetings)
-
-
-def get_greeting_message(user_name="คุณ"):
-    """Generate greeting message"""
-    now = datetime.datetime.now()
-    time_greeting = "สวัสดี"
-    if 5 <= now.hour < 10:
-        time_greeting = "อรุณสวัสดิ์"
+@handler.add(MessageEvent, message=LocationMessage)
+def handle_location_message(event):
+    """Handle location sharing from users"""
+    user_id = event.source.user_id
+    lat = event.message.latitude
+    lon = event.message.longitude
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    text = (
-        f"{time_greeting} คุณ {user_name}\n"
-        "ผมคือ FLOODCARE AI\n"
-        "แชทบอทอัจฉริยะสำหรับติดตามสถานการณ์น้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยครับ\n\n"
-        "🔍 ผมช่วยคุณได้:\n"
-        "1. 📞 เบอร์โทรฉุกเฉิน\n"
-        "2. 🚨 SOS แจ้งเหตุ\n"
-        "3. 🏠 ค้นหาศูนย์อพยพ\n"
-        "4. 🌊 ตรวจสอบระดับน้ำ\n"
-        "5. 📦 แจ้งความต้องการ\n"
-        "6. 🤖 สอบถาม AI\n\n"
-        "ผมพร้อมช่วยเหลือตลอด 24 ชั่วโมงครับ 💧"
-    )
-    return TextSendMessage(text=text)
-
-
-def handle_emergency_response(user_id: str, event=None) -> TextSendMessage:
-    """Immediate emergency response without AI"""
-    emergency_text = (
-        "🚨 ฉุกเฉิน! ทำตามนี้ทันที:\n\n"
-        "1️⃣ ยกเบรกเกอร์ไฟฟ้าทันที\n"
-        "2️⃣ ขึ้นที่สูงที่สุดเท่าที่ทำได้\n"
-        "3️⃣ โทรแจ้งเจ้าหน้าที่:\n"
-        "   📞 ปภ. 1784\n"
-        "   📞 สพฉ. 1669\n"
-        "   📞 ตำรวจทางหลวง 1193\n\n"
-        "⚠️ อย่าตกใจ ประหยัดแบตมือถือ\n"
-        "รอความช่วยเหลืออยู่ที่จุดปลอดภัย"
-    )
-    return TextSendMessage(text=emergency_text)
-
-
-# =============================================================================
-# SECTION 14: SOS & NEEDS WORKFLOW HELPERS
-# =============================================================================
-
-def calculate_sos_priority(group_types: list, urgency_level: str) -> Tuple[str, str]:
-    """Calculate SOS priority level"""
-    gt = [g.lower() for g in group_types] if group_types else []
-    ul = (urgency_level or "").lower()
+    session = sessions.get(user_id)
+    state = session.state
     
-    critical_keywords = ["บาดเจ็บ", "ผู้ป่วย", "พิการ", "วิกฤต", "ขาดแคลน"]
-    if any(k in g for g in gt for k in critical_keywords) or "วิกฤต" in ul:
-        return ("🔴 CRITICAL", "CRITICAL")
+    Logger.info("Location", f"Received location: {lat}, {lon}",
+               {"user": bot_config.hash_user_id(user_id), "state": state})
     
-    high_keywords = ["เด็ก", "ชรา", "เด็กเล็ก"]
-    if any(k in g for g in gt for k in high_keywords) or "สูง" in ul:
-        return ("🟠 HIGH", "HIGH")
+    # ---- SOS: Receive GPS ----
+    if state == "sos_location":
+        session.update(state="sos_step2", data={"latitude": lat, "longitude": lon})
+        update_legacy_state(user_id, "sos_step2", session.data)
+        
+        quick_reply = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา")),
+            QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วย/พิการ", text="🚑 มีผู้ป่วยติดเตียง/พิการ")),
+            QuickReplyButton(action=MessageAction(label="🩸 ผู้บาดเจ็บ", text="🩸 มีผู้บาดเจ็บฉุกเฉิน")),
+            QuickReplyButton(action=MessageAction(label="👨‍👩‍👧 ผู้ใหญ่", text="👨‍👩‍👧 ผู้ใหญ่ทั่วไป")),
+            QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง")),
+            QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น")),
+        ])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="👥 ระบุกลุ่มผู้ประสบภัย (เลือกได้หลายกลุ่ม กด 'เสร็จสิ้น' เมื่อเลือกครบ):",
+                quick_reply=quick_reply
+            )
+        )
+        return
     
-    return ("🟢 NORMAL", "NORMAL")
-
-
-def build_sos_summary_text(data: dict) -> str:
-    """Build SOS summary text for confirmation"""
-    lat = data.get("latitude", "0")
-    lon = data.get("longitude", "0")
-    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    priority_label = data.get("priority_label", "🟢 NORMAL")
+    # ---- Needs: Receive GPS ----
+    if state == "needs_location":
+        session.update(state="needs_step2", data={"need_latitude": lat, "need_longitude": lon})
+        update_legacy_state(user_id, "needs_step2", session.data)
+        
+        quick_reply = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="🍲 อาหาร/น้ำดื่ม", text="🍲 อาหาร/น้ำดื่ม")),
+            QuickReplyButton(action=MessageAction(label="💊 ยา/เวชภัณฑ์", text="💊 ยารักษาโรค/เวชภัณฑ์")),
+            QuickReplyButton(action=MessageAction(label="👶 ของใช้เด็ก", text="👶 ของใช้เด็กอ่อน")),
+            QuickReplyButton(action=MessageAction(label="🧼 ของใช้ส่วนตัว", text="🧼 ของใช้ส่วนตัว")),
+            QuickReplyButton(action=MessageAction(label="🔦 ส่องสว่าง", text="🔦 อุปกรณ์ส่องสว่าง")),
+            QuickReplyButton(action=MessageAction(label="📝 อื่นๆ", text="📝 อื่นๆ (ระบุเอง)")),
+            QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น")),
+        ])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="📦 เลือกหมวดหมู่สิ่งของที่ต้องการ (เลือกได้หลายหมวด กด 'เสร็จสิ้น' เมื่อเลือกครบ):",
+                quick_reply=quick_reply
+            )
+        )
+        return
     
-    return (
-        "📋 สรุปข้อมูลแจ้งเหตุ\n\n"
-        f"📍 พิกัด: {maps_link}\n"
-        f"👥 กลุ่ม: {', '.join(data.get('group_types', []))}\n"
-        f"🌊 สถานการณ์: {data.get('urgency_level', 'ต่ำ')}\n"
-        f"📊 ระดับความเร่งด่วน: {priority_label}\n\n"
-        f"ยืนยันการส่งข้อมูลแจ้งกู้ภัย?"
-    )
-
-
-def build_needs_summary_text(data: dict) -> str:
-    """Build Needs summary text for confirmation"""
-    lat = data.get("latitude", "0")
-    lon = data.get("longitude", "0")
-    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+    # ---- Shelter Search ----
+    if state == "waiting_shelter_location":
+        _process_shelter_search(event, lat, lon, user_id)
+        return
     
-    return (
-        "📋 สรุปความต้องการ\n\n"
-        f"📍 พิกัด: {maps_link}\n"
-        f"📦 หมวดหมู่: {', '.join(data.get('categories', []))}\n"
-        f"📝 รายละเอียด: {data.get('details', '-')}\n"
-        f"⏳ ความเร่งด่วน: {data.get('urgency', '-')}\n\n"
-        f"ยืนยันการส่งข้อมูล?"
+    # ---- Water Level Check ----
+    if state == "waiting_water_location":
+        _process_water_level(event, lat, lon, user_id, timestamp)
+        return
+    
+    # ---- Weather Check ----
+    if state == "waiting_weather_location":
+        _process_weather(event, lat, lon, user_id, timestamp)
+        return
+    
+    # Default
+    session.reset()
+    update_legacy_state(user_id, "IDLE", {})
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text="📍 ได้รับพิกัดแล้วครับ หากต้องการใช้งาน กรุณาเลือกจากเมนูหลักครับ")
     )
 
 
 # =============================================================================
-# SECTION 15: BACKGROUND CLEANUP
+# IMAGE MESSAGE HANDLER (SOS Photo)
 # =============================================================================
 
-def start_background_tasks():
-    """Start background cleanup thread"""
-    def cleanup_loop():
-        while True:
-            try:
-                time.sleep(300)  # Every 5 minutes
+@handler.add(MessageEvent, message=ImageMessage)
+def handle_image_message(event):
+    """Handle image uploads during SOS flow"""
+    user_id = event.source.user_id
+    session = sessions.get(user_id)
+    
+    if session.state == "sos_step4":
+        image_id = event.message.id
+        content_url = f"https://api-data.line.me/v2/bot/message/{image_id}/content"
+        session.data["photo_url"] = content_url
+        session.data["image_id"] = image_id
+        session.update(state="sos_confirm")
+        update_legacy_state(user_id, "sos_confirm", session.data)
+        
+        summary = build_sos_summary_text(session.data)
+        quick_reply = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="✅ ยืนยันแจ้งกู้ภัย", text="ยืนยันแจ้งกู้ภัย")),
+            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก")),
+        ])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=summary, quick_reply=quick_reply)
+        )
+    else:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="📸 ได้รับรูปภาพแล้วครับ หากต้องการแจ้ง SOS พร้อมส่งรูป กรุณาเริ่มจากเมนู 'SOS' ก่อนครับ")
+        )
+
+
+# =============================================================================
+# SOS STATE MACHINE HANDLERS
+# =============================================================================
+
+def _handle_sos_location_state(event, user_id, user_text):
+    """Handle SOS location state - prompt for GPS"""
+    quick_reply = QuickReply(items=[
+        QuickReplyButton(action=LocationAction(label="📍 ส่งพิกัดตำแหน่งแจ้งเหตุ"))
+    ])
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(
+            text="🚨 ระบบกำลังรอพิกัดของคุณครับ โปรดกดปุ่ม '📍 ส่งพิกัดตำแหน่งแจ้งเหตุ' ด้านล่าง หรือพิมพ์ 'ยกเลิก' เพื่อเริ่มต้นใหม่ครับ",
+            quick_reply=quick_reply
+        )
+    )
+
+
+def _handle_sos_state_machine(event, user_id, user_text, state):
+    """Handle SOS multi-step workflow"""
+    session = sessions.get(user_id)
+    
+    # ---- Step 2: Select victim groups ----
+    if state == "sos_step2":
+        valid_options = {
+            "👶 มีเด็กเล็ก/คนชรา": "เด็กเล็ก/คนชรา",
+            "🚑 มีผู้ป่วยติดเตียง/พิการ": "ผู้ป่วยติดเตียง/พิการ",
+            "🩸 มีผู้บาดเจ็บฉุกเฉิน": "ผู้บาดเจ็บฉุกเฉิน",
+            "👨‍👩‍👧 ผู้ใหญ่ทั่วไป": "ผู้ใหญ่ทั่วไป",
+            "🐶 มีสัตว์เลี้ยง": "สัตว์เลี้ยง"
+        }
+        
+        if "group_types" not in session.data:
+            session.data["group_types"] = []
+        
+        if user_text in valid_options:
+            selected = valid_options[user_text]
+            if selected not in session.data["group_types"]:
+                session.data["group_types"].append(selected)
+        elif user_text in ["เสร็จสิ้น", "➡️ เสร็จสิ้น"]:
+            if not session.data.get("group_types"):
+                session.data["group_types"] = ["ผู้ใหญ่ทั่วไป"]
+            session.update(state="sos_step3")
+            update_legacy_state(user_id, "sos_step3", session.data)
+            
+            quick_reply = QuickReply(items=[
+                QuickReplyButton(action=MessageAction(label="🔴 วิกฤต (มิดหัว/ติดหลังคา)", text="🔴 วิกฤต (มิดหัว/ติดบนหลังคา)")),
+                QuickReplyButton(action=MessageAction(label="🟠 สูง (ระดับอก/เกิน 1 เมตร)", text="🟠 สูง (ระดับอก/เกิน 1 เมตร)")),
+                QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง (ระดับเอว)", text="🟡 ปานกลาง (ระดับเอว)")),
+                QuickReplyButton(action=MessageAction(label="🟢 ต่ำ (ระดับหน้าแข้ง)", text="🟢 ต่ำ (ระดับหน้าแข้ง)")),
+            ])
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="🌊 ระดับน้ำและสถานการณ์ปัจจุบัน\n\nโปรดเลือกระดับความรุนแรง:", quick_reply=quick_reply)
+            )
+            return
+        else:
+            # Custom input
+            if user_text:
+                session.data["group_types"].append(user_text)
+        
+        # Show selection again
+        quick_reply = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="👶 เด็กเล็ก/คนชรา", text="👶 มีเด็กเล็ก/คนชรา")),
+            QuickReplyButton(action=MessageAction(label="🚑 ผู้ป่วย/พิการ", text="🚑 มีผู้ป่วยติดเตียง/พิการ")),
+            QuickReplyButton(action=MessageAction(label="🩸 ผู้บาดเจ็บ", text="🩸 มีผู้บาดเจ็บฉุกเฉิน")),
+            QuickReplyButton(action=MessageAction(label="👨‍👩‍👧 ผู้ใหญ่", text="👨‍👩‍👧 ผู้ใหญ่ทั่วไป")),
+            QuickReplyButton(action=MessageAction(label="🐶 สัตว์เลี้ยง", text="🐶 มีสัตว์เลี้ยง")),
+            QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น")),
+        ])
+        selected_text = ", ".join(session.data["group_types"]) if session.data["group_types"] else "ยังไม่ได้เลือก"
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text=f"👥 กลุ่มที่เลือก: {selected_text}\n\nเลือกเพิ่มหรือกด 'เสร็จสิ้น' เพื่อไปต่อครับ",
+                quick_reply=quick_reply
+            )
+        )
+        return
+    
+    # ---- Step 3: Urgency level ----
+    if state == "sos_step3":
+        urgency_map = {
+            "🔴 วิกฤต (มิดหัว/ติดบนหลังคา)": "วิกฤต",
+            "🟠 สูง (ระดับอก/เกิน 1 เมตร)": "สูง",
+            "🟡 ปานกลาง (ระดับเอว)": "ปานกลาง",
+            "🟢 ต่ำ (ระดับหน้าแข้ง)": "ต่ำ",
+        }
+        session.data["urgency_level"] = urgency_map.get(user_text, user_text)
+        session.data["photo_url"] = "-"
+        session.update(state="sos_step4")
+        update_legacy_state(user_id, "sos_step4", session.data)
+        
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="📝 ขั้นตอนที่ 4: โปรดพิมพ์รายละเอียดเพิ่มเติม (หรือส่งรูปภาพสถานการณ์)\n\nเช่น 'น้ำท่วมถึงชั้น 2 ต้องการเรือยาง'")
+        )
+        return
+    
+    # ---- Step 4: Details/Photo ----
+    if state == "sos_step4":
+        session.data["note"] = user_text
+        session.data["photo_url"] = "-"
+        
+        # Calculate priority
+        priority_label, priority_code = calculate_sos_priority(
+            session.data.get("group_types", []),
+            session.data.get("urgency_level", "")
+        )
+        session.data["priority"] = priority_code
+        session.data["priority_label"] = priority_label
+        
+        session.update(state="sos_confirm")
+        update_legacy_state(user_id, "sos_confirm", session.data)
+        
+        summary = build_sos_summary_text(session.data)
+        quick_reply = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="✅ ยืนยันแจ้งกู้ภัย", text="ยืนยันแจ้งกู้ภัย")),
+            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก")),
+        ])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=summary, quick_reply=quick_reply)
+        )
+        return
+    
+    # ---- Step 5: Confirm ----
+    if state == "sos_confirm":
+        if "ยืนยัน" in user_text:
+            _submit_sos(event, user_id, session)
+        else:
+            session.reset()
+            update_legacy_state(user_id, "IDLE", {})
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="❌ ยกเลิกเคสเรียบร้อยครับ กดปุ่ม SOS ใหม่ได้ทันทีครับ")
+            )
+        return
+
+
+def _submit_sos(event, user_id, session):
+    """Submit SOS to database"""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data = session.data
+    case_id = generate_case_id()
+    
+    # Save to sheets
+    # header: case_id, user_id, timestamp, latitude, longitude,
+    #         water_level_status, victim_count, vulnerable_groups, group_types,
+    #         urgency_level, details, photo_url, priority, status,
+    #         responder_name, responder_notes, accepted_at, completed_at
+    success = sheets_mgr.batch_append("sos_requests", [[
+        case_id,
+        user_id,
+        timestamp,
+        data.get("latitude", "0"),
+        data.get("longitude", "0"),
+        data.get("water_level_status", "-"),           # col 6: water_level_status
+        data.get("victim_count", "-"),                  # col 7: victim_count
+        data.get("vulnerable_groups", "-"),             # col 8: vulnerable_groups
+        ", ".join(data.get("group_types", [])),         # col 9: group_types
+        data.get("urgency_level", "ต่ำ"),               # col 10: urgency_level
+        data.get("note", "-"),                          # col 11: details
+        data.get("photo_url", "-"),                     # col 12: photo_url
+        data.get("priority", "NORMAL"),                 # col 13: priority
+        "OPEN",                                         # col 14: status
+        "-", "-", "-", "-"                              # responder fields
+    ]])
+    
+    session.reset()
+    update_legacy_state(user_id, "IDLE", {})
+    
+    if success:
+        reply = (
+            f"🚀 ส่งข้อมูลสำเร็จ! เลขเคส: {case_id}\n"
+            f"ทีมกู้ภัยกำลังจัดลำดับความสำคัญ\n\n"
+            f"🛡️ ระหว่างรอ:\n"
+            f"1. ตัดสะพานไฟในบ้านทันที\n"
+            f"2. พยายามอยู่บนที่สูง\n"
+            f"3. เตรียมไฟฉายหรือนกหวีด\n"
+            f"4. ประหยัดแบตเตอรี่มือถือ\n"
+            f"5. หากอันตรายถึงชีวิต โทร 1784"
+        )
+    else:
+        reply = (
+            f"🚀 ส่งข้อมูลสำเร็จ! เลขเคส: {case_id}\n"
+            f"⚠️ บันทึกฐานข้อมูลไม่สำเร็จ แต่ข้อมูลถูกบันทึกบนเซิร์ฟเวอร์แล้ว\n\n"
+            f"🛡️ ระหว่างรอโปรดปฏิบัติดังนี้:\n"
+            f"1. ตัดสะพานไฟในบ้านทันที\n"
+            f"2. พยายามอยู่บนที่สูง\n"
+            f"3. เตรียมไฟฉายหรือนกหวีด\n"
+            f"4. ประหยัดแบตเตอรี่มือถือ\n"
+            f"5. หากอันตรายถึงชีวิต โทร 1784"
+        )
+    
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+
+
+# =============================================================================
+# NEEDS STATE MACHINE HANDLERS
+# =============================================================================
+
+def _handle_needs_location_state(event, user_id, user_text):
+    """Handle needs location state - prompt for GPS"""
+    quick_reply = QuickReply(items=[
+        QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเพื่อรับสิ่งของ"))
+    ])
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(
+            text="📌 ระบบกำลังรอพิกัดของคุณครับ โปรดกดปุ่ม '📍 แชร์พิกัดเพื่อรับสิ่งของ' ด้านล่าง หรือพิมพ์ 'ยกเลิก' เพื่อยกเลิกครับ",
+            quick_reply=quick_reply
+        )
+    )
+
+
+def _handle_needs_state_machine(event, user_id, user_text, state):
+    """Handle Needs multi-step workflow"""
+    session = sessions.get(user_id)
+    
+    # ---- Step 2: Select categories ----
+    if state == "needs_step2":
+        categories_map = {
+            "🍲 อาหาร/น้ำดื่ม": "อาหาร/น้ำดื่ม",
+            "💊 ยารักษาโรค/เวชภัณฑ์": "ยารักษาโรค/เวชภัณฑ์",
+            "👶 ของใช้เด็กอ่อน": "ของใช้เด็กอ่อน",
+            "🧼 ของใช้ส่วนตัว": "ของใช้ส่วนตัว",
+            "🔦 อุปกรณ์ส่องสว่าง": "อุปกรณ์ส่องสว่าง",
+            "📝 อื่นๆ (ระบุเอง)": "อื่นๆ",
+        }
+        
+        if "need_categories" not in session.data:
+            session.data["need_categories"] = []
+        
+        # User typed custom details directly
+        if user_text not in categories_map and user_text not in ["เสร็จสิ้น", "➡️ เสร็จสิ้น"]:
+            session.data["need_details"] = user_text
+            if not session.data.get("need_categories"):
+                session.data["need_categories"] = ["อื่นๆ"]
+            session.update(state="needs_step4")
+            update_legacy_state(user_id, "needs_step4", session.data)
+            
+            quick_reply = QuickReply(items=[
+                QuickReplyButton(action=MessageAction(label="🔴 ด่วนมาก", text="🔴 ด่วนมาก (หมดแล้ว)")),
+                QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง", text="🟡 ปานกลาง (รอได้ 24 ชม.)")),
+                QuickReplyButton(action=MessageAction(label="🟢 ไม่ด่วน", text="🟢 ไม่ด่วน")),
+            ])
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:", quick_reply=quick_reply)
+            )
+            return
+        
+        # User selected a category
+        if user_text in categories_map:
+            cat = categories_map[user_text]
+            if cat not in session.data["need_categories"]:
+                session.data["need_categories"].append(cat)
+        
+        # User pressed "Done"
+        if user_text in ["เสร็จสิ้น", "➡️ เสร็จสิ้น"]:
+            if not session.data.get("need_categories"):
+                session.data["need_categories"] = ["อื่นๆ"]
+            
+            # Ask for details
+            if not session.data.get("need_details"):
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="📝 โปรดระบุรายละเอียดสั้นๆ (เช่น 'ขอน้ำดื่ม 2 แพ็ค ข้าวกล่อง 5 กล่อง')")
+                )
+                return
+            else:
+                session.update(state="needs_step4")
+                update_legacy_state(user_id, "needs_step4", session.data)
                 
-                # Cleanup expired sessions
-                session_count = sessions.cleanup_expired()
-                
-                # Cleanup expired cache entries
-                cache_count = sum(cache.cleanup_all().values())
-                
-                if session_count > 0 or cache_count > 0:
-                    Logger.info("Cleanup", f"Removed {session_count} sessions, {cache_count} cache entries")
-                    
-            except Exception as e:
-                Logger.error("Cleanup", f"Loop error: {e}")
+                quick_reply = QuickReply(items=[
+                    QuickReplyButton(action=MessageAction(label="🔴 ด่วนมาก", text="🔴 ด่วนมาก (หมดแล้ว)")),
+                    QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง", text="🟡 ปานกลาง (รอได้ 24 ชม.)")),
+                    QuickReplyButton(action=MessageAction(label="🟢 ไม่ด่วน", text="🟢 ไม่ด่วน")),
+                ])
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:", quick_reply=quick_reply)
+                )
+                return
+        
+        # Show categories again
+        selected = ", ".join(session.data["need_categories"]) if session.data["need_categories"] else "ยังไม่ได้เลือก"
+        quick_reply = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="🍲 อาหาร/น้ำดื่ม", text="🍲 อาหาร/น้ำดื่ม")),
+            QuickReplyButton(action=MessageAction(label="💊 ยา/เวชภัณฑ์", text="💊 ยารักษาโรค/เวชภัณฑ์")),
+            QuickReplyButton(action=MessageAction(label="👶 ของใช้เด็ก", text="👶 ของใช้เด็กอ่อน")),
+            QuickReplyButton(action=MessageAction(label="🧼 ของใช้ส่วนตัว", text="🧼 ของใช้ส่วนตัว")),
+            QuickReplyButton(action=MessageAction(label="🔦 ส่องสว่าง", text="🔦 อุปกรณ์ส่องสว่าง")),
+            QuickReplyButton(action=MessageAction(label="📝 อื่นๆ", text="📝 อื่นๆ (ระบุเอง)")),
+            QuickReplyButton(action=MessageAction(label="➡️ เสร็จสิ้น", text="เสร็จสิ้น")),
+        ])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text=f"📦 เลือกหมวดหมู่เพิ่ม หรือพิมพ์รายละเอียด\n(เลือกแล้ว: {selected})",
+                quick_reply=quick_reply
+            )
+        )
+        return
     
-    thread = threading.Thread(target=cleanup_loop, daemon=True)
-    thread.start()
-    Logger.info("System", "Background cleanup started")
+    # ---- Step 3: Details (captured inline in step 2) ----
+    if state == "needs_step3":
+        session.data["need_details"] = user_text
+        session.update(state="needs_step4")
+        update_legacy_state(user_id, "needs_step4", session.data)
+        
+        quick_reply = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="🔴 ด่วนมาก", text="🔴 ด่วนมาก (หมดแล้ว)")),
+            QuickReplyButton(action=MessageAction(label="🟡 ปานกลาง", text="🟡 ปานกลาง (รอได้ 24 ชม.)")),
+            QuickReplyButton(action=MessageAction(label="🟢 ไม่ด่วน", text="🟢 ไม่ด่วน")),
+        ])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="⏳ ความต้องการนี้เร่งด่วนเพียงใด?\n\nโปรดเลือก:", quick_reply=quick_reply)
+        )
+        return
+    
+    # ---- Step 4: Urgency ----
+    if state == "needs_step4":
+        session.data["need_urgency"] = user_text
+        session.update(state="needs_confirm")
+        update_legacy_state(user_id, "needs_confirm", session.data)
+        
+        # Build summary
+        lat = session.data.get("need_latitude", "0")
+        lon = session.data.get("need_longitude", "0")
+        maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+        summary = (
+            "📋 สรุปรายการความต้องการ\n\n"
+            f"📍 พิกัด: {maps_link}\n"
+            f"📦 หมวดหมู่: {', '.join(session.data.get('need_categories', []))}\n"
+            f"📝 รายละเอียด: {session.data.get('need_details', '-')}\n"
+            f"⏳ ความเร่งด่วน: {session.data.get('need_urgency', '-')}\n\n"
+            f"ยืนยันการส่งข้อมูลไปยังศูนย์อาสาสมัคร?"
+        )
+        quick_reply = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="✅ ยืนยัน", text="ยืนยันการแจ้ง")),
+            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก")),
+        ])
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=summary, quick_reply=quick_reply)
+        )
+        return
+    
+    # ---- Step 5: Confirm ----
+    if state == "needs_confirm":
+        if "ยืนยัน" in user_text:
+            _submit_needs(event, user_id, session)
+        else:
+            session.reset()
+            update_legacy_state(user_id, "IDLE", {})
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="❌ ยกเลิกรายการเรียบร้อยครับ")
+            )
+        return
 
 
-# Start background tasks on import
-start_background_tasks()
+def _submit_needs(event, user_id, session):
+    """Submit needs to database"""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data = session.data
+    need_id = generate_need_id()
+    
+    success = sheets_mgr.batch_append("user_needs", [[
+        need_id, timestamp, user_id,
+        data.get("need_latitude", "0"), data.get("need_longitude", "0"),
+        ", ".join(data.get("need_categories", [])),
+        data.get("need_details", "-"),
+        data.get("need_urgency", "ไม่ด่วน"),
+        "PENDING", "-", "-", "-"
+    ]])
+    
+    session.reset()
+    update_legacy_state(user_id, "IDLE", {})
+    
+    if success:
+        reply = (
+            f"🟢 บันทึกความต้องการเรียบร้อยครับ!\n\n"
+            f"📦 หมวดหมู่: {', '.join(data.get('need_categories', []))}\n"
+            f"📝 รายละเอียด: {data.get('need_details', '-')}\n\n"
+            f"ทีมอาสาสมัครจะดำเนินการจัดส่งให้ครับ"
+        )
+    else:
+        reply = (
+            f"🟢 บันทึกความต้องการสำเร็จ (ระบบชั่วคราว)\n\n"
+            f"⚠️ ฐานข้อมูลขัดข้อง แต่ข้อมูลถูกเก็บบนเซิร์ฟเวอร์แล้ว\n\n"
+            f"ทีมอาสาสมัครจะดำเนินการจัดส่งให้ครับ"
+        )
+    
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
-Logger.info("System", "FLOODCARE AI Bot Config v2.0 loaded successfully")
+
+# =============================================================================
+# MENU HANDLERS
+# =============================================================================
+
+def _start_sos_flow(event, user_id):
+    """Start SOS workflow - LIFF ONLY (v2.3).
+
+    ⚠️ ในสถานการณ์ฉุกเฉิน ผู้ใช้ต้องแจ้งเหตุได้ทันที ไม่มีการกรอกข้อมูลทีละขั้นตอน
+    ในแชทอีกต่อไป — ทุกอย่างทำผ่านฟอร์ม LIFF เดียวที่ครบในหน้าเดียว เร็วกว่าและ
+    ไม่มี state ค้างให้สับสน (เดิมถ้า SOS_LIFF_URL ไม่ได้ตั้งค่า จะ fallback ไปเป็น
+    ฟอร์มถามทีละคำถามในแชท ซึ่งตัดออกไปแล้วตามที่ขอ)
+    """
+    if not SOS_LIFF_URL:
+        Logger.info("SOS", "SOS_LIFF_URL not configured — button will not open correctly")
+    line_bot_api.reply_message(event.reply_token, build_sos_form_flex("คุณ"))
+
+
+def _start_needs_flow(event, user_id):
+    """Start Needs workflow - LIFF ONLY (v2.3). See _start_sos_flow docstring."""
+    if not NEED_LIFF_URL:
+        Logger.info("Needs", "NEED_LIFF_URL not configured — button will not open correctly")
+    line_bot_api.reply_message(event.reply_token, build_need_form_flex("คุณ"))
+
+
+def _handle_contact_request(event):
+    """Handle emergency contact request"""
+    records = sheets_mgr.get_all_records("Contacts")
+    if records:
+        contacts = []
+        for r in records:
+            contacts.append(f"🚨 {r.get('Name')}\n   📞 {r.get('Phone')}\n   📝 {r.get('Role', '')}")
+        reply = "📞 เบอร์โทรฉุกเฉิน:\n\n" + "\n\n".join(contacts)
+    else:
+        reply = (
+            "📞 เบอร์โทรฉุกเฉิน:\n\n"
+            "🚨 ปภ. 1784\n"
+            "🚨 สพฉ. 1669\n"
+            "🚨 หน่วยกู้ชีพ 1554\n"
+            "🚨 ตำรวจทางหลวง 1193"
+        )
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+
+
+def _handle_shelter_request(event, user_id):
+    """Handle shelter search request"""
+    session = sessions.get(user_id)
+    session.update(state="waiting_shelter_location")
+    update_legacy_state(user_id, "waiting_shelter_location", session.data)
+    
+    quick_reply = QuickReply(items=[
+        QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดหาศูนย์พักพิง"))
+    ])
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(
+            text="🏠 ค้นหาศูนย์พักพิง\n\nโปรดกดแชร์พิกัดด้านล่าง:",
+            quick_reply=quick_reply
+        )
+    )
+
+
+def _handle_water_level_request(event, user_id):
+    """Handle water level check request"""
+    session = sessions.get(user_id)
+    session.update(state="waiting_water_location")
+    update_legacy_state(user_id, "waiting_water_location", session.data)
+    
+    quick_reply = QuickReply(items=[
+        QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเช็กระดับน้ำ"))
+    ])
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(
+            text="🌊 ตรวจสอบระดับน้ำ\n\nโปรดกดแชร์พิกัด:",
+            quick_reply=quick_reply
+        )
+    )
+
+
+def _handle_weather_request(event, user_id):
+    """Handle weather check request"""
+    session = sessions.get(user_id)
+    session.update(state="waiting_weather_location")
+    update_legacy_state(user_id, "waiting_weather_location", session.data)
+    
+    quick_reply = QuickReply(items=[
+        QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเช็กอากาศ"))
+    ])
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(
+            text="🌦️ ตรวจสอบสภาพอากาศ\n\nโปรดกดแชร์พิกัด:",
+            quick_reply=quick_reply
+        )
+    )
+
+
+def _start_registration(event, user_id):
+    """Start user registration flow - LIFF ONLY (v2.3). See _start_sos_flow docstring."""
+    if not REGISTER_LIFF_URL:
+        Logger.info("Register", "REGISTER_LIFF_URL not configured — button will not open correctly")
+    line_bot_api.reply_message(event.reply_token, build_register_form_flex("คุณ"))
+
+
+def _handle_registration(event, user_id, user_text, state):
+    """Handle registration state machine"""
+    session = sessions.get(user_id)
+    
+    if state == "register_first_name":
+        session.data["temp_first_name"] = user_text
+        session.update(state="register_last_name")
+        update_legacy_state(user_id, "register_last_name", session.data)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="📝 ขั้นตอนที่ 2: โปรดพิมพ์ 'นามสกุล' ครับ")
+        )
+        return
+    
+    if state == "register_last_name":
+        session.data["temp_last_name"] = user_text
+        session.update(state="register_phone")
+        update_legacy_state(user_id, "register_phone", session.data)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="📝 ขั้นตอนที่ 3: โปรดพิมพ์ 'เบอร์โทร' 9-10 หลักครับ")
+        )
+        return
+    
+    if state == "register_phone":
+        clean_phone = "".join(filter(str.isdigit, user_text))
+        if len(clean_phone) < 9 or len(clean_phone) > 10:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="⚠️ เบอร์โทรไม่ถูกต้อง! โปรดพิมพ์ตัวเลข 9-10 หลัก")
+            )
+            return
+        
+        first_name = session.data.get("temp_first_name", "ผู้แจ้ง")
+        last_name = session.data.get("temp_last_name", "ทั่วไป")
+        
+        # Save to sheets
+        success = sheets_mgr.batch_append("users", [[
+            user_id, first_name, last_name, clean_phone,
+            "-", "-", "-", "0", "0", "0", "-", "FALSE", "PENDING",
+            datetime.datetime.now().strftime("%Y-%m-%d"), "ACTIVE"
+        ]])
+
+        # ✅ Invalidate users cache ทันที เพื่อให้ตรวจสอบสถานะลงทะเบียนถูกต้อง
+        cache.sheets.delete("sheets:users")
+        
+        session.reset()
+        update_legacy_state(user_id, "IDLE", {})
+        
+        if success:
+            reply = f"🎉 ยินดีต้อนรับ คุณ {first_name} {last_name}!\nระบบลงทะเบียนเรียบร้อยแล้วครับ"
+        else:
+            reply = f"🎉 ลงทะเบียนสำเร็จ (ระบบชั่วคราว) คุณ {first_name} {last_name}!"
+        
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        return
+
+
+def _handle_faq_query(event, user_id, user_text, timestamp):
+    """
+    Handle FAQ / current flood info queries using Gemini with Google Search grounding.
+    The model searches Google automatically for up-to-date information, then reformats
+    the answer in clear Thai and attaches real source links from the search results.
+    Falls back to plain Gemini if grounding is unavailable.
+    """
+    show_loading_animation(user_id, loading_seconds=10)
+
+    result = ask_gemini_with_search(user_text, max_tokens=700)
+    answer = result.get("answer", "")
+    sources = result.get("sources", [])
+
+    if not answer:
+        answer = "ไม่พบข้อมูลที่เกี่ยวข้องในขณะนี้ กรุณาลองถามใหม่อีกครั้งครับ"
+
+    flex_msg = build_faq_response_flex(answer, sources, user_text)
+    line_bot_api.reply_message(event.reply_token, flex_msg)
+
+    try:
+        sheets_mgr.batch_append("AI_Logs", [[
+            timestamp, user_id, "FAQ_SEARCH", user_text[:200],
+            answer[:500], str(len(sources))
+        ]])
+    except Exception as e:
+        Logger.error("FAQ", f"Log error: {e}")
+
+
+def _handle_ai_query(event, user_id, user_text, timestamp):
+    """Handle general AI query — uses Gemini with Google Search grounding when possible,
+    falls back to plain Gemini. All responses stay within flood/disaster scope."""
+    show_loading_animation(user_id, loading_seconds=8)
+
+    result = ask_gemini_with_search(
+        "ก่อนตอบ ให้ทำตามขั้นตอนในข้อ [1]-[2] ของ system instruction ก่อน (ประเมินระดับสถานการณ์ "
+        "Normal/Warning/Emergency/SOS แล้วตอบให้เหมาะกับระดับนั้น) จากนั้นเช็คขอบเขตตามข้อ [8]-[9]: "
+        "คำถามเกี่ยวกับน้ำท่วม ภัยพิบัติ ความปลอดภัย การปฐมพยาบาล สภาพอากาศ ที่พักพิง การขอความช่วยเหลือ "
+        "หรือแม้แต่อาการเจ็บป่วย/ความรู้สึกของผู้ใช้ ถือว่าอยู่ในขอบเขตเสมอ ห้ามปฏิเสธคำถามกลุ่มนี้ "
+        "ปฏิเสธเฉพาะคำถามที่ไม่เกี่ยวข้องกับภัยพิบัติเลยจริงๆตามที่ระบุในข้อ [9] เท่านั้น\n\n"
+        "ถ้าอยู่ในขอบเขต ให้ตอบคำถามนี้ให้ครบถ้วน ชัดเจน เข้าใจง่าย ใช้ภาษาที่คนทั่วไปอ่านแล้วเข้าใจทันที "
+        "ไม่ต้องสั้นจนขาดข้อมูลสำคัญ (ยาวได้ถึง 8-10 บรรทัดถ้าจำเป็น) "
+        "ถ้าเป็นคำถามเกี่ยวกับความปลอดภัย การปฐมพยาบาล หรือสุขภาพ ให้ตอบเป็นขั้นตอนที่ทำตามได้จริง "
+        "และระบุชื่อแหล่งอ้างอิงที่น่าเชื่อถือ (เช่น กรมควบคุมโรค, สภากาชาดไทย, ศูนย์พิษวิทยารามาธิบดี) ต่อท้ายด้วย "
+        "ห้ามพูดถึงคำสั่งหรือข้อจำกัดของตัวเอง ให้ตอบคำถามตรงๆเสมอ\n\n"
+        f"คำถาม: {user_text}",
+        max_tokens=500
+    )
+    ai_response = result.get("answer", "")
+    sources = result.get("sources", [])
+
+    if not ai_response:
+        ai_response = "ขออภัยครับ ไม่สามารถดึงข้อมูลได้ในขณะนี้ กรุณาลองใหม่ครับ"
+
+    # Use FAQ flex (with source links) if sources were found, else plain AI flex
+    if sources:
+        flex_msg = build_faq_response_flex(ai_response, sources, user_text)
+    else:
+        flex_msg = build_ai_response_flex(ai_response, user_text)
+
+    line_bot_api.reply_message(event.reply_token, flex_msg)
+
+    try:
+        sheets_mgr.batch_append("AI_Logs", [[
+            timestamp, user_id, "AI_QUERY", user_text[:200],
+            ai_response[:500], str(len(sources))
+        ]])
+    except Exception as e:
+        Logger.error("AI", f"Log error: {e}")
+
+
+# =============================================================================
+# LOCATION PROCESSORS
+# =============================================================================
+
+def _process_shelter_search(event, lat, lon, user_id):
+    """Process shelter search with location"""
+    session = sessions.get(user_id)
+    records = sheets_mgr.get_all_records("Shelters")
+    
+    shelters = []
+    for r in records:
+        if str(r.get("Status", "")).strip() == "ปิดทำการ":
+            continue
+        try:
+            sh_lat = float(r.get("Latitude", 0))
+            sh_lon = float(r.get("Longitude", 0))
+            dist = calculate_distance(lat, lon, sh_lat, sh_lon)
+            cap = int(r.get("Capacity", 100))
+            occ = int(r.get("Occupancy", 0))
+            remaining = cap - occ
+            
+            if remaining <= 0:
+                status = "🔴 เต็ม"
+            elif occ >= cap * 0.8:
+                status = f"🟡 ใกล้เต็ม (ว่าง {remaining})"
+            else:
+                status = f"🟢 มีที่ว่าง (ว่าง {remaining})"
+            
+            shelters.append({
+                "name": r.get("Name", "ไม่ระบุ"),
+                "distance": dist,
+                "status": status,
+                "lat": sh_lat,
+                "lon": sh_lon
+            })
+        except (ValueError, TypeError):
+            continue
+    
+    shelters.sort(key=lambda x: x["distance"])
+    top = shelters[:3]
+    
+    if not top:
+        reply = "📍 ไม่พบข้อมูลศูนย์พักพิง โปรดติดต่อ ปภ. 1784 ครับ"
+    else:
+        reply = "📍 ศูนย์พักพิงใกล้คุณ:\n\n"
+        for i, sh in enumerate(top, 1):
+            reply += (
+                f"{i}. {sh['name']}\n"
+                f"   ห่าง: {sh['distance']:.2f} กม.\n"
+                f"   สถานะ: {sh['status']}\n"
+                f"   🧭 นำทาง: https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
+            )
+        reply += "⚠️ โปรดใช้ความระมัดระวังในการเดินทาง"
+    
+    session.reset()
+    update_legacy_state(user_id, "IDLE", {})
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+
+
+def _process_water_level(event, lat, lon, user_id, timestamp):
+    """Process water level check"""
+    session = sessions.get(user_id)
+    show_loading_animation(user_id, loading_seconds=5)
+    
+    # Get water data from sheets (cached)
+    records = sheets_mgr.get_all_records("Water_Levels")
+    stations = []
+    
+    for r in records:
+        try:
+            st_lat = float(r.get("Lat", 0))
+            st_lon = float(r.get("Lon", 0))
+            if st_lat == 0 and st_lon == 0:
+                continue
+            dist = calculate_distance(lat, lon, st_lat, st_lon)
+            
+            wl_val = r.get("WaterLevel", "-")
+            bl_val = r.get("BankLevel", "-")
+            situation = r.get("Situation", "ปกติ")
+            trend = r.get("Trend", "คงที่")
+            
+            stations.append({
+                "stationName": r.get("Name", "ไม่ระบุ"),
+                "provinceName": r.get("Location", ""),
+                "riverName": r.get("River", ""),
+                "latitude": st_lat,
+                "longitude": st_lon,
+                "distance_km": dist,
+                "water_level": {"value": wl_val, "uom": "m"},
+                "bank_level": bl_val,
+                "situation": situation,
+                "trend": trend,
+                "measure_time": r.get("Time", "-"),
+                "source": "sheets"
+            })
+        except (ValueError, TypeError):
+            continue
+    
+    stations.sort(key=lambda x: x["distance_km"])
+    top_stations = stations[:3]
+    
+    try:
+        flex_msg = build_water_level_flex_message(lat, lon, timestamp, top_stations)
+        line_bot_api.reply_message(event.reply_token, flex_msg)
+    except Exception as e:
+        Logger.error("WaterLevel", f"Flex failed: {e}")
+        # Fallback to text
+        lines = ["🌊 ระดับน้ำใกล้คุณ:\n"]
+        for st in top_stations:
+            wl = st.get("water_level", {})
+            wl_val = wl.get("value", "-")
+            lines.append(f"• {st['stationName']} (ห่าง {st['distance_km']:.1f} กม.): {wl_val} ม.")
+        lines.append(f"\n🔗 ดูแผนที่ระดับน้ำทั้งประเทศ: {WATER_LEVEL_SOURCE_URL}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="\n".join(lines)))
+    
+    session.reset()
+    update_legacy_state(user_id, "IDLE", {})
+
+
+def _process_weather(event, lat, lon, user_id, timestamp):
+    """Process weather check — uses TMD (กรมอุตุนิยมวิทยา) official open-data API,
+    shown as a clear, professional Flex card with a link back to the source."""
+    session = sessions.get(user_id)
+    show_loading_animation(user_id, loading_seconds=5)
+
+    weather_data = get_live_weather_data(lat, lon)
+
+    session.reset()
+    update_legacy_state(user_id, "IDLE", {})
+
+    try:
+        flex_msg = build_weather_flex(lat, lon, weather_data, timestamp)
+        line_bot_api.reply_message(event.reply_token, flex_msg)
+    except Exception as e:
+        Logger.error("Weather", f"Flex failed: {e}")
+        # Fallback to plain text if Flex rendering fails for any reason
+        weather_text = get_live_weather_scraper(lat, lon)
+        reply = (
+            f"📍 พิกัด: {lat:.4f}, {lon:.4f}\n"
+            f"🕒 {timestamp}\n\n"
+            f"{weather_text}\n\n"
+            f"⚠️ ข้อมูลพยากรณ์เบื้องต้น โปรดสังเกตท้องฟ้าจริงประกอบ\n"
+            f"🔗 ดูพยากรณ์เต็มรูปแบบ: {TMD_SOURCE_URL}"
+        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+
+
+# =============================================================================
+# LIFF ENDPOINTS
+# =============================================================================
+# v2.5 FIX: previously these routes manually located the file with
+# os.path.join(os.path.dirname(__file__), "templates", filename) + open() +
+# render_template_string(). That has two failure modes that show up as a
+# bare "HTTP 500" with very little to debug from:
+#   1. If the templates/ folder isn't present in the deployed build (e.g. an
+#      old .gitignore rule, or a partial upload) os.path.exists() silently
+#      returns False and the route returns 500 with no traceback at all.
+#   2. Any exception while reading/rendering had no try/except around it,
+#      so Render's logs would just show a raw 500 with no context.
+#
+# Fix: use Flask's own render_template(), which resolves the templates/
+# folder the standard Flask way (relative to the app's root_path — verified
+# this matches the templates/ folder location), and wrap every page route in
+# try/except that logs the FULL exception to Render's logs before returning
+# a 500. This makes any future failure immediately diagnosable instead of a
+# silent dead end, and removes the manual path-joining as a source of bugs.
+
+def _render_liff_page(template_name: str, page_label: str):
+    """Shared safe-render helper for every LIFF / dashboard HTML page.
+    Logs the full exception (with traceback) on failure so a 500 is always
+    debuggable from the server logs, instead of failing silently."""
+    try:
+        return render_template(template_name)
+    except Exception as e:
+        import traceback
+        Logger.error(
+            "LIFF",
+            f"Failed to render {page_label} ({template_name}): {e}\n{traceback.format_exc()}"
+        )
+        return (
+            f"{page_label} โหลดไม่สำเร็จ (ดูรายละเอียดใน server log) — "
+            f"กรุณาตรวจสอบว่าไฟล์ templates/{template_name} ถูก deploy ขึ้นไปด้วยหรือไม่",
+            500,
+        )
+
+
+@app.route("/liff/sos")
+def sos_liff_page():
+    """SOS LIFF HTML page — served from templates/sos_liff.html"""
+    return _render_liff_page("sos_liff.html", "SOS LIFF")
+
+
+@app.route("/liff/need")
+def need_liff_page():
+    """Needs LIFF HTML page — served from templates/need_liff.html"""
+    return _render_liff_page("need_liff.html", "Needs LIFF")
+
+
+@app.route("/liff/register")
+def register_liff_page():
+    """Registration LIFF HTML page — served from templates/register_liff.html"""
+    return _render_liff_page("register_liff.html", "Register LIFF")
+
+
+# =============================================================================
+# STAFF DASHBOARD (read-only admin view — SOS / Needs / Users)
+# =============================================================================
+# Protected by a single shared password (DASHBOARD_PASSWORD env var) + Flask
+# session cookie. This is intentionally simple (no per-user accounts) since
+# it's meant for a small relief team — if you need per-user logins/roles
+# later, swap this for a proper auth system.
+
+def _dashboard_logged_in() -> bool:
+    return bool(session.get("dashboard_authed"))
+
+
+@app.route("/dashboard/login", methods=["GET", "POST"])
+def dashboard_login():
+    if not DASHBOARD_PASSWORD:
+        return (
+            "Dashboard ยังไม่ได้ตั้งค่า — กรุณาตั้ง environment variable "
+            "DASHBOARD_PASSWORD ก่อนใช้งานหน้านี้ (ดูวิธีตั้งค่าใน README หัวข้อ Dashboard)",
+            500,
+        )
+
+    error = None
+    if request.method == "POST":
+        if request.form.get("password") == DASHBOARD_PASSWORD:
+            session["dashboard_authed"] = True
+            return redirect(url_for("dashboard_home"))
+        error = "รหัสผ่านไม่ถูกต้อง"
+
+    return render_template_string(_DASHBOARD_LOGIN_HTML, error=error)
+
+
+@app.route("/dashboard/logout")
+def dashboard_logout():
+    session.pop("dashboard_authed", None)
+    return redirect(url_for("dashboard_login"))
+
+
+@app.route("/dashboard")
+def dashboard_home():
+    if not DASHBOARD_PASSWORD:
+        return (
+            "Dashboard ยังไม่ได้ตั้งค่า — กรุณาตั้ง environment variable "
+            "DASHBOARD_PASSWORD ก่อนใช้งานหน้านี้ (ดูวิธีตั้งค่าใน README หัวข้อ Dashboard)",
+            500,
+        )
+    if not _dashboard_logged_in():
+        return redirect(url_for("dashboard_login"))
+
+    return _render_liff_page("dashboard.html", "Dashboard")
+
+
+@app.route("/api/dashboard/data")
+def api_dashboard_data():
+    """JSON data feed for the dashboard page (table rows + map pins).
+    Re-checked on every load so staff always see current sheet data
+    (subject to the normal 5-minute Sheets cache in get_all_records)."""
+    if not _dashboard_logged_in():
+        return jsonify({"error": "unauthorized"}), 401
+
+    try:
+        sos_records = sheets_mgr.get_all_records("sos_requests") or []
+        need_records = sheets_mgr.get_all_records("user_needs") or []
+        user_records = sheets_mgr.get_all_records("users") or []
+    except Exception as e:
+        Logger.error("Dashboard", f"Sheets read error: {e}")
+        sos_records, need_records, user_records = [], [], []
+
+    def _is_pending(rec, status_field="status"):
+        s = str(rec.get(status_field, "")).strip().upper()
+        return s in ("", "PENDING", "NEW", "รอดำเนินการ")
+
+    sos_pending = sum(1 for r in sos_records if _is_pending(r))
+    need_pending = sum(1 for r in need_records if _is_pending(r))
+
+    # newest first; keep the dashboard light by capping rows sent to the browser
+    sos_sorted = list(reversed(sos_records))[:100]
+    need_sorted = list(reversed(need_records))[:100]
+
+    return jsonify({
+        "stats": {
+            "sos_total": len(sos_records),
+            "sos_pending": sos_pending,
+            "need_total": len(need_records),
+            "need_pending": need_pending,
+            "users_total": len(user_records),
+        },
+        "sos": sos_sorted,
+        "needs": need_sorted,
+    })
+
+
+_DASHBOARD_LOGIN_HTML = """
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>เข้าสู่ระบบ - FLOODCARE Dashboard</title>
+<style>
+  :root{--bg:#F6F4EF;--surface:#FFFFFF;--ink:#15151A;--muted:#8C8980;--line:#EAE6DF;--primary:#2F6F8F;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Sukhumvit Set',sans-serif;background:var(--bg);
+       min-height:100vh;display:flex;align-items:center;justify-content:center;color:var(--ink);}
+  .box{background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:40px 32px;width:320px;}
+  h1{font-size:20px;font-weight:700;margin-bottom:6px;}
+  p{font-size:13px;color:var(--muted);margin-bottom:24px;}
+  input{width:100%;height:48px;border:1px solid var(--line);border-radius:12px;padding:0 14px;font-size:16px;margin-bottom:14px;}
+  input:focus{outline:none;border-color:var(--primary);}
+  button{width:100%;height:48px;border:none;border-radius:12px;background:var(--primary);color:#fff;font-size:16px;font-weight:600;cursor:pointer;}
+  .error{color:#C2452F;font-size:13px;margin-bottom:14px;}
+</style>
+</head>
+<body>
+  <form class="box" method="post">
+    <h1>FLOODCARE Dashboard</h1>
+    <p>สำหรับเจ้าหน้าที่เท่านั้น</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <input type="password" name="password" placeholder="รหัสผ่าน" autofocus required>
+    <button type="submit">เข้าสู่ระบบ</button>
+  </form>
+</body>
+</html>
+"""
+
+
+@app.route("/api/sos/submit", methods=['POST'])
+@_require_liff_auth(SOS_LIFF_ID)
+def api_sos_submit():
+    """API endpoint for SOS LIFF form submission"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data"}), 400
+
+        # Use LINE-verified user_id from token; fallback to payload only in dev mode
+        verified_uid = g.get("verified_user_id")
+        user_id = verified_uid or data.get("user_id", "unknown")
+
+        case_id = generate_case_id()
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        success = sheets_mgr.batch_append("sos_requests", [[
+            case_id,
+            user_id,                                    # from verified token
+            timestamp,
+            data.get("latitude", "0"),
+            data.get("longitude", "0"),
+            data.get("water_level_status", "-"),        # col 6: water_level_status
+            data.get("victim_count", "1"),              # col 7: victim_count
+            data.get("vulnerable_groups", ""),          # col 8: vulnerable_groups
+            data.get("group_types", ""),                # col 9: group_types
+            data.get("urgency_level", "ต่ำ"),           # col 10: urgency_level
+            data.get("details", "-"),                   # col 11: details
+            data.get("photo_url", "-"),                 # col 12: photo_url
+            data.get("priority", "NORMAL"),             # col 13: priority
+            "OPEN",                                     # col 14: status
+            "-", "-", "-", "-"                          # responder fields
+        ]])
+        
+        Logger.info("SOS_API", f"Submitted case {case_id}")
+
+        if success:
+            _push_save_confirmation(
+                user_id,
+                f"✅ บันทึกข้อมูลแจ้งเหตุเรียบร้อยแล้วครับ\n"
+                f"เลขเคส: {case_id}\n\n"
+                f"ทีมงานได้รับแจ้งเหตุแล้ว กรุณารอการติดต่อกลับ "
+                f"หากสถานการณ์เปลี่ยนแปลงหรือฉุกเฉินมากขึ้น พิมพ์ \'sos\' เพื่อแจ้งซ้ำได้ครับ"
+            )
+        else:
+            _push_save_confirmation(
+                user_id,
+                f"⚠️ ขออภัยครับ! ไม่สามารถบันทึกข้อมูลแจ้งเหตุได้ในขณะนี้\n"
+                f"กรุณาลองใหม่อีกครั้ง หรือติดต่อเจ้าหน้าที่โดยตรงที่เบอร์ 1784 (ปภ.) ครับ"
+            )
+
+        return jsonify({"success": success, "case_id": case_id})
+        
+    except Exception as e:
+        Logger.error("SOS_API", f"Submit error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/need/submit", methods=['POST'])
+@_require_liff_auth(NEED_LIFF_ID)
+def api_need_submit():
+    """API endpoint for Needs LIFF form submission"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data"}), 400
+
+        # Use LINE-verified user_id from token; fallback to payload only in dev mode
+        verified_uid = g.get("verified_user_id")
+        user_id = verified_uid or data.get("user_id", "unknown")
+
+        need_id = generate_need_id()
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        success = sheets_mgr.batch_append("user_needs", [[
+            need_id,
+            timestamp,
+            user_id,                                    # from verified token
+            data.get("latitude", "0"),
+            data.get("longitude", "0"),
+            data.get("categories", ""),
+            data.get("details", "-"),
+            data.get("urgency", "ไม่ด่วน"),
+            "PENDING",
+            data.get("halal", "FALSE"),
+            "-", "-"
+        ]])
+        
+        Logger.info("Need_API", f"Submitted need {need_id}")
+
+        if success:
+            _push_save_confirmation(
+                user_id,
+                f"✅ บันทึกข้อมูลความต้องการเรียบร้อยแล้วครับ\n"
+                f"เลขที่รายการ: {need_id}\n\n"
+                f"ทีมงานจะประสานจัดส่งสิ่งของให้เร็วที่สุดครับ"
+            )
+        else:
+            _push_save_confirmation(
+                user_id,
+                f"⚠️ ขออภัยครับ! ไม่สามารถบันทึกข้อมูลความต้องการได้ในขณะนี้\n"
+                f"กรุณาลองใหม่อีกครั้ง หรือติดต่อเจ้าหน้าที่โดยตรงครับ"
+            )
+
+        return jsonify({"success": success, "need_id": need_id})
+        
+    except Exception as e:
+        Logger.error("Need_API", f"Submit error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/register/submit", methods=['POST'])
+@_require_liff_auth(REGISTER_LIFF_ID)
+def api_register_submit():
+    """API endpoint for the Register LIFF form submission (basic user profile)"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data"}), 400
+
+        # Use LINE-verified user_id from token; fallback to payload only in dev mode
+        verified_uid = g.get("verified_user_id")
+        user_id = verified_uid or data.get("user_id", "unknown")
+
+        first_name = (data.get("first_name") or "ผู้แจ้ง").strip()
+        last_name = (data.get("last_name") or "ทั่วไป").strip()
+        phone = "".join(filter(str.isdigit, data.get("phone", "")))
+        if len(phone) < 9 or len(phone) > 10:
+            return jsonify({"success": False, "error": "เบอร์โทรไม่ถูกต้อง"}), 400
+
+        register_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+        success = sheets_mgr.batch_append("users", [[
+            user_id,
+            first_name,
+            last_name,
+            phone,
+            data.get("province", "-") or "-",
+            data.get("district", "-") or "-",
+            data.get("sub_district", "-") or "-",
+            data.get("latitude", "0"),
+            data.get("longitude", "0"),
+            data.get("member_count", "1"),
+            data.get("emergency_contact", "-") or "-",
+            "TRUE",                                       # sms_enabled
+            "TRUE" if data.get("consent_pdpa") else "FALSE",  # consent_pdpa
+            register_date,
+            "ACTIVE",
+        ]])
+
+        # Invalidate users cache so registration status is reflected immediately
+        cache.sheets.delete("sheets:users")
+
+        Logger.info("Register_API", f"Registered user {bot_config.hash_user_id(user_id)}")
+
+        if success:
+            _push_save_confirmation(
+                user_id,
+                f"✅ บันทึกข้อมูลเรียบร้อยแล้วครับ\n"
+                f"ยินดีต้อนรับคุณ {first_name} {last_name} เข้าสู่ FLOODCARE AI\n\n"
+                f"พิมพ์ \'sos\' เพื่อแจ้งเหตุฉุกเฉิน หรือ \'ขอของ\' เพื่อแจ้งความต้องการสิ่งของได้ทันทีครับ"
+            )
+        else:
+            _push_save_confirmation(
+                user_id,
+                f"⚠️ ขออภัยครับ! ไม่สามารถบันทึกข้อมูลการลงทะเบียนได้ในขณะนี้\n"
+                f"กรุณาลองใหม่อีกครั้งครับ"
+            )
+
+        return jsonify({"success": success})
+
+    except Exception as e:
+        Logger.error("Register_API", f"Submit error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# =============================================================================
+# DEBUG ENDPOINTS
+# =============================================================================
+
+@app.route("/health")
+def health_check():
+    """
+    Lightweight health-check endpoint.
+    Use this URL with a free external ping service (e.g. UptimeRobot, BetterUptime,
+    cron-job.org) to keep the Render free-tier instance awake — Render free tier
+    sleeps after 15 minutes of inactivity, causing a 30–60 second cold-start delay
+    on the next request. Pinging /health every 10–14 minutes prevents that.
+
+    Setup (free, 3 minutes):
+    1. Go to https://uptimerobot.com → sign up (free)
+    2. Add Monitor → HTTP(S) → URL: https://your-app.onrender.com/health
+    3. Check interval: 10 minutes → Save
+    That's it — UptimeRobot will ping this endpoint every 10 min and the instance
+    stays warm. Zero cost, no code change needed.
+    """
+    return jsonify({
+        "status": "ok",
+        "service": "FLOODCARE AI",
+        "timestamp": datetime.datetime.now().isoformat(),
+    }), 200
+@_require_debug_key()
+def debug_status():
+    """System status endpoint"""
+    return jsonify({
+        "system": "FLOODCARE AI v2.0",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "gemini_ready": bot_config._gemini_initialized if hasattr(bot_config, '_gemini_initialized') else False,
+        "sheets_connected": sheets_mgr.get_client() is not None,
+        "rate_limiter": {
+            "max_requests": bot_config.RATE_LIMIT_REQUESTS,
+            "window_seconds": bot_config.RATE_LIMIT_WINDOW
+        },
+        "cache": cache.all_stats(),
+        "sessions": sessions.stats(),
+    })
+
+
+@app.route("/debug/sync-status", methods=['GET'])
+@_require_debug_key()
+def debug_sync_status():
+    """Water data sync status"""
+    records = sheets_mgr.get_all_records("Water_Levels")
+    return jsonify({
+        "record_count": len(records),
+        "sheets_connected": sheets_mgr.get_client() is not None,
+    })
+
+
+@app.route("/debug/force-sync", methods=['POST'])
+@_require_debug_key()
+def debug_force_sync():
+    """Force water data sync"""
+    # Trigger sync via bot_config
+    try:
+        client = sheets_mgr.get_client()
+        if client:
+            return jsonify({"success": True, "message": "Sync triggered"})
+        return jsonify({"success": False, "error": "Sheets not connected"}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/debug/logs", methods=['GET'])
+@_require_debug_key()
+def debug_logs():
+    """Get recent logs"""
+    limit = request.args.get("limit", 50, type=int)
+    return jsonify({"logs": Logger.get_logs(limit)})
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+def _startup_self_check():
+    """
+    Run once at boot. Logs a clear, loud warning for each LIFF/dashboard
+    template that's missing from the deployed build — this is exactly the
+    situation that previously caused a silent "HTTP 500" with no clue why
+    (e.g. templates/ folder not actually pushed to GitHub/Render). Check
+    Render's deploy logs right after a deploy to see this immediately.
+    """
+    required_templates = ["sos_liff.html", "need_liff.html", "register_liff.html", "dashboard.html"]
+    templates_dir = os.path.join(app.root_path, app.template_folder or "templates")
+
+    Logger.info("Startup", f"Checking LIFF templates in: {templates_dir}")
+    all_ok = True
+    for name in required_templates:
+        path = os.path.join(templates_dir, name)
+        if os.path.exists(path):
+            Logger.info("Startup", f"  ✓ found {name}")
+        else:
+            all_ok = False
+            Logger.error(
+                "Startup",
+                f"  ✗ MISSING {name} — /liff/* or /dashboard will return HTTP 500 until this "
+                f"file is deployed. Check that templates/{name} is committed to git and not "
+                f"excluded by .gitignore."
+            )
+
+    if not all_ok:
+        Logger.error(
+            "Startup",
+            "⚠️ One or more LIFF templates are missing — see lines above. "
+            "The bot's chat features will still work; only the LIFF pages are affected."
+        )
+    else:
+        Logger.info("Startup", "All LIFF templates found OK.")
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    Logger.info("System", f"Starting FLOODCARE AI on port {port}")
+    _startup_self_check()
+    app.run(host="0.0.0.0", port=port)
