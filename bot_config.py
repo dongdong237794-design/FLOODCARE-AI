@@ -728,7 +728,7 @@ def init_gemini():
         return False
     
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY
+        client = genai.Client(api_key=GEMINI_API_KEY)
         gemini_model = genai.GenerativeModel(
             model_name="gemini-2.5-flash",
             system_instruction=(
