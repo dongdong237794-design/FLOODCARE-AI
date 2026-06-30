@@ -1,1193 +1,1238 @@
-
 <!DOCTYPE html>
 <html lang="th">
 <head>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
- <title>แจ้งความต้องการ - FLOODCARE AI</title>
- <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
- <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
- <style>
- /* ============================================
- DESIGN SYSTEM - Elderly & Accessibility Optimized
- ============================================ */
- :root {
- --bg: #F6F4EF;
- --surface: #FFFFFF;
- --ink: #15151A;
- --muted: #8C8980;
- --line: #EAE6DF;
- --primary: #2F6F5C;
- --primary-dark: #245546;
- --primary-light: #DEEBE3;
- --secondary: #2F6F8F;
- --secondary-light: #DCE9EE;
- --warning: #C8923A;
- --warning-light: #F3E6CC;
- --danger: #C2452F;
- --danger-light: #F3DCD2;
- --food-halal: #2F6F5C;
- --food-halal-light: #DEEBE3;
- --gray-50: #F6F4EF;
- --gray-100: #F1EEE8;
- --gray-200: #E5E2DA;
- --gray-300: #D1CCC2;
- --gray-400: #A6A199;
- --gray-500: #8C8980;
- --gray-600: #5C594F;
- --gray-700: #3A382F;
- --gray-800: #15151A;
- --font-size-base: 20px;
- --font-size-lg: 24px;
- --font-size-xl: 28px;
- --btn-height: 64px;
- --btn-height-lg: 72px;
- --spacing-xs: 8px;
- --spacing-sm: 12px;
- --spacing-md: 16px;
- --spacing-lg: 24px;
- --spacing-xl: 32px;
- --radius: 18px;
- --radius-lg: 24px;
- }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>แจ้งความต้องการ - FLOODCARE AI</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #F8F9FA;
+            --surface-color: #FFFFFF;
+            --text-primary: #1F2226;
+            --text-secondary: #606870;
+            --border-soft: #EFEFF1;
+            --primary-accent: #2F6F5C;
+            --primary-accent-light: #DEEBE3;
+            --success-accent: #3CD070;
+            --success-accent-light: #E8F8EE;
+            --info-accent: #2F6F8F;
+            --info-accent-light: #EBF3FC;
+            --danger-accent: #E05353;
+            --danger-accent-light: #FCE8E8;
+            --shadow-subtle: 0 16px 36px rgba(0, 0, 0, 0.04);
+            --shadow-button: 0 8px 24px rgba(47, 111, 92, 0.15);
+            --radius-xl: 28px;
+            --radius-lg: 20px;
+        }
 
- * { 
- box-sizing: border-box; 
- margin: 0; 
- padding: 0; 
- -webkit-tap-highlight-color: transparent;
- }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
 
- body {
- font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Sukhumvit Set', 'Kanit', sans-serif;
- font-size: var(--font-size-base);
- line-height: 1.6;
- color: var(--gray-800);
- background: var(--gray-50);
- min-height: 100vh;
- padding-bottom: 40px;
- }
+        body {
+            font-family: 'Inter', 'Kanit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding-bottom: 48px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
 
- /* Header */
- .header {
- background: var(--surface);
- color: var(--ink);
- padding: var(--spacing-lg) var(--spacing-md);
- text-align: left;
- position: sticky;
- top: 0;
- z-index: 100;
- border-bottom: 1px solid var(--line);
- }
- .header h1 {
- font-size: var(--font-size-xl);
- font-weight: 700;
- margin-bottom: 4px;
- letter-spacing: -0.01em;
- }
- .header p {
- font-size: 14px;
- color: var(--muted);
- font-weight: 400;
- }
+        .app-container {
+            width: 100%;
+            max-width: 480px;
+            padding: 24px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
 
- /* Progress Steps */
- .progress-bar {
- display: flex;
- justify-content: center;
- align-items: center;
- padding: var(--spacing-md);
- background: white;
- border-bottom: 1px solid var(--gray-200);
- gap: 4px;
- }
- .step {
- display: flex;
- align-items: center;
- gap: 4px;
- }
- .step-dot {
- width: 36px;
- height: 36px;
- border-radius: 50%;
- background: var(--gray-300);
- color: white;
- display: flex;
- align-items: center;
- justify-content: center;
- font-size: 16px;
- font-weight: 700;
- transition: all 0.3s ease;
- }
- .step-dot.active {
- background: var(--primary);
- box-shadow: 0 0 0 4px var(--primary-light);
- }
- .step-dot.completed {
- background: var(--primary);
- }
- .step-line {
- width: 40px;
- height: 3px;
- background: var(--gray-300);
- border-radius: 2px;
- }
- .step-line.completed {
- background: var(--primary);
- }
- .step-label {
- font-size: 12px;
- color: var(--gray-500);
- text-align: center;
- margin-top: 4px;
- }
+        /* Profile Header */
+        .header-section {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface-color);
+            padding: 20px;
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-subtle);
+            border: 1px solid var(--border-soft);
+        }
 
- /* Container */
- .container {
- max-width: 480px;
- margin: 0 auto;
- padding: var(--spacing-lg) var(--spacing-md);
- }
+        .profile-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
 
- /* Cards */
- .card {
- background: white;
- border-radius: var(--radius-lg);
- padding: var(--spacing-lg);
- margin-bottom: var(--spacing-lg);
- box-shadow: 0 2px 12px rgba(0,0,0,0.08);
- border: 1px solid var(--gray-200);
- }
- .card-title {
- font-size: var(--font-size-lg);
- font-weight: 700;
- color: var(--gray-800);
- margin-bottom: var(--spacing-sm);
- display: flex;
- align-items: center;
- gap: 8px;
- }
- .card-subtitle {
- font-size: var(--font-size-base);
- color: var(--gray-500);
- margin-bottom: var(--spacing-md);
- }
+        .avatar-container {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: var(--primary-accent-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 2px solid var(--surface-color);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
 
- /* Category Grid */
- .category-grid {
- display: grid;
- grid-template-columns: 1fr 1fr;
- gap: var(--spacing-sm);
- }
- .category-btn {
- padding: var(--spacing-lg) var(--spacing-md);
- border: 2px solid var(--gray-300);
- border-radius: var(--radius);
- background: white;
- font-size: var(--font-size-base);
- font-weight: 600;
- cursor: pointer;
- transition: all 0.2s;
- text-align: center;
- min-height: 90px;
- display: flex;
- flex-direction: column;
- align-items: center;
- justify-content: center;
- gap: 4px;
- }
- .category-btn .icon {
- font-size: 32px;
- }
- .category-btn.selected {
- border-color: var(--primary);
- background: var(--primary-light);
- color: var(--primary-dark);
- box-shadow: 0 2px 8px rgba(5, 150, 105, 0.2);
- }
- .category-btn:active {
- transform: scale(0.97);
- }
+        .avatar-container svg {
+            width: 28px;
+            height: 28px;
+            fill: var(--primary-accent);
+        }
 
- /* Halal Options */
- .halal-options {
- margin-top: var(--spacing-md);
- padding: var(--spacing-md);
- background: var(--food-halal-light);
- border-radius: var(--radius);
- border: 2px solid var(--food-halal);
- }
- .halal-title {
- font-size: var(--font-size-lg);
- font-weight: 700;
- color: var(--food-halal);
- margin-bottom: var(--spacing-sm);
- text-align: center;
- }
- .halal-grid {
- display: grid;
- grid-template-columns: 1fr 1fr;
- gap: var(--spacing-sm);
- }
- .halal-btn {
- padding: var(--spacing-md);
- border: 2px solid var(--food-halal);
- border-radius: var(--radius);
- background: white;
- font-size: var(--font-size-lg);
- font-weight: 700;
- cursor: pointer;
- transition: all 0.2s;
- text-align: center;
- color: var(--food-halal);
- }
- .halal-btn.selected {
- background: var(--food-halal);
- color: white;
- }
+        .welcome-text h1 {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
+        }
 
- /* Buttons */
- .btn {
- width: 100%;
- height: var(--btn-height);
- font-size: var(--font-size-lg);
- font-weight: 600;
- border: none;
- border-radius: var(--radius);
- cursor: pointer;
- transition: all 0.2s ease;
- display: flex;
- align-items: center;
- justify-content: center;
- gap: 8px;
- margin-bottom: var(--spacing-sm);
- -webkit-appearance: none;
- }
- .btn:active { transform: scale(0.98); }
- .btn-primary {
- background: var(--primary);
- color: white;
- box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
- }
- .btn-primary:hover { background: var(--primary-dark); }
- .btn-lg {
- height: var(--btn-height-lg);
- font-size: var(--font-size-xl);
- }
- .btn-outline {
- background: white;
- color: var(--gray-700);
- border: 2px solid var(--gray-300);
- }
- .btn-outline:hover { border-color: var(--primary); }
- .btn-warning {
- background: var(--warning);
- color: white;
- box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
- }
+        .welcome-text p {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
 
- /* Form Elements */
- .form-group {
- margin-bottom: var(--spacing-lg);
- }
- .form-label {
- display: block;
- font-size: var(--font-size-lg);
- font-weight: 600;
- color: var(--gray-700);
- margin-bottom: var(--spacing-sm);
- }
- .form-input {
- width: 100%;
- min-height: var(--btn-height);
- padding: var(--spacing-md);
- font-size: var(--font-size-lg);
- border: 2px solid var(--gray-300);
- border-radius: var(--radius);
- background: var(--gray-50);
- transition: border-color 0.2s;
- -webkit-appearance: none;
- }
- .form-input:focus {
- outline: none;
- border-color: var(--primary);
- background: white;
- }
- textarea.form-input {
- min-height: 120px;
- resize: vertical;
- }
+        /* Stepper Navigation */
+        .stepper-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface-color);
+            padding: 16px 24px;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-subtle);
+            border: 1px solid var(--border-soft);
+        }
 
- /* Urgency Selection */
- .urgency-grid {
- display: grid;
- gap: var(--spacing-sm);
- }
- .urgency-btn {
- padding: var(--spacing-md) var(--spacing-lg);
- border: 3px solid;
- border-radius: var(--radius);
- background: white;
- font-size: var(--font-size-lg);
- font-weight: 700;
- cursor: pointer;
- transition: all 0.2s;
- text-align: left;
- display: flex;
- align-items: center;
- gap: var(--spacing-md);
- }
- .urgency-btn.critical {
- border-color: var(--danger);
- color: var(--danger);
- }
- .urgency-btn.critical.selected {
- background: var(--danger);
- color: white;
- }
- .urgency-btn.high {
- border-color: var(--warning);
- color: #92400E;
- }
- .urgency-btn.high.selected {
- background: var(--warning);
- color: white;
- }
- .urgency-btn.normal {
- border-color: var(--primary);
- color: var(--primary);
- }
- .urgency-btn.normal.selected {
- background: var(--primary);
- color: white;
- }
+        .step-node {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: var(--bg-color);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
 
- /* GPS Status */
- .gps-status {
- padding: var(--spacing-md);
- border-radius: var(--radius);
- text-align: center;
- font-size: var(--font-size-base);
- margin-bottom: var(--spacing-md);
- }
- .gps-status.loading {
- background: var(--secondary-light);
- color: var(--secondary);
- }
- .gps-status.success {
- background: var(--primary-light);
- color: var(--primary);
- }
- .gps-status.error {
- background: var(--danger-light);
- color: var(--danger);
- }
+        .step-node.active {
+            background: var(--primary-accent);
+            color: var(--surface-color);
+            box-shadow: 0 4px 14px rgba(47, 111, 92, 0.3);
+        }
 
- /* Map */
- .map-container {
- width: 100%;
- height: 220px;
- border-radius: var(--radius-lg);
- overflow: hidden;
- margin-bottom: var(--spacing-md);
- border: 1px solid var(--line);
- background: var(--gray-100);
- }
- .map-hint {
- font-size: 13px;
- color: var(--muted);
- text-align: center;
- margin-bottom: var(--spacing-md);
- }
- .leaflet-control-attribution { font-size: 9px; }
+        .step-node.completed {
+            background: var(--success-accent);
+            color: var(--surface-color);
+        }
 
- /* Summary */
- .summary-item {
- display: flex;
- justify-content: space-between;
- padding: var(--spacing-sm) 0;
- border-bottom: 1px solid var(--gray-200);
- font-size: var(--font-size-base);
- }
- .summary-label {
- font-weight: 600;
- color: var(--gray-600);
- }
- .summary-value {
- color: var(--gray-800);
- font-weight: 700;
- text-align: right;
- max-width: 60%;
- }
+        .step-divider {
+            flex-grow: 1;
+            height: 3px;
+            background: var(--border-soft);
+            margin: 0 8px;
+            border-radius: 2px;
+        }
 
- /* Photo Upload */
- .photo-upload {
- border: 3px dashed var(--gray-300);
- border-radius: var(--radius-lg);
- padding: var(--spacing-xl);
- text-align: center;
- cursor: pointer;
- transition: all 0.2s;
- }
- .photo-upload:hover {
- border-color: var(--primary);
- background: var(--primary-light);
- }
- .photo-preview {
- max-width: 100%;
- border-radius: var(--radius);
- margin-top: var(--spacing-sm);
- }
+        .step-divider.completed {
+            background: var(--success-accent);
+        }
 
- /* Selected Tags */
- .tags-container {
- display: flex;
- flex-wrap: wrap;
- gap: var(--spacing-xs);
- margin-top: var(--spacing-sm);
- }
- .tag {
- background: var(--primary-light);
- color: var(--primary-dark);
- padding: 4px 12px;
- border-radius: 20px;
- font-size: 16px;
- font-weight: 600;
- }
- .tag-warning {
- background: var(--warning-light);
- color: #92400E;
- }
+        /* Cards and Elements */
+        .card {
+            background: var(--surface-color);
+            border-radius: var(--radius-xl);
+            padding: 28px 24px;
+            box-shadow: var(--shadow-subtle);
+            border: 1px solid var(--border-soft);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
 
- /* Animations */
- @keyframes fadeIn {
- from { opacity: 0; transform: translateY(10px); }
- to { opacity: 1; transform: translateY(0); }
- }
- .fade-in {
- animation: fadeIn 0.3s ease;
- }
+        .card-title-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
 
- /* Hidden */
- .hidden { display: none !important; }
+        .card-title-group h2 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
+        }
 
- /* Loading */
- .spinner {
- width: 40px;
- height: 40px;
- border: 4px solid var(--gray-300);
- border-top-color: var(--primary);
- border-radius: 50%;
- animation: spin 1s linear infinite;
- margin: 0 auto;
- }
- @keyframes spin {
- to { transform: rotate(360deg); }
- }
+        .card-title-group p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
 
- /* Success Screen */
- .success-screen {
- text-align: center;
- padding: var(--spacing-xl) 0;
- }
- .success-icon {
- font-size: 80px;
- margin-bottom: var(--spacing-md);
- }
- .checkmark-wrap {
- width: 96px; height: 96px; margin: 0 auto var(--spacing-md);
- animation: checkmark-pop 0.4s ease-out;
- }
- .checkmark-circle {
- stroke: #10B981; stroke-width: 3; fill: none;
- stroke-dasharray: 151; stroke-dashoffset: 151;
- animation: checkmark-circle-draw 0.5s ease-out forwards;
- }
- .checkmark-check {
- stroke: #10B981; stroke-width: 4; fill: none;
- stroke-linecap: round; stroke-linejoin: round;
- stroke-dasharray: 36; stroke-dashoffset: 36;
- animation: checkmark-check-draw 0.35s ease-out 0.5s forwards;
- }
- @keyframes checkmark-pop {
- 0% { transform: scale(0.7); opacity: 0; }
- 100% { transform: scale(1); opacity: 1; }
- }
- @keyframes checkmark-circle-draw { to { stroke-dashoffset: 0; } }
- @keyframes checkmark-check-draw { to { stroke-dashoffset: 0; } }
- .need-number {
- font-size: 32px;
- font-weight: 700;
- color: var(--primary);
- background: var(--primary-light);
- padding: var(--spacing-sm) var(--spacing-lg);
- border-radius: var(--radius);
- display: inline-block;
- margin: var(--spacing-sm) 0;
- }
+        /* Category Selector Grid */
+        .category-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
 
- /* Detail helper text */
- .helper-text {
- font-size: 16px;
- color: var(--gray-400);
- margin-top: 4px;
- }
+        .category-btn {
+            background: var(--surface-color);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-lg);
+            padding: 22px 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            outline: none;
+        }
 
- /* Responsive */
- @media (max-width: 360px) {
- :root {
- --font-size-base: 18px;
- --font-size-lg: 20px;
- --font-size-xl: 24px;
- }
- .category-grid, .halal-grid {
- grid-template-columns: 1fr;
- }
- }
- </style>
+        .category-btn svg {
+            width: 28px;
+            height: 28px;
+            fill: var(--text-secondary);
+        }
+
+        .category-btn.selected {
+            background-color: var(--primary-accent-light);
+            border-color: var(--primary-accent);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(47, 111, 92, 0.08);
+        }
+
+        .category-btn.selected svg {
+            fill: var(--primary-accent);
+        }
+
+        .category-btn.selected span {
+            color: var(--primary-accent);
+            font-weight: 600;
+        }
+
+        .category-btn span {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        /* Food Halal Options Panel */
+        .halal-panel {
+            background-color: var(--bg-color);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            border: 1px solid var(--border-soft);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .halal-panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-align: center;
+        }
+
+        .halal-choice-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .halal-btn {
+            background: var(--surface-color);
+            border: 1px solid var(--border-soft);
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            outline: none;
+        }
+
+        .halal-btn.selected {
+            background-color: var(--primary-accent);
+            color: var(--surface-color);
+            border-color: var(--primary-accent);
+        }
+
+        /* Form elements */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .form-input {
+            width: 100%;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-soft);
+            background-color: var(--bg-color);
+            padding: 18px 20px;
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+            transition: all 0.25s ease;
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        .form-input:focus {
+            border-color: var(--primary-accent);
+            background-color: var(--surface-color);
+            box-shadow: 0 0 0 4px var(--primary-accent-light);
+        }
+
+        textarea.form-input {
+            height: 120px;
+            resize: none;
+        }
+
+        /* Tag system */
+        .tags-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .tag-pill {
+            font-size: 13px;
+            font-weight: 600;
+            background-color: var(--primary-accent-light);
+            color: var(--primary-accent);
+            padding: 6px 14px;
+            border-radius: 16px;
+        }
+
+        .tag-pill.tag-warn {
+            background-color: var(--warning-accent-light);
+            color: var(--warning-accent);
+        }
+
+        /* Urgency selector cards */
+        .urgency-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .urgency-card-btn {
+            background: var(--surface-color);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-lg);
+            padding: 18px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: left;
+            width: 100%;
+            outline: none;
+        }
+
+        .urgency-card-btn.selected {
+            background-color: var(--primary-accent-light);
+            border-color: var(--primary-accent);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(47, 111, 92, 0.08);
+        }
+
+        /* Urgency levels specific styles */
+        .urgency-card-btn.selected.critical {
+            background-color: var(--danger-accent-light);
+            border-color: var(--danger-accent);
+        }
+
+        .urgency-card-btn.selected.high {
+            background-color: var(--warning-accent-light);
+            border-color: var(--warning-accent);
+        }
+
+        .select-indicator-dot {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 2px solid var(--border-soft);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            background: var(--surface-color);
+        }
+
+        .urgency-card-btn.selected .select-indicator-dot {
+            border-color: var(--primary-accent);
+            background: var(--primary-accent);
+        }
+
+        .urgency-card-btn.selected.critical .select-indicator-dot {
+            border-color: var(--danger-accent);
+            background: var(--danger-accent);
+        }
+
+        .urgency-card-btn.selected.high .select-indicator-dot {
+            border-color: var(--warning-accent);
+            background: var(--warning-accent);
+        }
+
+        .urgency-card-btn.selected .select-indicator-dot::after {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--surface-color);
+        }
+
+        .btn-label-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .btn-label-sub {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 400;
+            margin-top: 2px;
+        }
+
+        /* GPS Actions & Maps */
+        .gps-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            border-radius: var(--radius-lg);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .gps-status.loading {
+            background-color: var(--info-accent-light);
+            color: var(--info-accent);
+        }
+
+        .gps-status.success {
+            background-color: var(--primary-accent-light);
+            color: var(--primary-accent);
+        }
+
+        .gps-status.error {
+            background-color: var(--danger-accent-light);
+            color: var(--danger-accent);
+        }
+
+        .map-container {
+            width: 100%;
+            height: 240px;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            border: 1px solid var(--border-soft);
+            position: relative;
+        }
+
+        .map-hint-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        /* Summary item row */
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 0;
+            border-bottom: 1px solid var(--border-soft);
+        }
+
+        .summary-row:last-child {
+            border-bottom: none;
+        }
+
+        .summary-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .summary-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-align: right;
+            max-width: 60%;
+        }
+
+        /* Buttons Styling */
+        .btn-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn-modern {
+            width: 100%;
+            height: 58px;
+            border-radius: var(--radius-lg);
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn-modern:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background-color: var(--primary-accent);
+            color: var(--surface-color);
+            box-shadow: var(--shadow-button);
+        }
+
+        .btn-primary:disabled {
+            background-color: #D1D5DB;
+            color: #9CA3AF;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background-color: var(--surface-color);
+            color: var(--text-primary);
+            border: 1px solid var(--border-soft);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--bg-color);
+        }
+
+        /* Custom Alert Overlay */
+        .custom-alert {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(31, 34, 38, 0.4);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            backdrop-filter: blur(8px);
+        }
+
+        .custom-alert-box {
+            background: var(--surface-color);
+            border-radius: var(--radius-xl);
+            padding: 32px 24px;
+            width: 100%;
+            max-width: 380px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .alert-icon-wrap {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .alert-message {
+            font-size: 16px;
+            color: var(--text-primary);
+            font-weight: 600;
+            line-height: 1.6;
+        }
+
+        /* Transitions */
+        .fade-in {
+            animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(0, 0, 0, 0.08);
+            border-top-color: var(--primary-accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Success elements */
+        .success-illustration {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto;
+            background: var(--success-accent-light);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .success-illustration svg {
+            width: 40px;
+            height: 40px;
+            fill: none;
+            stroke: var(--success-accent);
+            stroke-width: 4;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+    </style>
 </head>
 <body>
- <!-- Header -->
- <div class="header">
- <h1>แจ้งความต้องการ</h1>
- <p>FLOODCARE AI - ระบบขอความช่วยเหลือสิ่งของ</p>
- </div>
+    <div class="app-container">
 
- <!-- Progress Steps -->
- <div class="progress-bar">
- <div class="step">
- <div class="step-dot active" id="step1-dot">1</div>
- <div class="step-label">GPS</div>
- </div>
- <div class="step-line" id="line1"></div>
- <div class="step">
- <div class="step-dot" id="step2-dot">2</div>
- <div class="step-label">หมวดหมู่</div>
- </div>
- <div class="step-line" id="line2"></div>
- <div class="step">
- <div class="step-dot" id="step3-dot">3</div>
- <div class="step-label">รายละเอียด</div>
- </div>
- <div class="step-line" id="line3"></div>
- <div class="step">
- <div class="step-dot" id="step4-dot">4</div>
- <div class="step-label">เร่งด่วน</div>
- </div>
- <div class="step-line" id="line4"></div>
- <div class="step">
- <div class="step-dot" id="step5-dot">5</div>
- <div class="step-label">ยืนยัน</div>
- </div>
- </div>
+        <!-- Profile Header -->
+        <div class="header-section">
+            <div class="profile-info">
+                <div class="avatar-container">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/>
+                    </svg>
+                </div>
+                <div class="welcome-text">
+                    <p>FLOODCARE AI</p>
+                    <h1>แจ้งขอช่วยเหลือสิ่งของ</h1>
+                </div>
+            </div>
+        </div>
 
- <!-- Main Content -->
- <div class="container">
+        <!-- Stepper -->
+        <div class="stepper-container">
+            <div class="step-node active" id="step1-dot">1</div>
+            <div class="step-divider" id="line1"></div>
+            <div class="step-node" id="step2-dot">2</div>
+            <div class="step-divider" id="line2"></div>
+            <div class="step-node" id="step3-dot">3</div>
+            <div class="step-divider" id="line3"></div>
+            <div class="step-node" id="step4-dot">4</div>
+            <div class="step-divider" id="line4"></div>
+            <div class="step-node" id="step5-dot">5</div>
+        </div>
 
- <!-- ========== STEP 1: GPS Location ========== -->
- <div id="step1" class="fade-in">
- <div class="card">
- <div class="card-title">ขั้นตอนที่ 1: ตำแหน่งของคุณ</div>
- <div class="card-subtitle">ระบบจะดึงพิกัด GPS อัตโนมัติเพื่อส่งของให้ถูกต้อง</div>
- 
- <div class="gps-status loading" id="gpsStatus">
- <div class="spinner" style="display:inline-block; width:24px; height:24px; margin-right:8px;"></div>กำลังระบุตำแหน่ง...
- </div>
+        <!-- ========== STEP 1: Address & GPS ========== -->
+        <div id="step1" class="fade-in">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>พิกัดจุดส่งของ</h2>
+                    <p>ระบุสถานที่พิกัดที่ท่านต้องการให้ทีมอาสาสมัคร จัดส่งของบรรเทาทุกข์เข้าไปถึงมือ</p>
+                </div>
 
- <div class="map-container hidden" id="mapContainer">
- <div id="liffMap" style="width:100%; height:100%;"></div>
- </div>
- <div class="map-hint hidden" id="mapHint">ลากหมุดเพื่อปรับตำแหน่งให้ตรงจุด หรือแตะบนแผนที่เพื่อปักหมุดเอง</div>
+                <button class="btn-modern btn-primary" id="btnGetGPS" onclick="getGPS()">ยืนยันพิกัดปัจจุบันของฉัน</button>
+                <div class="gps-status loading hidden" id="gpsStatus"></div>
 
- <div id="gpsResult" class="hidden">
- <div class="summary-item">
- <span class="summary-label">ละติจูด</span>
- <span class="summary-value" id="latValue">-</span>
- </div>
- <div class="summary-item">
- <span class="summary-label">ลองจิจูด</span>
- <span class="summary-value" id="lonValue">-</span>
- </div>
- <div class="summary-item">
- <span class="summary-label">ที่อยู่โดยประมาณ</span>
- <span class="summary-value" id="addressValue">-</span>
- </div>
- </div>
+                <div class="map-container hidden" id="mapContainer">
+                    <div id="liffMap" style="width:100%; height:100%;"></div>
+                </div>
+                <div class="map-hint-text hidden" id="mapHint">ท่านสามารถลากหมุดขยับ เพื่อให้ตรงตำแหน่งบ้านจัดส่งของท่านอย่างละเอียด</div>
 
- <button class="btn btn-primary btn-lg" id="btnGetGPS" onclick="getGPS()">ดึงพิกัด GPS
- </button>
- <button class="btn btn-success hidden" id="btnNext1" onclick="goToStep(2)">ถัดไป 
- </button>
- </div>
- </div>
+                <div id="gpsResult" class="hidden">
+                    <div class="summary-row">
+                        <span class="summary-label">ละติจูด/ลองจิจูด</span>
+                        <span class="summary-value" id="coordsValue">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">ที่อยู่จัดส่งประมาณ</span>
+                        <span class="summary-value" id="addressValue">-</span>
+                    </div>
+                </div>
 
- <!-- ========== STEP 2: Category Selection ========== -->
- <div id="step2" class="hidden">
- <div class="card">
- <div class="card-title">ขั้นตอนที่ 2: เลือกหมวดหมู่</div>
- <div class="card-subtitle">เลือกสิ่งของที่ต้องการ (เลือกได้หลายหมวดหมู่)</div>
+                <button class="btn-modern btn-primary hidden" id="btnNext1" onclick="goToStep(2)">ดำเนินการต่อ</button>
+            </div>
+        </div>
 
- <div class="category-grid">
- <button class="category-btn" id="cat-food" onclick="toggleCategory('food', ' อาหาร')">
- <span class="icon"></span>
- <div>อาหาร</div>
- </button>
- <button class="category-btn" id="cat-water" onclick="toggleCategory('water', ' น้ำดื่ม')">
- <span class="icon"></span>
- <div>น้ำดื่ม</div>
- </button>
- <button class="category-btn" id="cat-medicine" onclick="toggleCategory('medicine', ' ยา/เวชภัณฑ์')">
- <span class="icon"></span>
- <div>ยา/เวชภัณฑ์</div>
- </button>
- <button class="category-btn" id="cat-personal" onclick="toggleCategory('personal', ' ของใช้ส่วนตัว')">
- <span class="icon"></span>
- <div>ของใช้ส่วนตัว</div>
- </button>
- <button class="category-btn" id="cat-bedding" onclick="toggleCategory('bedding', ' เครื่องนอน')">
- <span class="icon"></span>
- <div>เครื่องนอน</div>
- </button>
- <button class="category-btn" id="cat-clothes" onclick="toggleCategory('clothes', ' เสื้อผ้า')">
- <span class="icon"></span>
- <div>เสื้อผ้า</div>
- </button>
- <button class="category-btn" id="cat-flashlight" onclick="toggleCategory('flashlight', ' ไฟฉาย')">
- <span class="icon"></span>
- <div>ไฟฉาย</div>
- </button>
- <button class="category-btn" id="cat-powerbank" onclick="toggleCategory('powerbank', ' Power Bank')">
- <span class="icon"></span>
- <div>Power Bank</div>
- </button>
- <button class="category-btn" id="cat-baby" onclick="toggleCategory('baby', ' ของใช้เด็กอ่อน')">
- <span class="icon"></span>
- <div>ของใช้เด็กอ่อน</div>
- </button>
- <button class="category-btn" id="cat-pet" onclick="toggleCategory('pet', ' อาหารสัตว์เลี้ยง')">
- <span class="icon"></span>
- <div>อาหารสัตว์เลี้ยง</div>
- </button>
- <button class="category-btn" id="cat-other" onclick="toggleCategory('other', ' อื่น ๆ')" style="grid-column: span 2;">
- <span class="icon"></span>
- <div>อื่น ๆ (ระบุเอง)</div>
- </button>
- </div>
+        <!-- ========== STEP 2: Categories Selection ========== -->
+        <div id="step2" class="hidden">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>เลือกหมวดหมู่สิ่งของ</h2>
+                    <p>เลือกรายการสิ่งของจำเป็นที่กำลังขาดแคลนในขณะนี้ (เลือกได้หลายตัวเลือก)</p>
+                </div>
 
- <!-- Selected tags display -->
- <div class="tags-container" id="selectedTags"></div>
+                <div class="category-grid">
+                    <button class="category-btn" id="cat-food" onclick="toggleCategory('food', 'อาหาร')">
+                        <svg viewBox="0 0 24 24"><path d="M11 9H9V2H7v7H5V2H3v7c0 2.12 1.66 3.84 3.75 3.97V22h2.5v-10.03c2.09-.13 3.75-1.85 3.75-3.97V2h-2v7zm10-4c0-1.66-1.34-3-3-3s-3 1.34-3 3v8h4.5v10h2V5z"/></svg>
+                        <span>อาหาร</span>
+                    </button>
+                    <button class="category-btn" id="cat-water" onclick="toggleCategory('water', 'น้ำดื่ม')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                        <span>น้ำดื่ม</span>
+                    </button>
+                    <button class="category-btn" id="cat-medicine" onclick="toggleCategory('medicine', 'ยา/เวชภัณฑ์')">
+                        <svg viewBox="0 0 24 24"><path d="M4.5 10.5C3.67 10.5 3 11.17 3 12s.67 1.5 1.5 1.5h15c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5h-15z M10.5 4.5C10.5 3.67 11.17 3 12 3s1.5.67 1.5 1.5v15c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-15z"/></svg>
+                        <span>ยา/เวชภัณฑ์</span>
+                    </button>
+                    <button class="category-btn" id="cat-personal" onclick="toggleCategory('personal', 'ของใช้ส่วนตัว')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+                        <span>ของใช้ส่วนตัว</span>
+                    </button>
+                    <button class="category-btn" id="cat-bedding" onclick="toggleCategory('bedding', 'เครื่องนอน')">
+                        <svg viewBox="0 0 24 24"><path d="M20 10H4v2h16v-2zm-1-4H5c-1.1 0-2 .9-2 2v10h18V8c0-1.1-.9-2-2-2z"/></svg>
+                        <span>เครื่องนอน</span>
+                    </button>
+                    <button class="category-btn" id="cat-clothes" onclick="toggleCategory('clothes', 'เสื้อผ้า')">
+                        <svg viewBox="0 0 24 24"><path d="M2 10V5h3c1.1 0 2-.9 2-2s-.9-2-2-2H2C.9 1 0 1.9 0 3v15c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2h-3c-1.1 0-2 .9-2 2s.9 2 2 2h3v5H2z"/></svg>
+                        <span>เสื้อผ้า</span>
+                    </button>
+                    <button class="category-btn" id="cat-flashlight" onclick="toggleCategory('flashlight', 'ไฟฉาย')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                        <span>ไฟฉาย</span>
+                    </button>
+                    <button class="category-btn" id="cat-powerbank" onclick="toggleCategory('powerbank', 'Power Bank')">
+                        <svg viewBox="0 0 24 24"><path d="M15.5 2H14V1c0-.55-.45-1-1-1h-2c-.55 0-1 .45-1 1v1H8.5C7.12 2 6 3.12 6 4.5v15c0 1.38 1.12 2.5 2.5 2.5h7c1.38 0 2.5-1.12 2.5-2.5v-15c0-1.38-1.12-2.5-2.5-2.5z"/></svg>
+                        <span>Power Bank</span>
+                    </button>
+                    <button class="category-btn" id="cat-baby" onclick="toggleCategory('baby', 'ของใช้เด็กอ่อน')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 3c-1.1 0-2 .9-2 2v5h1.5v6h1v-6H14v-5c0-1.1-.9-2-2-2z"/></svg>
+                        <span>ของใช้เด็กอ่อน</span>
+                    </button>
+                    <button class="category-btn" id="cat-pet" onclick="toggleCategory('pet', 'อาหารสัตว์เลี้ยง')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2z"/></svg>
+                        <span>อาหารสัตว์เลี้ยง</span>
+                    </button>
+                    <button class="category-btn" id="cat-other" onclick="toggleCategory('other', 'อื่น ๆ')" style="grid-column: span 2;">
+                        <svg viewBox="0 0 24 24"><path d="M20 6h-8v2h8v12H4V8h8V6H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"/></svg>
+                        <span>อื่น ๆ (ระบุเองในการระบุรายละเอียด)</span>
+                    </button>
+                </div>
 
- <!-- Halal options (show when food selected) -->
- <div class="halal-options hidden" id="halalOptions">
- <div class="halal-title">อาหารประเภทใด?</div>
- <div class="halal-grid">
- <button class="halal-btn" id="halal-yes" onclick="selectHalal(true)">ฮาลาล
- </button>
- <button class="halal-btn" id="halal-no" onclick="selectHalal(false)">ทั่วไป
- </button>
- </div>
- </div>
+                <div class="tags-wrap" id="selectedTags"></div>
 
- <button class="btn btn-success btn-lg" style="margin-top:var(--spacing-lg);" id="btnNext2" onclick="goToStep(3)">ถัดไป 
- </button>
- <button class="btn btn-outline" onclick="goToStep(1)">กลับ
- </button>
- </div>
- </div>
+                <div class="halal-panel hidden" id="halalOptions">
+                    <div class="halal-panel-title">ข้อจำกัดทางศาสนาด้านอาหาร</div>
+                    <div class="halal-choice-grid">
+                        <button class="halal-btn" id="halal-yes" onclick="selectHalal(true)">ฮาลาล (มุสลิม)</button>
+                        <button class="halal-btn" id="halal-no" onclick="selectHalal(false)">อาหารทั่วไป</button>
+                    </div>
+                </div>
 
- <!-- ========== STEP 3: Details ========== -->
- <div id="step3" class="hidden">
- <div class="card">
- <div class="card-title">ขั้นตอนที่ 3: รายละเอียด</div>
- <div class="card-subtitle">ระบุรายละเอียดสิ่งของที่ต้องการ</div>
+                <div class="btn-stack" style="margin-top: 12px;">
+                    <button class="btn-modern btn-primary" id="btnNext2" onclick="goToStep(3)">ดำเนินการต่อ</button>
+                    <button class="btn-modern btn-secondary" onclick="goToStep(1)">ย้อนกลับ</button>
+                </div>
+            </div>
+        </div>
 
- <!-- Selected categories reminder -->
- <div style="background: var(--primary-light); padding: var(--spacing-md); border-radius: var(--radius); margin-bottom: var(--spacing-md);">
- <div style="font-size: 16px; color: var(--gray-600); margin-bottom: 4px;">หมวดหมู่ที่เลือก:</div>
- <div class="tags-container" id="detailTags"></div>
- </div>
+        <!-- ========== STEP 3: Details ========== -->
+        <div id="step3" class="hidden">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>รายละเอียดสิ่งของ</h2>
+                    <p>ระบุจำนวน หรือความต้องการเจาะจงที่ท่านต้องการให้ชัดเจน</p>
+                </div>
 
- <div class="form-group">
- <label class="form-label">รายละเอียดที่ต้องการ</label>
- <textarea 
- class="form-input" 
- id="detailsInput" 
- placeholder="เช่น&#10;- ข้าวกล่อง 5 กล่อง&#10;- น้ำดื่ม 2 แพ็ค&#10;- ยาพาราเซตามอล 1 กล่อง&#10;- ผ้าห่ม 3 ผืน"
- ></textarea>
- <div class="helper-text">พิมพ์รายการที่ต้องการ พร้อมจำนวน</div>
- </div>
+                <div style="background: var(--primary-accent-light); padding: 16px; border-radius: var(--radius-lg);">
+                    <div style="font-size: 13px; font-weight:600; color: var(--primary-accent); margin-bottom: 8px;">หมวดหมู่ที่เลือกไว้:</div>
+                    <div class="tags-wrap" id="detailTags"></div>
+                </div>
 
- <div class="form-group">
- <label class="form-label">รูปภาพ (ถ้ามี)</label>
- <div class="photo-upload" onclick="document.getElementById('photoInput').click()">
- <div style="font-size: 40px;"></div>
- <div>แตะเพื่อเลือกรูปภาพ</div>
- </div>
- <input type="file" id="photoInput" accept="image/*" style="display:none" onchange="handlePhoto(this)">
- <img id="photoPreview" class="photo-preview hidden">
- </div>
+                <div class="form-group">
+                    <label class="form-label">รายการของที่ต้องการจัดส่ง</label>
+                    <textarea class="form-input" id="detailsInput" placeholder="ตัวอย่างเช่น&#10;- ขอข้าวกล่องสำหรับ 4 คน&#10;- ยาแก้ไข้และยาทาแก้แพ้น้ำคัน&#10;- นมผงเด็กทารกสูตร 1"></textarea>
+                </div>
 
- <button class="btn btn-success btn-lg" onclick="goToStep(4)">ถัดไป 
- </button>
- <button class="btn btn-outline" onclick="goToStep(2)">กลับ
- </button>
- </div>
- </div>
+                <div class="btn-stack">
+                    <button class="btn-modern btn-primary" onclick="goToStep(4)">ดำเนินการต่อ</button>
+                    <button class="btn-modern btn-secondary" onclick="goToStep(2)">ย้อนกลับ</button>
+                </div>
+            </div>
+        </div>
 
- <!-- ========== STEP 4: Urgency ========== -->
- <div id="step4" class="hidden">
- <div class="card">
- <div class="card-title">ขั้นตอนที่ 4: ระดับความเร่งด่วน</div>
- <div class="card-subtitle">เลือกระดับความเร่งด่วนของความต้องการนี้</div>
+        <!-- ========== STEP 4: Urgency ========== -->
+        <div id="step4" class="hidden">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>ระดับความเร่งด่วน</h2>
+                    <p>เลือกระดับความเร่งด่วนเพื่อจัดลำดับให้อาสาสมัครแพ็คและส่งมอบได้ตามจริง</p>
+                </div>
 
- <div class="urgency-grid">
- <button class="urgency-btn critical" onclick="selectUrgency('critical', ' ด่วนมาก - หมดแล้ว/ต้องการด่วนที่สุด')">
- <span style="font-size: 32px;"></span>
- <div>
- <div style="font-size: 22px;">ด่วนมาก</div>
- <div style="font-size: 16px; font-weight: 400;">หมดแล้ว / ต้องการด่วนที่สุด</div>
- </div>
- </button>
- <button class="urgency-btn high" onclick="selectUrgency('high', ' ปานกลาง - รอได้ 1-2 วัน')">
- <span style="font-size: 32px;"></span>
- <div>
- <div style="font-size: 22px;">ปานกลาง</div>
- <div style="font-size: 16px; font-weight: 400;">รอได้ 1-2 วัน</div>
- </div>
- </button>
- <button class="urgency-btn normal" onclick="selectUrgency('normal', ' ไม่ด่วน - แจ้งไว้ล่วงหน้า')">
- <span style="font-size: 32px;"></span>
- <div>
- <div style="font-size: 22px;">ไม่ด่วน</div>
- <div style="font-size: 16px; font-weight: 400;">แจ้งไว้ล่วงหน้า</div>
- </div>
- </button>
- </div>
+                <div class="urgency-grid">
+                    <button class="urgency-card-btn critical" id="urg-critical" onclick="selectUrgency('critical', 'ด่วนมาก - ของจำเป็นหมดเกลี้ยงแล้ว')">
+                        <div class="select-indicator-dot"></div>
+                        <div>
+                            <div class="btn-label-title" style="color:var(--danger-accent);">ด่วนวิกฤต</div>
+                            <div class="btn-label-sub">ของกินและของใช้จำเป็นหมดเกลี้ยงแล้ว ต้องการวันนี้</div>
+                        </div>
+                    </button>
+                    <button class="urgency-card-btn high" id="urg-high" onclick="selectUrgency('high', 'ปานกลาง - รอได้ 1-2 วัน')">
+                        <div class="select-indicator-dot"></div>
+                        <div>
+                            <div class="btn-label-title" style="color:var(--warning-accent);">ปานกลาง</div>
+                            <div class="btn-label-sub">ของกินพอยังชีพได้อีกเล็กน้อย แต่ควรได้รับใน 1-2 วัน</div>
+                        </div>
+                    </button>
+                    <button class="urgency-card-btn normal" id="urg-normal" onclick="selectUrgency('normal', 'ไม่ด่วน - แจ้งไว้ล่วงหน้า')">
+                        <div class="select-indicator-dot"></div>
+                        <div>
+                            <div class="btn-label-title" style="color:var(--primary-accent);">ไม่ด่วน</div>
+                            <div class="btn-label-sub">แจ้งส่งขอความช่วยเหลือสำรองไว้ล่วงหน้า รอตามรอบได้</div>
+                        </div>
+                    </button>
+                </div>
 
- <button class="btn btn-outline" style="margin-top:var(--spacing-md);" onclick="goToStep(3)">กลับ
- </button>
- </div>
- </div>
+                <button class="btn-modern btn-secondary" onclick="goToStep(3)">ย้อนกลับ</button>
+            </div>
+        </div>
 
- <!-- ========== STEP 5: Summary & Confirm ========== -->
- <div id="step5" class="hidden">
- <div class="card">
- <div class="card-title">ขั้นตอนที่ 5: สรุปข้อมูล</div>
- <div class="card-subtitle">ตรวจสอบข้อมูลก่อนส่งไปยังศูนย์อาสาสมัคร</div>
+        <!-- ========== STEP 5: Summary & Confirm ========== -->
+        <div id="step5" class="hidden">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>สรุปใบแจ้งสิ่งของ</h2>
+                    <p>ตรวจสอบความถูกต้องของรายการทั้งหมด ก่อนส่งเข้าระบบฐานข้อมูลอาสา</p>
+                </div>
 
- <div id="summaryContent">
- <div class="summary-item">
- <span class="summary-label">พิกัด</span>
- <span class="summary-value" id="sumGPS">-</span>
- </div>
- <div class="summary-item">
- <span class="summary-label">หมวดหมู่</span>
- <span class="summary-value" id="sumCategories">-</span>
- </div>
- <div class="summary-item">
- <span class="summary-label">ประเภทอาหาร</span>
- <span class="summary-value" id="sumHalal">-</span>
- </div>
- <div class="summary-item">
- <span class="summary-label">รายละเอียด</span>
- <span class="summary-value" id="sumDetails">-</span>
- </div>
- <div class="summary-item">
- <span class="summary-label">ความเร่งด่วน</span>
- <span class="summary-value" id="sumUrgency">-</span>
- </div>
- </div>
+                <div>
+                    <div class="summary-row">
+                        <span class="summary-label">พิกัดจัดส่ง</span>
+                        <span class="summary-value" id="sumGPS">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">หมวดหมู่ของ</span>
+                        <span class="summary-value" id="sumCategories">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">ประเภททางเลือก</span>
+                        <span class="summary-value" id="sumHalal">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">รายละเอียดสินค้า</span>
+                        <span class="summary-value" id="sumDetails">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">ความเร่งด่วน</span>
+                        <span class="summary-value" id="sumUrgency">-</span>
+                    </div>
+                </div>
 
- <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: var(--warning-light); border-radius: var(--radius); font-size: var(--font-size-base);">
- <div style="font-weight: 700; color: #92400E; margin-bottom: var(--spacing-xs);">กรุณาตรวจสอบ:
- </div>
- <div style="color: var(--gray-700);">ข้อมูลจะถูกส่งไปยังศูนย์อาสาสมัครใกล้เคียงเพื่อจัดส่งสิ่งของให้
- </div>
- </div>
+                <div class="btn-stack">
+                    <button class="btn-modern btn-primary" id="btnSubmit" onclick="submitNeed()">ส่งใบขอความช่วยเหลือสิ่งของ</button>
+                    <button class="btn-modern btn-secondary" onclick="goToStep(4)">ย้อนกลับแก้ไข</button>
+                </div>
+            </div>
+        </div>
 
- <button class="btn btn-primary btn-lg" style="margin-top:var(--spacing-lg);" id="btnSubmit" onclick="submitNeed()">ยืนยันส่งข้อมูล
- </button>
- <button class="btn btn-outline" onclick="goToStep(4)">กลับแก้ไข
- </button>
- </div>
- </div>
+        <!-- ========== SUCCESS SCREEN ========== -->
+        <div id="successScreen" class="hidden">
+            <div class="card" style="gap: 28px; text-align: center;">
+                <div class="success-illustration">
+                    <svg viewBox="0 0 24 24">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+                <div class="card-title-group" style="align-items: center;">
+                    <h2 style="color:var(--success-accent)">ส่งใบคำขอสำเร็จแล้ว</h2>
+                    <p style="text-align: center;">รหัสรายการพัสดุช่วยเหลือของคุณคือ</p>
+                    <div style="font-size: 24px; font-weight: 700; color: var(--primary-accent); background: var(--primary-accent-light); padding: 12px 24px; border-radius: 16px; margin: 12px 0;" id="needId">-</div>
+                    <p style="text-align: center; font-size: 14px;">ทีมกู้ภัยและหน่วยอาสาสมัครจะเริ่มวางแผนบรรจุของและส่งมอบตามพิกัดโดยเร็วที่สุด</p>
+                </div>
 
- <!-- ========== SUCCESS SCREEN ========== -->
- <div id="successScreen" class="hidden">
- <div class="card success-screen">
- <div class="checkmark-wrap">
- <svg viewBox="0 0 52 52" width="96" height="96">
- <circle class="checkmark-circle" cx="26" cy="26" r="24"/>
- <path class="checkmark-check" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
- </svg>
- </div>
- <h2 style="font-size: var(--font-size-xl); color: var(--primary); margin-bottom: var(--spacing-sm);">ส่งข้อมูลสำเร็จ!
- </h2>
- <p style="color: var(--gray-600); margin-bottom: var(--spacing-sm);">เลขรายการของคุณ:
- </p>
- <div class="need-number" id="needId">-</div>
- <p style="color: var(--gray-600); margin-top: var(--spacing-md); line-height: 1.8;">ทีมอาสาสมัครจะดำเนินการจัดส่งให้<br>ตามลำดับความเร่งด่วน
- </p>
- <div style="margin-top: var(--spacing-lg); padding: var(--spacing-md); background: var(--primary-light); border-radius: var(--radius); text-align: left; font-size: var(--font-size-base);">
- <div style="font-weight: 700; color: var(--primary-dark); margin-bottom: var(--spacing-sm);">ติดต่อสอบถาม:
- </div>
- <div style="color: var(--gray-700); line-height: 2;">ปภ. 1784<br>สพฉ. 1669<br>
- <strong>ประหยัดแบตเตอรี่มือถือ</strong>
- </div>
- </div>
- <button class="btn btn-outline" style="margin-top: var(--spacing-lg);" onclick="closeLIFF()">ปิดหน้าต่าง
- </button>
- </div>
- </div>
+                <button class="btn-modern btn-secondary" onclick="closeLIFF()">ปิดหน้าต่างนี้</button>
+            </div>
+        </div>
 
- </div>
+    </div>
 
- <script>
- // ====== STATE ======
- let currentStep = 1;
- let formData = {
- latitude: null,
- longitude: null,
- address: '',
- categories: [],
- halal: null,
- details: '',
- photo: null,
- urgency: null,
- urgencyLabel: '',
- userId: null
- };
+    <!-- Custom Modern Alert Dialog -->
+    <div id="customAlert" class="custom-alert hidden">
+        <div class="custom-alert-box">
+            <div class="alert-icon-wrap" id="alertIconBg" style="background-color: var(--primary-accent-light);">
+                <svg id="alertIcon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--primary-accent)" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+            </div>
+            <span id="customAlertMessage" class="alert-message">-</span>
+            <button class="btn-modern btn-primary" style="height:48px; border-radius:14px;" onclick="closeCustomAlert()">ตกลง</button>
+        </div>
+    </div>
 
- // Category definitions
- const CATEGORY_MAP = {
- 'food': { icon: '', label: 'อาหาร' },
- 'water': { icon: '', label: 'น้ำดื่ม' },
- 'medicine': { icon: '', label: 'ยา/เวชภัณฑ์' },
- 'personal': { icon: '', label: 'ของใช้ส่วนตัว' },
- 'bedding': { icon: '', label: 'เครื่องนอน' },
- 'clothes': { icon: '', label: 'เสื้อผ้า' },
- 'flashlight': { icon: '', label: 'ไฟฉาย' },
- 'powerbank': { icon: '', label: 'Power Bank' },
- 'baby': { icon: '', label: 'ของใช้เด็กอ่อน' },
- 'pet': { icon: '', label: 'อาหารสัตว์เลี้ยง' },
- 'other': { icon: '', label: 'อื่น ๆ' }
- };
+    <script>
+        let currentStep = 1;
+        let formData = {
+            latitude: null,
+            longitude: null,
+            address: '',
+            categories: [],
+            halal: null,
+            details: '',
+            urgency: null,
+            urgencyLabel: '',
+            userId: null
+        };
 
- // ====== LIFF INIT ======
- async function initLIFF() {
- try {
- await liff.init({ liffId: getLiffId() });
- if (liff.isLoggedIn()) {
- const profile = await liff.getProfile();
- formData.userId = profile.userId;
- formData.idToken = liff.getIDToken();
- }
- getGPS();
- } catch (err) {
- console.error('LIFF init failed:', err);
- document.getElementById('gpsStatus').className = 'gps-status error';
- document.getElementById('gpsStatus').innerHTML = ' กรุณาเปิดจากแอป LINE';
- }
- }
+        function showCustomAlert(message, type = 'error') {
+            const modal = document.getElementById('customAlert');
+            const alertBg = document.getElementById('alertIconBg');
+            const alertIcon = document.getElementById('alertIcon');
+            const msgText = document.getElementById('customAlertMessage');
+            
+            msgText.textContent = message;
+            if (type === 'success') {
+                alertBg.style.backgroundColor = 'var(--success-accent-light)';
+                alertIcon.setAttribute('stroke', 'var(--success-accent)');
+                alertIcon.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
+            } else {
+                alertBg.style.backgroundColor = 'var(--primary-accent-light)';
+                alertIcon.setAttribute('stroke', 'var(--primary-accent)');
+                alertIcon.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>';
+            }
+            modal.classList.remove('hidden');
+        }
 
- function getLiffId() {
- const params = new URLSearchParams(window.location.search);
- return params.get('liffId') || '';
- }
+        function closeCustomAlert() {
+            document.getElementById('customAlert').classList.add('hidden');
+        }
 
- // ====== MAP (auto pin from GPS, draggable / tap to place manually) ======
- let liffMap = null;
- let liffMarker = null;
+        L.Marker.prototype.options.icon = L.icon({
+            iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
 
- function initOrUpdateMap(lat, lon) {
- document.getElementById('mapContainer').classList.remove('hidden');
- document.getElementById('mapHint').classList.remove('hidden');
+        async function initLIFF() {
+            try {
+                await liff.init({ liffId: getLiffId() });
+                if (liff.isLoggedIn()) {
+                    const profile = await liff.getProfile();
+                    formData.userId = profile.userId;
+                    formData.idToken = liff.getIDToken();
+                }
+                getGPS();
+            } catch (err) {
+                console.error('LIFF init failed:', err);
+                const statusEl = document.getElementById('gpsStatus');
+                statusEl.classList.remove('hidden');
+                statusEl.className = 'gps-status error';
+                statusEl.innerHTML = 'กรุณาเปิดจาก LINE APP';
+            }
+        }
 
- if (!liffMap) {
- liffMap = L.map('liffMap', { zoomControl: true, attributionControl: true }).setView([lat, lon], 16);
- L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
- maxZoom: 19,
- attribution: '&copy; OpenStreetMap'
- }).addTo(liffMap);
+        function getLiffId() {
+            const flaskLiffId = "{{ liff_id }}";
+            if (flaskLiffId && !flaskLiffId.startsWith('{')) {
+                return flaskLiffId;
+            }
+            const params = new URLSearchParams(window.location.search);
+            return params.get('liffId') || '';
+        }
 
- liffMarker = L.marker([lat, lon], { draggable: true }).addTo(liffMap);
+        let liffMap = null;
+        let liffMarker = null;
 
- liffMarker.on('dragend', () => {
- const pos = liffMarker.getLatLng();
- updatePinPosition(pos.lat, pos.lng);
- });
+        function initOrUpdateMap(lat, lon) {
+            document.getElementById('mapContainer').classList.remove('hidden');
+            document.getElementById('mapHint').classList.remove('hidden');
 
- liffMap.on('click', (e) => {
- liffMarker.setLatLng(e.latlng);
- updatePinPosition(e.latlng.lat, e.latlng.lng);
- });
+            if (!liffMap) {
+                liffMap = L.map('liffMap', { zoomControl: true, attributionControl: true }).setView([lat, lon], 16);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap'
+                }).addTo(liffMap);
 
- setTimeout(() => liffMap.invalidateSize(), 200);
- } else {
- liffMap.setView([lat, lon], 16);
- liffMarker.setLatLng([lat, lon]);
- }
- }
+                liffMarker = L.marker([lat, lon], { draggable: true }).addTo(liffMap);
 
- function updatePinPosition(lat, lon) {
- formData.latitude = lat.toFixed(6);
- formData.longitude = lon.toFixed(6);
- document.getElementById('latValue').textContent = formData.latitude;
- document.getElementById('lonValue').textContent = formData.longitude;
- getAddress(formData.latitude, formData.longitude);
- }
+                liffMarker.on('dragend', () => {
+                    const pos = liffMarker.getLatLng();
+                    updatePinPosition(pos.lat, pos.lng);
+                });
 
- // ====== GPS ======
- function getGPS() {
- const statusEl = document.getElementById('gpsStatus');
- const btnGPS = document.getElementById('btnGetGPS');
- 
- statusEl.className = 'gps-status loading';
- statusEl.innerHTML = '<div class="spinner" style="display:inline-block;width:24px;height:24px;margin-right:8px;"></div>กำลังระบุตำแหน่ง...';
- btnGPS.classList.add('hidden');
+                liffMap.on('click', (e) => {
+                    liffMarker.setLatLng(e.latlng);
+                    updatePinPosition(e.latlng.lat, e.latlng.lng);
+                });
 
- if (!navigator.geolocation) {
- statusEl.className = 'gps-status error';
- statusEl.innerHTML = 'เบราว์เซอร์ไม่รองรับ GPS — แตะบนแผนที่เพื่อปักหมุดเอง';
- btnGPS.classList.remove('hidden');
- document.getElementById('gpsResult').classList.remove('hidden');
- document.getElementById('btnNext1').classList.remove('hidden');
- updatePinPosition(13.7563, 100.5018);
- initOrUpdateMap(13.7563, 100.5018);
- return;
- }
+                setTimeout(() => liffMap.invalidateSize(), 200);
+            } else {
+                liffMap.setView([lat, lon], 16);
+                liffMarker.setLatLng([lat, lon]);
+            }
+        }
 
- navigator.geolocation.getCurrentPosition(
- (position) => {
- const lat = position.coords.latitude;
- const lon = position.coords.longitude;
- updatePinPosition(lat, lon);
- initOrUpdateMap(lat, lon);
- 
- document.getElementById('gpsResult').classList.remove('hidden');
- statusEl.className = 'gps-status success';
- statusEl.innerHTML = 'ระบุตำแหน่งสำเร็จ — ลากหมุดได้ถ้าต้องการปรับ';
- document.getElementById('btnNext1').classList.remove('hidden');
- },
- (error) => {
- let msg = 'ไม่สามารถดึงพิกัดได้ — แตะบนแผนที่เพื่อปักหมุดเอง';
- switch(error.code) {
- case error.PERMISSION_DENIED: msg = 'กรุณาอนุญาตให้เข้าถึงตำแหน่ง (หรือแตะบนแผนที่เพื่อปักหมุดเอง)'; break;
- case error.POSITION_UNAVAILABLE: msg = 'ไม่พบสัญญาณ GPS — แตะบนแผนที่เพื่อปักหมุดเอง'; break;
- case error.TIMEOUT: msg = 'หมดเวลารอ GPS — แตะบนแผนที่เพื่อปักหมุดเอง'; break;
- }
- statusEl.className = 'gps-status error';
- statusEl.innerHTML = msg;
- btnGPS.classList.remove('hidden');
- btnGPS.textContent = 'ลองดึงพิกัด GPS ใหม่';
- document.getElementById('gpsResult').classList.remove('hidden');
- document.getElementById('btnNext1').classList.remove('hidden');
- updatePinPosition(13.7563, 100.5018);
- initOrUpdateMap(13.7563, 100.5018);
- },
- { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
- );
- }
+        function updatePinPosition(lat, lon) {
+            formData.latitude = lat.toFixed(6);
+            formData.longitude = lon.toFixed(6);
+            document.getElementById('coordsValue').textContent = `${formData.latitude}, ${formData.longitude}`;
+            getAddress(formData.latitude, formData.longitude);
+        }
 
- async function getAddress(lat, lon) {
- try {
- const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
- const data = await res.json();
- const addr = data.address;
- const display = addr ? 
- `${addr.subdistrict || ''} ${addr.district || ''} ${addr.city || addr.province || ''}` : 
- 'ไม่สามารถระบุที่อยู่ได้';
- document.getElementById('addressValue').textContent = display;
- formData.address = display;
- } catch (e) {
- document.getElementById('addressValue').textContent = 'ไม่สามารถระบุที่อยู่ได้';
- }
- }
+        function getGPS() {
+            const statusEl = document.getElementById('gpsStatus');
+            statusEl.classList.remove('hidden');
+            statusEl.className = 'gps-status loading';
+            statusEl.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;margin-right:8px;"></div>กำลังระบุพิกัดสถานที่...';
 
- // ====== NAVIGATION ======
- function goToStep(step) {
- // Hide all steps
- for (let i = 1; i <= 5; i++) {
- document.getElementById('step' + i).classList.add('hidden');
- }
- document.getElementById('successScreen').classList.add('hidden');
- 
- // Show target step
- document.getElementById('step' + step).classList.remove('hidden');
- document.getElementById('step' + step).classList.add('fade-in');
- 
- // Update progress dots
- for (let i = 1; i <= 5; i++) {
- const dot = document.getElementById('step' + i + '-dot');
- const line = document.getElementById('line' + i);
- 
- dot.classList.remove('active', 'completed');
- if (line) line.classList.remove('completed');
- 
- if (i < step) {
- dot.classList.add('completed');
- dot.textContent = '';
- if (line) line.classList.add('completed');
- } else if (i === step) {
- dot.classList.add('active');
- dot.textContent = i;
- } else {
- dot.textContent = i;
- }
- }
- 
- currentStep = step;
- 
- if (step === 3) {
- updateDetailTags();
- }
- if (step === 5) {
- updateSummary();
- }
- 
- window.scrollTo(0, 0);
- }
+            if (!navigator.geolocation) {
+                statusEl.className = 'gps-status error';
+                statusEl.innerHTML = 'ระบบ GPS ของท่านถูกปิดกั้น — กรุณาเลือกปักหมุดบนแผนที่';
+                document.getElementById('gpsResult').classList.remove('hidden');
+                document.getElementById('btnNext1').classList.remove('hidden');
+                updatePinPosition(13.7563, 100.5018);
+                initOrUpdateMap(13.7563, 100.5018);
+                return;
+            }
 
- // ====== CATEGORY SELECTION ======
- function toggleCategory(id, label) {
- const btn = document.getElementById('cat-' + id);
- const idx = formData.categories.findIndex(c =>c.id === id);
- 
- if (idx > -1) {
- formData.categories.splice(idx, 1);
- btn.classList.remove('selected');
- } else {
- formData.categories.push({ id, label });
- btn.classList.add('selected');
- }
- 
- updateTags();
- 
- // Show/hide halal options
- const hasFood = formData.categories.some(c =>c.id === 'food');
- document.getElementById('halalOptions').classList.toggle('hidden', !hasFood);
- }
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    updatePinPosition(lat, lon);
+                    initOrUpdateMap(lat, lon);
+                    
+                    document.getElementById('gpsResult').classList.remove('hidden');
+                    statusEl.className = 'gps-status success';
+                    statusEl.innerHTML = 'บันทึกพิกัดสถานที่เสร็จสิ้น';
+                    document.getElementById('btnNext1').classList.remove('hidden');
+                },
+                (error) => {
+                    statusEl.className = 'gps-status error';
+                    statusEl.innerHTML = 'เกิดข้อผิดพลาดในการดึงพิกัด — กรุณาแตะบนแผนที่เพื่อปักหมุดเอง';
+                    document.getElementById('gpsResult').classList.remove('hidden');
+                    document.getElementById('btnNext1').classList.remove('hidden');
+                    updatePinPosition(13.7563, 100.5018);
+                    initOrUpdateMap(13.7563, 100.5018);
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            );
+        }
 
- function selectHalal(isHalal) {
- formData.halal = isHalal;
- document.getElementById('halal-yes').classList.toggle('selected', isHalal);
- document.getElementById('halal-no').classList.toggle('selected', !isHalal);
- }
+        async function getAddress(lat, lon) {
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
+                const data = await res.json();
+                const addr = data.address;
+                const display = addr ? 
+                    `${addr.subdistrict || ''} ${addr.district || ''} ${addr.city || addr.province || ''}` : 
+                    'พิกัดไม่พบบันทึกที่อยู่';
+                document.getElementById('addressValue').textContent = display;
+                formData.address = display;
+            } catch (e) {
+                document.getElementById('addressValue').textContent = 'บันทึกค่าเฉพาะตัวเลขพิกัด';
+            }
+        }
 
- function updateTags() {
- const container = document.getElementById('selectedTags');
- container.innerHTML = formData.categories.map(c => 
- `<span class="tag">${c.label}</span>`
- ).join('');
- }
+        function goToStep(step) {
+            for (let i = 1; i <= 5; i++) {
+                document.getElementById('step' + i).classList.add('hidden');
+            }
+            document.getElementById('successScreen').classList.add('hidden');
+            
+            document.getElementById('step' + step).classList.remove('hidden');
+            document.getElementById('step' + step).classList.add('fade-in');
+            
+            for (let i = 1; i <= 5; i++) {
+                const dot = document.getElementById('step' + i + '-dot');
+                const line = document.getElementById('line' + i);
+                
+                dot.classList.remove('active', 'completed');
+                if (line) line.classList.remove('completed');
+                
+                if (i < step) {
+                    dot.classList.add('completed');
+                    dot.innerHTML = '<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:white;stroke-width:3;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                    if (line) line.classList.add('completed');
+                } else if (i === step) {
+                    dot.classList.add('active');
+                    dot.textContent = i;
+                } else {
+                    dot.textContent = i;
+                }
+            }
+            currentStep = step;
+            if (step === 3) {
+                updateDetailTags();
+            }
+            if (step === 5) {
+                updateSummary();
+            }
+            window.scrollTo(0, 0);
+        }
 
- function updateDetailTags() {
- const container = document.getElementById('detailTags');
- container.innerHTML = formData.categories.map(c => 
- `<span class="tag">${c.label}</span>`
- ).join('');
- 
- if (formData.halal !== null) {
- container.innerHTML += `<span class="tag tag-warning">${formData.halal ? ' ฮาลาล' : ' ทั่วไป'}</span>`;
- }
- }
+        function toggleCategory(id, label) {
+            const btn = document.getElementById('cat-' + id);
+            const idx = formData.categories.findIndex(c => c.id === id);
+            
+            if (idx > -1) {
+                formData.categories.splice(idx, 1);
+                btn.classList.remove('selected');
+            } else {
+                formData.categories.push({ id, label });
+                btn.classList.add('selected');
+            }
+            
+            updateTags();
+            const hasFood = formData.categories.some(c => c.id === 'food');
+            document.getElementById('halalOptions').classList.toggle('hidden', !hasFood);
+        }
 
- // ====== URGENCY ======
- function selectUrgency(level, label) {
- formData.urgency = level;
- formData.urgencyLabel = label;
- 
- document.querySelectorAll('.urgency-btn').forEach(btn =>btn.classList.remove('selected'));
- document.querySelector('.urgency-btn.' + level).classList.add('selected');
- 
- setTimeout(() =>goToStep(5), 300);
- }
+        function selectHalal(isHalal) {
+            formData.halal = isHalal;
+            document.getElementById('halal-yes').classList.toggle('selected', isHalal);
+            document.getElementById('halal-no').classList.toggle('selected', !isHalal);
+        }
 
- // ====== PHOTO ======
- function handlePhoto(input) {
- if (input.files && input.files[0]) {
- formData.photo = input.files[0];
- const reader = new FileReader();
- reader.onload = function(e) {
- const preview = document.getElementById('photoPreview');
- preview.src = e.target.result;
- preview.classList.remove('hidden');
- };
- reader.readAsDataURL(input.files[0]);
- }
- }
+        function updateTags() {
+            const container = document.getElementById('selectedTags');
+            container.innerHTML = formData.categories.map(c => 
+                `<span class="tag-pill">${c.label}</span>`
+            ).join('');
+        }
 
- // ====== SUMMARY ======
- function updateSummary() {
- formData.details = document.getElementById('detailsInput').value || '-';
- 
- const catLabels = formData.categories.map(c =>c.label).join(', ') || 'ไม่ระบุ';
- const halalText = formData.halal === null ? '-' : (formData.halal ? ' ฮาลาล' : ' ทั่วไป');
- 
- document.getElementById('sumGPS').textContent = 
- formData.latitude ? `${formData.latitude}, ${formData.longitude}` : 'ไม่ระบุ';
- document.getElementById('sumCategories').textContent = catLabels;
- document.getElementById('sumHalal').textContent = halalText;
- document.getElementById('sumDetails').textContent = formData.details;
- document.getElementById('sumUrgency').textContent = formData.urgencyLabel || 'ไม่ระบุ';
- }
+        function updateDetailTags() {
+            const container = document.getElementById('detailTags');
+            container.innerHTML = formData.categories.map(c => 
+                `<span class="tag-pill">${c.label}</span>`
+            ).join('');
+            
+            if (formData.halal !== null) {
+                container.innerHTML += `<span class="tag-pill tag-warn">${formData.halal ? 'ฮาลาล' : 'อาหารทั่วไป'}</span>`;
+            }
+        }
 
- // ====== SUBMIT ======
- async function submitNeed() {
- const btn = document.getElementById('btnSubmit');
- btn.disabled = true;
- btn.innerHTML = '<div class="spinner" style="width:28px;height:28px;border-width:3px;display:inline-block;margin-right:8px;"></div>กำลังส่งข้อมูล...';
- 
- const payload = {
- user_id: formData.userId || 'unknown',
- latitude: formData.latitude,
- longitude: formData.longitude,
- categories: formData.categories.map(c =>c.label).join(', '),
- details: formData.details,
- urgency: formData.urgency === 'critical' ? ' ด่วนมาก' :
- formData.urgency === 'high' ? ' ปานกลาง' : ' ไม่ด่วน',
- halal: formData.halal === null ? 'FALSE' : (formData.halal ? 'TRUE' : 'FALSE')
- };
- 
- try {
- const response = await fetch('/api/need/submit', {
- method: 'POST',
- headers: {
- 'Content-Type': 'application/json',
- 'Authorization': 'Bearer ' + (formData.idToken || '')
- },
- body: JSON.stringify(payload)
- });
- 
- const result = await response.json();
- 
- if (result.success) {
- document.getElementById('needId').textContent = result.need_id;
- document.getElementById('step5').classList.add('hidden');
- document.getElementById('successScreen').classList.remove('hidden');
- document.getElementById('successScreen').classList.add('fade-in');
- } else {
- throw new Error(result.error || 'Unknown error');
- }
- } catch (error) {
- btn.disabled = false;
- btn.innerHTML = ' ลองส่งใหม่';
- alert(' ส่งข้อมูลไม่สำเร็จ: ' + error.message + '\n\nกรุณาลองใหม่');
- }
- }
+        function selectUrgency(level, label) {
+            formData.urgency = level;
+            formData.urgencyLabel = label;
+            
+            document.querySelectorAll('.urgency-card-btn').forEach(btn => btn.classList.remove('selected'));
+            document.getElementById('urg-' + level).classList.add('selected');
+            
+            setTimeout(() => goToStep(5), 300);
+        }
 
- // ====== CLOSE LIFF ======
- function closeLIFF() {
- if (liff.isInClient()) {
- liff.closeWindow();
- } else {
- window.close();
- }
- }
+        function updateSummary() {
+            formData.details = document.getElementById('detailsInput').value || '-';
+            
+            const catLabels = formData.categories.map(c => c.label).join(', ') || 'ไม่มี';
+            const halalText = formData.halal === null ? '-' : (formData.halal ? 'ต้องการฮาลาล' : 'อาหารทั่วไป');
+            
+            document.getElementById('sumGPS').textContent = 
+                formData.latitude ? `${formData.latitude}, ${formData.longitude}` : 'ไม่ได้ระบุพิกัด';
+            document.getElementById('sumCategories').textContent = catLabels;
+            document.getElementById('sumHalal').textContent = halalText;
+            document.getElementById('sumDetails').textContent = formData.details;
+            document.getElementById('sumUrgency').textContent = formData.urgencyLabel || 'ไม่ได้ระบุ';
+        }
 
- // ====== INIT ======
- document.addEventListener('DOMContentLoaded', initLIFF);
- </script>
+        async function submitNeed() {
+            const btn = document.getElementById('btnSubmit');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;border-width:2px;display:inline-block;margin-right:8px;border-top-color:white;"></div>กำลังบันทึกข้อมูล...';
+            
+            const payload = {
+                user_id: formData.userId || 'unknown',
+                latitude: formData.latitude,
+                longitude: formData.longitude,
+                categories: formData.categories.map(c => c.label).join(', '),
+                details: formData.details,
+                urgency: formData.urgency === 'critical' ? 'ด่วนมาก' :
+                         formData.urgency === 'high' ? 'ปานกลาง' : 'ไม่ด่วน',
+                halal: formData.halal === null ? 'FALSE' : (formData.halal ? 'TRUE' : 'FALSE')
+            };
+            
+            try {
+                const response = await fetch('/api/need/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + (formData.idToken || '')
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('needId').textContent = result.need_id;
+                    document.getElementById('step5').classList.add('hidden');
+                    document.getElementById('successScreen').classList.remove('hidden');
+                    document.getElementById('successScreen').classList.add('fade-in');
+                } else {
+                    throw new Error(result.error || 'ระบบขัดข้องชั่วคราว');
+                }
+            } catch (error) {
+                btn.disabled = false;
+                btn.innerHTML = 'ส่งคำขอความช่วยเหลือสิ่งของ';
+                showCustomAlert('ไม่สามารถทำการบันทึก: ' + error.message, 'error');
+            }
+        }
+
+        function closeLIFF() {
+            if (liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                window.close();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initLIFF);
+    </script>
 </body>
 </html>
