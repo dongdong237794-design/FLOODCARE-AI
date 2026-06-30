@@ -1276,7 +1276,7 @@ def build_register_form_flex(user_name="คุณ", lang="TH"):
             ),
             footer=BoxComponent(
                 layout="vertical",
-                contents=[TextComponent(text="ใช้เวลาไม่ถึง 1 นาที ข้อมูลของคุณจะได้รับความปลอดภัยสูงสุด", size="xxs", color="#9CA3AF", align="center", wrap=True)]
+                contents=[TextComponent(text="ใช้เวลาไม่ถึง 1 นาที ข้อมูลของคุณจะได้รับความปลอดภัยสูงสุด", size="xs", color="#9CA3AF", align="center", wrap=True)]
             )
         )
     )
