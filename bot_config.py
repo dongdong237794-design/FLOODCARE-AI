@@ -3,15 +3,16 @@ FLOODCARE AI - Optimized Bot Configuration
 ============================================
 Architecture: Modular | Class-Based State Machine | Intent Classification
 Author: Senior Software Architect
-Version: 2.0 (Production-Ready)
+Version: 2.2 (Production-Ready / Localized Timezone & Custom Water Status)
 
 Key Optimizations:
 - Intent Classification: Reduces Gemini API calls by ~80%
 - Smart Cache: Multi-layer (Memory LRU > TTL Cache)
-- State Machine: Class-based, separated workflows
+- State Machine: Class-based, separated workflows (Only for Location searches)
 - Rate Limiting: Per-user request throttling
-- Memory Management: Auto-cleanup stale sessions
-- Sheets Optimization: Batch writes, connection pooling
+- Localized Timezone: Standardized Thai timezone (Asia/Bangkok / UTC+7) for all systems
+- Custom Water Status Mapping: Uses official Thaiwater status keys with specified hex colors
+- Strictly Limited Scope: Only answers floods, safety, and health queries. Refuses all else.
 """
 
 import os
@@ -36,10 +37,6 @@ except ImportError:
     requests = None
 
 try:
-    # google-generativeai (old SDK, import path "google.generativeai") is deprecated
-    # and no longer receives updates/bug fixes from Google. Migrated to the new
-    # unified SDK "google-genai" (import path "google.genai") — see:
-    # https://github.com/googleapis/python-genai
     from google import genai
     from google.genai import types as genai_types
 except ImportError:
@@ -51,8 +48,6 @@ try:
 except ImportError:
     gspread = None
 
-# supabase ถูกลบออก — ไม่ได้ใช้งานในโปรเจกต์นี้ (dependency เกินจำเป็น)
-
 try:
     from linebot import LineBotApi, WebhookHandler
     from linebot.models import (
@@ -63,6 +58,19 @@ try:
 except ImportError:
     LineBotApi = None
     WebhookHandler = None
+
+
+# =============================================================================
+# TIMEZONE HELPER (Asia/Bangkok - UTC+7)
+# =============================================================================
+
+def get_bangkok_time() -> datetime.datetime:
+    """
+    Get the current localized Thai datetime (UTC+7 / Asia/Bangkok).
+    Guarantees correct timezone mapping even on foreign cloud platforms like Render.
+    """
+    bangkok_tz = datetime.timezone(datetime.timedelta(hours=7))
+    return datetime.datetime.now(bangkok_tz)
 
 
 # =============================================================================
@@ -84,15 +92,12 @@ NEED_LIFF_URL = os.environ.get("NEED_LIFF_URL", "")
 REGISTER_LIFF_ID = os.environ.get("REGISTER_LIFF_ID", "")
 REGISTER_LIFF_URL = os.environ.get("REGISTER_LIFF_URL", "")
 
-# --- Trusted reference sources (used so safety-critical replies link to a
-#     verified source instead of relying purely on AI-generated text) ---
 WATER_LEVEL_SOURCE_URL = os.environ.get(
     "WATER_LEVEL_SOURCE_URL", "https://www.thaiwater.net/water/wl"
-)  # คลังข้อมูลน้ำแห่งชาติ - สถาบันสารสนเทศทรัพยากรน้ำ (สสน.)
+)
 SNAKE_BITE_INFO_URL = "https://www.rama.mahidol.ac.th/poisoncenter/th"
-SNAKE_BITE_HOTLINE = "1367"  # สายด่วนศูนย์พิษวิทยารามาธิบดี (24 ชม.)
+SNAKE_BITE_HOTLINE = "1367"
 
-# --- Staff dashboard (read-only admin view of Sheets data) ---
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
 
@@ -122,7 +127,7 @@ class Logger:
     
     @classmethod
     def _timestamp(cls) -> str:
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        return get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     
     @classmethod
     def info(cls, module: str, message: str, extra: dict = None):
@@ -180,10 +185,7 @@ class Logger:
 # =============================================================================
 
 class LRUMemoryCache:
-    """
-    Thread-safe LRU Cache with TTL support
-    Layer 1: Fastest - In-memory ordered dict
-    """
+    """Thread-safe LRU Cache with TTL support"""
     
     def __init__(self, maxsize: int = 256, default_ttl: int = 300):
         self._cache: OrderedDict = OrderedDict()
@@ -206,7 +208,6 @@ class LRUMemoryCache:
                 del self._cache[key]
                 self._misses += 1
                 return None
-            # Move to end (most recently used)
             self._cache.move_to_end(key)
             self._hits += 1
             return entry["value"]
@@ -220,7 +221,6 @@ class LRUMemoryCache:
                 "time": time.time(),
                 "ttl": ttl or self._ttl
             }
-            # Evict oldest if over capacity
             while len(self._cache) > self._maxsize:
                 self._cache.popitem(last=False)
     
@@ -233,7 +233,6 @@ class LRUMemoryCache:
             self._cache.clear()
     
     def cleanup_expired(self) -> int:
-        """Remove expired entries, return count removed"""
         with self._lock:
             expired = [k for k, v in self._cache.items() if self._is_expired(v)]
             for k in expired:
@@ -254,26 +253,15 @@ class LRUMemoryCache:
 
 
 class CacheManager:
-    """
-    Multi-layer cache manager
-    - Layer 1: LRUMemoryCache (fastest, per-process)
-    - Layer 2: TTL-based weather/water cache
-    """
-    
+    """Multi-layer cache manager"""
     def __init__(self):
-        # General purpose cache
         self.general = LRUMemoryCache(maxsize=512, default_ttl=CACHE_TTL_SECONDS)
-        # Weather-specific cache (30 min)
         self.weather = LRUMemoryCache(maxsize=256, default_ttl=1800)
-        # Water levels cache (15 min)
         self.water = LRUMemoryCache(maxsize=128, default_ttl=900)
-        # User sessions (30 min)
         self.sessions = LRUMemoryCache(maxsize=1024, default_ttl=SESSION_TTL_MINUTES * 60)
-        # Sheets data cache (10 min)
         self.sheets = LRUMemoryCache(maxsize=64, default_ttl=600)
     
     def cleanup_all(self) -> dict:
-        """Cleanup all expired entries, return stats"""
         return {
             "general": self.general.cleanup_expired(),
             "weather": self.weather.cleanup_expired(),
@@ -291,8 +279,6 @@ class CacheManager:
             "sheets": self.sheets.stats(),
         }
 
-
-# Global cache manager instance
 cache = CacheManager()
 
 
@@ -301,22 +287,16 @@ cache = CacheManager()
 # =============================================================================
 
 class RateLimiter:
-    """
-    Token bucket rate limiter per user
-    - Default: 30 requests per 60 seconds
-    - Burst protection with token bucket algorithm
-    """
-    
+    """Token bucket rate limiter per user"""
     def __init__(self, max_requests: int = 30, window_seconds: int = 60):
         self._max_requests = max_requests
         self._window = window_seconds
         self._buckets: Dict[str, dict] = {}
         self._lock = threading.Lock()
-        self._cleanup_interval = 300  # Cleanup every 5 minutes
+        self._cleanup_interval = 300
         self._last_cleanup = time.time()
     
     def _cleanup(self):
-        """Remove old bucket entries"""
         now = time.time()
         if now - self._last_cleanup < self._cleanup_interval:
             return
@@ -332,10 +312,6 @@ class RateLimiter:
                 Logger.info("RateLimiter", f"Cleaned up {len(expired)} expired buckets")
     
     def check(self, user_id: str) -> Tuple[bool, dict]:
-        """
-        Check if user can make a request
-        Returns: (allowed, metadata)
-        """
         self._cleanup()
         with self._lock:
             now = time.time()
@@ -348,13 +324,11 @@ class RateLimiter:
                 }
                 return True, {"remaining": self._max_requests - 1, "limit": self._max_requests}
             
-            # Reset window
             if now - bucket["last_reset"] > self._window:
                 bucket["tokens"] = self._max_requests - 1
                 bucket["last_reset"] = now
                 return True, {"remaining": self._max_requests - 1, "limit": self._max_requests}
             
-            # Check token
             if bucket["tokens"] <= 0:
                 retry_after = int(self._window - (now - bucket["last_reset"]))
                 Logger.security("RateLimiter", f"Rate limit exceeded", user_id)
@@ -362,39 +336,21 @@ class RateLimiter:
             
             bucket["tokens"] -= 1
             return True, {"remaining": bucket["tokens"], "limit": self._max_requests}
-    
-    def get_status(self, user_id: str) -> dict:
-        with self._lock:
-            bucket = self._buckets.get(user_id)
-            if not bucket:
-                return {"remaining": self._max_requests, "limit": self._max_requests}
-            return {"remaining": max(0, bucket["tokens"]), "limit": self._max_requests}
 
-
-# Global rate limiter
 rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW)
 
 
 def sanitize_text(text: str, max_length: int = 2000) -> str:
-    """Sanitize user input — strip non-printable control chars and enforce length limit.
-
-    หมายเหตุ: ระบบนี้ไม่ได้คุยกับ SQL database โดยตรง
-    จึงไม่จำเป็นต้องกรอง SQL syntax (เช่น --, @@)
-    การกรองนั้นอาจตัดข้อความภาษาไทยจริงๆ ออกไปโดยไม่ตั้งใจ
-    """
     if not text:
         return ""
-    # Remove control characters except newline/tab
     sanitized = "".join(
         ch for ch in text
         if ch in ("\n", "\t") or (ch.isprintable() and ord(ch) >= 32)
     )
-    # Limit length
     return sanitized[:max_length]
 
 
 def hash_user_id(user_id: str) -> str:
-    """Hash user_id for logging without exposing PII"""
     return hashlib.sha256(user_id.encode()).hexdigest()[:12]
 
 
@@ -403,121 +359,72 @@ def hash_user_id(user_id: str) -> str:
 # =============================================================================
 
 class IntentClassifier:
-    """
-    Rule-based Intent Classifier
-    Purpose: Filter messages BEFORE sending to Gemini API
-    Reduces token usage by ~80% for common patterns
-    
-    Intents:
-    - GREETING: ทักทาย, สวัสดี
-    - HELP: ถามว่าบอททำอะไรได้บ้าง / วิธีใช้
-    - SOS: ขอความช่วยเหลือฉุกเฉิน
-    - NEEDS: ขอสิ่งของ, ความต้องการ
-    - EMERGENCY: ช่วยด้วย, อันตรายถึงชีวิต
-    - SNAKE_BITE: ถูกงูกัด (ตอบด้วยข้อมูลปฐมพยาบาลที่ตรวจสอบแล้ว ไม่ใช่ AI freeform)
-    - SHELTER: หาศูนย์พักพิง
-    - WATER_LEVEL: เช็คระดับน้ำ
-    - WEATHER: เช็คสภาพอากาศ
-    - CONTACT: เบอร์โทรฉุกเฉิน
-    - LANGUAGE: เปลี่ยนภาษา
-    - CANCEL: ยกเลิก
-    - AI_QUERY: ส่งต่อ Gemini (เฉพาะคำถามทั่วไปที่ไม่ตรงกับ intent ข้างต้น)
-    """
-    
-    # ⚠️ ลำดับ key ใน dict มีความสำคัญ: classify() วน loop ตามลำดับนี้
-    # EMERGENCY และ SOS ต้องมาก่อน GREETING เสมอ
-    # คำที่ทับซ้อนกับ EMERGENCY/SOS ถูกเอาออกจาก GREETING แล้ว (เช่น "ช่วยด้วยครับ")
+    """Rule-based Intent Classifier to reduce API costs"""
     PATTERNS = {
         "EMERGENCY": [
-            "ช่วยด้วย", "ช่วยด้วยครับ", "ช่วยด้วยค่ะ",
-            "จะตาย", "จมแล้ว", "ไฟดูด", "ไฟฟ้าดูด",
-            "หายใจไม่ออก", "เป็นลม", "บาดเจ็บสาหัส", "ด่วนที่สุด",
-            "วิกฤต", "ช่วยชีวิต", "กำลังจม", "ติดอยู่", "ขอความช่วยเหลือด่วน",
-            "น้ำเข้าบ้าน", "น้ำกำลังเข้าบ้าน", "ติดอยู่บนหลังคา", "ติดหลังคา",
-            "น้ำเชี่ยว", "คนจมน้ำ", "รถติดกลางน้ำ", "น้ำเข้ารถ"
+            "ช่วยด้วย", "ช่วยด้วยครับ", "ช่วยด้วยค่ะ", "จะตาย", "จมแล้ว", "ไฟดูด", "ไฟฟ้าดูด",
+            "หายใจไม่ออก", "เป็นลม", "บาดเจ็บสาหัส", "ด่วนที่สุด", "วิกฤต", "ช่วยชีวิต", 
+            "กำลังจม", "ติดอยู่", "ขอความช่วยเหลือด่วน", "น้ำเข้าบ้าน", "น้ำกำลังเข้าบ้าน", 
+            "ติดอยู่บนหลังคา", "ติดหลังคา", "น้ำเชี่ยว", "คนจมน้ำ", "รถติดกลางน้ำ", "น้ำเข้ารถ"
         ],
         "SOS": [
-            "sos", "🆘", "ขอความช่วยเหลือ", "แจ้งเหตุ", "กู้ภัย",
-            "ติดน้ำท่วม", "จมน้ำ", "ช่วย"
+            "sos", "🆘", "ขอความช่วยเหลือ", "แจ้งเหตุ", "กู้ภัย", "ติดน้ำท่วม", "จมน้ำ", "ช่วย"
         ],
         "SNAKE_BITE": [
-            "งูกัด", "ถูกงูกัด", "โดนงูกัด", "งูกัดครับ", "งูกัดค่ะ",
-            "ถูกงู", "โดนงู", "งูฉก", "ถูกสัตว์มีพิษกัด"
+            "งูกัด", "ถูกงูกัด", "โดนงูกัด", "งูกัดครับ", "งูกัดค่ะ", "ถูกงู", "โดนงู", "งูฉก", "ถูกสัตว์มีพิษกัด"
         ],
         "GREETING": [
-            "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า", "ดีคับ",
-            "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
-            "เริ่ม", "start", "menu", "เมนู"
+            "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า", "ดีคับ", "hello", "hi", "hey", 
+            "good morning", "good afternoon", "good evening", "เริ่ม", "start", "menu", "เมนู"
         ],
         "NEEDS": [
-            "ขอของ", "ต้องการ", "ขาดแคลน", "ไม่มีอาหาร", "ไม่มีน้ำ",
-            "ของบริจาค", "ขอความช่วยเหลือเรื่องของ", "need help",
-            "แจ้งความต้องการ", "ขอน้ำดื่ม", "ขอยา", "ขอเสื้อผ้า"
+            "ขอของ", "ต้องการ", "ขาดแคลน", "ไม่มีอาหาร", "ไม่มีน้ำ", "ของบริจาค", 
+            "ขอความช่วยเหลือเรื่องของ", "need help", "แจ้งความต้องการ", "ขอน้ำดื่ม", "ขอยา", "ขอเสื้อผ้า"
         ],
         "SHELTER": [
-            "ศูนย์พักพิง", "ที่พัก", "อพยพ", "หลบภัย", "หลบน้ำ",
-            "ที่พักชั่วคราว", "evacuation center", "shelter",
-            "ไปไหนดี", "พักที่ไหน", "ห้างน้ำท่วม"
+            "ศูนย์พักพิง", "ที่พัก", "อพยพ", "หลบภัย", "หลบน้ำ", "ที่พักชั่วคราว", 
+            "evacuation center", "shelter", "ไปไหนดี", "พักที่ไหน", "ห้างน้ำท่วม"
         ],
         "WATER_LEVEL": [
-            "ระดับน้ำ", "น้ำท่วม", "น้ำสูง", "เช็คน้ำ", "ตรวจน้ำ",
-            "water level", "flood level", "น้ำขึ้น", "น้ำลด",
-            "สถานการณ์น้ำ", "check water"
+            "ระดับน้ำ", "น้ำท่วม", "น้ำสูง", "เช็คน้ำ", "ตรวจน้ำ", "water level", 
+            "flood level", "น้ำขึ้น", "น้ำลด", "สถานการณ์น้ำ", "check water"
         ],
         "WEATHER": [
-            "สภาพอากาศ", "พยากรณ์อากาศ", "ฝนตก", "ฝน", "อากาศ",
-            "weather", "forecast", "rain", " raining",
-            "จะฝนตกไหม", "เช็คฝน", "check weather"
+            "สภาพอากาศ", "พยากรณ์อากาศ", "ฝนตก", "ฝน", "อากาศ", "weather", 
+            "forecast", "rain", " raining", "จะฝนตกไหม", "เช็คฝน", "check weather"
         ],
         "CONTACT": [
-            "เบอร์โทร", "โทรศัพท์", "ติดต่อ", "สายด่วน", "hotline",
-            "phone", "contact", "call", "เบอร์ฉุกเฉิน",
-            "โทรหาใคร", "เบอร์ ปภ", "1784", "1669"
+            "เบอร์โทร", "โทรศัพท์", "ติดต่อ", "สายด่วน", "hotline", "phone", 
+            "contact", "call", "เบอร์ฉุกเฉิน", "โทรหาใคร", "เบอร์ ปภ", "1784", "1669"
         ],
         "LANGUAGE": [
-            "เปลี่ยนภาษา", "change language", "language", "ภาษา",
-            "lang", "english", "ไทย", "japanese", "日本語"
+            "เปลี่ยนภาษา", "change language", "language", "ภาษา", "lang", "english", "ไทย", "japanese", "日本語"
         ],
         "CANCEL": [
-            "ยกเลิก", "cancel", "หยุด", "stop", "ออก", "exit",
-            "เริ่มใหม่", "restart", "reset"
+            "ยกเลิก", "cancel", "หยุด", "stop", "ออก", "exit", "เริ่มใหม่", "restart", "reset"
         ],
         "REGISTRATION": [
-            "ลงทะเบียน", "register", "สมัคร", "เข้าร่วม",
-            "ลงชื่อ", "ข้อมูลของฉัน", "โปรไฟล์", "profile"
+            "ลงทะเบียน", "register", "สมัคร", "เข้าร่วม", "ลงชื่อ", "ข้อมูลของฉัน", "โปรไฟล์", "profile"
         ],
         "HELP": [
-            "ทำอะไรได้บ้าง", "ทำอะไรได้", "มีอะไรบ้าง", "ช่วยอะไรได้บ้าง",
-            "ใช้งานยังไง", "ใช้งานอย่างไร", "วิธีใช้", "what can you do",
-            "capabilities", "คุณคือใคร", "คุณทำอะไรได้"
+            "ทำอะไรได้บ้าง", "ทำอะไรได้", "มีอะไรบ้าง", "ช่วยอะไรได้บ้าง", "ใช้งานยังไง", 
+            "ใช้งานอย่างไร", "วิธีใช้", "what can you do", "capabilities", "คุณคือใคร", "คุณทำอะไรได้"
         ],
         "FAQ": [
-            "คำถามยอดฮิต", "คำถามที่พบบ่อย", "faq", "คำถามทั่วไป",
-            "อยากรู้เรื่อง", "บอกข้อมูล", "ค้นหา", "search",
-            "น้ำท่วม 2567", "น้ำท่วม 2568", "น้ำท่วมล่าสุด",
-            "สถานการณ์น้ำ", "ข่าวน้ำท่วม", "อัพเดทน้ำท่วม",
-            "ระดับน้ำล่าสุด", "คาดการณ์น้ำ", "พยากรณ์น้ำ",
+            "คำถามยอดฮิต", "คำถามที่พบบ่อย", "faq", "คำถามทั่วไป", "อยากรู้เรื่อง", "บอกข้อมูล", 
+            "ค้นหา", "search", "น้ำท่วม 2567", "น้ำท่วม 2568", "น้ำท่วมล่าสุด", "สถานการณ์น้ำ", 
+            "ข่าวน้ำท่วม", "อัพเดทน้ำท่วม", "ระดับน้ำล่าสุด", "คาดการณ์น้ำ", "พยากรณ์น้ำ"
         ],
     }
     
     @classmethod
     def classify(cls, text: str) -> Tuple[str, float]:
-        """
-        Classify user text into intent
-        Returns: (intent, confidence)
-        
-        ⚠️ ลำดับการตรวจ: EMERGENCY → SOS → อื่นๆ
-        เพื่อให้แน่ใจว่าคำขอความช่วยเหลือฉุกเฉินไม่ถูกจำแนกผิด
-        """
         if not text:
             return ("AI_QUERY", 0.5)
         
         text_lower = text.strip().lower()
         text_clean = text_lower.strip("!.,😊🙏👋🆘 ")
         
-        # ✅ ตรวจ EMERGENCY, SOS และ SNAKE_BITE ก่อนเสมอ (priority override)
-        # SNAKE_BITE ต้องมาก่อน เพราะเป็นเหตุการณ์ที่ต้องตอบด้วยข้อมูลปฐมพยาบาลที่ถูกต้อง
-        # แม่นยำ ไม่ใช่คำตอบสั้นๆ ที่ AI สร้างขึ้นเองซึ่งอาจขาดความครบถ้วน
         PRIORITY_INTENTS = ["EMERGENCY", "SOS", "SNAKE_BITE"]
         for intent in PRIORITY_INTENTS:
             keywords = cls.PATTERNS.get(intent, [])
@@ -532,10 +439,9 @@ class IntentClassifier:
                 if len(keyword) < 4 and kw_lower in text_lower:
                     return (intent, 0.7)
         
-        # ตรวจ intent อื่นๆ ตามลำดับปกติ (ยกเว้น EMERGENCY/SOS ที่ตรวจแล้ว)
         for intent, keywords in cls.PATTERNS.items():
             if intent in PRIORITY_INTENTS:
-                continue  # ข้ามไป เพราะตรวจแล้วด้านบน
+                continue
             for keyword in keywords:
                 kw_lower = keyword.lower()
                 if text_clean == kw_lower:
@@ -547,41 +453,11 @@ class IntentClassifier:
                 if len(keyword) < 4 and kw_lower in text_lower:
                     return (intent, 0.7)
         
-        # Fallback: ตรวจ emergency keywords กว้างๆ อีกรอบ
         emergency_words = ["ช่วย", "ด่วน", "วิกฤต", "ฉุกเฉิน", "help", "emergency", "urgent"]
         if any(w in text_lower for w in emergency_words):
             return ("EMERGENCY", 0.6)
         
-        # Default: ส่งต่อ AI
         return ("AI_QUERY", 0.5)
-    
-    @classmethod
-    def should_use_ai(cls, text: str) -> bool:
-        """Determine if message needs Gemini processing"""
-        intent, confidence = cls.classify(text)
-        # Only use AI for AI_QUERY intent
-        return intent == "AI_QUERY"
-    
-    @classmethod
-    def get_quick_response(cls, intent: str) -> Optional[str]:
-        """Get pre-defined response for common intents (avoid AI call)"""
-        responses = {
-            "GREETING": None,  # Use greeting handler
-            "SOS": None,       # Use SOS flow
-            "NEEDS": None,     # Use needs flow
-            "SHELTER": None,   # Use shelter flow
-            "WATER_LEVEL": None,  # Use water level flow
-            "WEATHER": None,   # Use weather flow
-            "CONTACT": None,   # Use contact handler
-            "LANGUAGE": None,  # Use language handler
-            "CANCEL": "❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ คุณสามารถกดใช้งานเมนูหลักใหม่ได้ทันทีครับ",
-            "EMERGENCY": None,  # Special emergency handler
-            "REGISTRATION": None,  # Use registration flow
-            "SNAKE_BITE": None,  # Use dedicated first-aid handler
-            "HELP": None,  # Use capabilities/menu handler
-            "FAQ": None,  # Use web-search grounded AI handler
-        }
-        return responses.get(intent)
 
 
 # =============================================================================
@@ -589,9 +465,6 @@ class IntentClassifier:
 # =============================================================================
 
 class UserSession:
-    """
-    Enhanced user session with TTL and metadata
-    """
     def __init__(self, user_id: str):
         self.user_id = user_id
         self.state = "IDLE"
@@ -603,7 +476,6 @@ class UserSession:
         self.last_intent = ""
     
     def update(self, state: str = None, data: dict = None):
-        """Update session state and data"""
         if state:
             self.state = state
         if data:
@@ -612,37 +484,20 @@ class UserSession:
         self.message_count += 1
     
     def is_expired(self, ttl_minutes: int = SESSION_TTL_MINUTES) -> bool:
-        """Check if session has expired"""
         return time.time() - self.updated_at > ttl_minutes * 60
     
     def reset(self):
-        """Reset session to idle state"""
         self.state = "IDLE"
         self.data = {}
         self.updated_at = time.time()
-    
-    def to_dict(self) -> dict:
-        return {
-            "user_id": hash_user_id(self.user_id),
-            "state": self.state,
-            "language": self.language,
-            "message_count": self.message_count,
-            "last_intent": self.last_intent,
-            "age_minutes": round((time.time() - self.updated_at) / 60, 1)
-        }
 
 
 class SessionManager:
-    """
-    Central session management with auto-cleanup
-    """
-    
     def __init__(self):
         self._sessions: Dict[str, UserSession] = {}
         self._lock = threading.Lock()
     
     def get(self, user_id: str) -> UserSession:
-        """Get or create user session"""
         with self._lock:
             session = self._sessions.get(user_id)
             if session is None or session.is_expired():
@@ -651,63 +506,31 @@ class SessionManager:
             return session
     
     def update(self, user_id: str, state: str = None, data: dict = None):
-        """Update user session"""
         session = self.get(user_id)
         session.update(state=state, data=data)
         return session
     
     def reset(self, user_id: str):
-        """Reset user session"""
         session = self.get(user_id)
         session.reset()
     
     def delete(self, user_id: str):
-        """Delete user session"""
         with self._lock:
             self._sessions.pop(user_id, None)
     
     def cleanup_expired(self) -> int:
-        """Remove expired sessions, return count"""
         with self._lock:
             expired = [uid for uid, s in self._sessions.items() if s.is_expired()]
             for uid in expired:
                 del self._sessions[uid]
             return len(expired)
-    
-    def stats(self) -> dict:
-        """Get session statistics"""
-        with self._lock:
-            total = len(self._sessions)
-            active = sum(1 for s in self._sessions.values() if not s.is_expired())
-            by_state = {}
-            for s in self._sessions.values():
-                by_state[s.state] = by_state.get(s.state, 0) + 1
-            return {
-                "total_sessions": total,
-                "active_sessions": active,
-                "expired_sessions": total - active,
-                "by_state": by_state
-            }
 
-
-# Global session manager
 sessions = SessionManager()
-
-# Legacy compatibility
-USER_STATES: Dict[str, str] = {}  # Maps to sessions
-USER_DATA: Dict[str, dict] = {}   # Maps to sessions
-
-
-def sync_legacy_state(user_id: str) -> str:
-    """Sync legacy USER_STATES with new session manager"""
-    session = sessions.get(user_id)
-    USER_STATES[user_id] = session.state
-    USER_DATA[user_id] = session.data
-    return session.state
+USER_STATES: Dict[str, str] = {}
+USER_DATA: Dict[str, dict] = {}
 
 
 def update_legacy_state(user_id: str, state: str, data: dict = None):
-    """Update both legacy and new state"""
     USER_STATES[user_id] = state
     if data:
         USER_DATA[user_id] = data
@@ -715,93 +538,29 @@ def update_legacy_state(user_id: str, state: str, data: dict = None):
 
 
 # =============================================================================
-# SECTION 7: GEMINI AI OPTIMIZATION
+# SECTION 7: GEMINI AI OPTIMIZATION (Optimized & Beautiful Responses)
 # =============================================================================
 
 gemini_model = None
 _gemini_initialized = False
 
-# System instruction kept as a module-level constant — the new google-genai SDK
-# takes system_instruction per-call (inside GenerateContentConfig) rather than
-# baked into a persistent "model" object like the old SDK did, so we no longer
-# build a GenerativeModel here; we build a genai.Client instead and pass this
-# string into each generate_content() call's config.
 FLOODCARE_SYSTEM_INSTRUCTION = (
-    # ======================== IDENTITY ========================
-    "คุณคือ FLOODCARE AI น้องบอทผู้ช่วยด้านภัยน้ำท่วมและเหตุฉุกเฉิน\n"
-    "สไตล์การตอบ: กระชับ ชัดเจน อ่านง่าย เป็นกันเอง แต่ข้อมูลต้องถูกต้องและมีแหล่งที่มาเสมอ\n"
-    "ตอบเป็นภาษาไทยเสมอ\n\n"
-
-    # ====================== STEP 1: SEVERITY ======================
-    "[1] ก่อนตอบทุกครั้ง ให้ประเมินระดับสถานการณ์จากความหมายของประโยค ไม่ใช่จับคำตรงตัว:\n"
-    "  NORMAL = ถามข้อมูลทั่วไป เช่น 'น้ำท่วมตอนนี้เป็นยังไงบ้าง' 'ปวดหัวหลังน้ำท่วมต้องทำไง'\n"
-    "  WARNING = กังวลแต่ยังไม่ฉุกเฉิน เช่น 'บ้านผมจะท่วมไหม' 'เด็กไม่สบายหลังน้ำลด'\n"
-    "  EMERGENCY = มีปัญหาเร่งด่วนแต่ยังไม่ถึงชีวิต เช่น 'ลูกติดอยู่ที่โรงเรียน' 'ไฟดับ น้ำเข้าหม้อแปลง' 'รถเสียกลางน้ำ'\n"
-    "  SOS = อันตรายถึงชีวิตทันที เช่น 'น้ำกำลังเข้าบ้านรวดเร็วมาก' 'คนกำลังจมน้ำ' 'ไฟดูด' 'ถูกงูกัด' 'ติดหลังคา'\n\n"
-
-    # ====================== STEP 2: RESPONSE BY LEVEL ======================
-    "[2] ตอบตามระดับ:\n"
-    "  NORMAL/WARNING: ตอบกระชับ ชัดเจน เข้าใจง่าย\n"
-    "  EMERGENCY: ตอบเป็นขั้นตอนชัดเจน แนะนำเบอร์ฉุกเฉิน (ปภ. 1784, สพฉ. 1669) และแนะนำให้พิมพ์ 'sos'\n"
-    "  SOS: ตอบคำแนะนำด่วนและเบอร์ฉุกเฉินทันที ห้ามยืดเยื้อ\n\n"
-
-    # ====================== STEP 3: SCOPE ======================
-    "[3] เรื่องที่ตอบได้ (ตอบได้หมดไม่ว่าจะพิมพ์ยังไง):\n"
-    "  น้ำท่วม, ฝนหนัก, น้ำป่า, ดินถล่ม, พายุ\n"
-    "  การอพยพ, จุดปลอดภัย, ศูนย์พักพิง, การเดินทางช่วงน้ำท่วม\n"
-    "  การปฐมพยาบาล, การเอาตัวรอด, เบอร์ฉุกเฉิน\n"
-    "  อาหาร, น้ำดื่ม, ไฟฟ้า, สัตว์มีพิษ\n"
-    "  อาการเจ็บป่วยทุกชนิด (ไข้ ปวด ท้องเสีย ผื่น บาดแผล ฯลฯ) "
-    "— เพราะผู้ประสบภัยน้ำท่วมเจ็บป่วยได้เยอะ ตอบได้เลยไม่ต้องถาม\n"
-    "  ความเครียด, วิตกกังวล, ซึมเศร้า, สุขภาพจิต "
-    "— ผู้ประสบภัยมักเครียด ตอบด้วยความเข้าใจและแนะนำทางออก\n"
-    "  อุบัติเหตุทุกประเภท\n\n"
-
-    # ====================== STEP 4: OUT OF SCOPE ======================
-    "[4] เรื่องที่ตอบไม่ได้ (ตอบแบบเพื่อนที่อ้อมๆแต่ไม่เสียน้ำใจ):\n"
-    "  ถ้าคำถามไม่เกี่ยวกับเรื่องใน [3] เลยจริงๆ เช่น ฟุตบอล, เกม, การบ้านวิชาอื่น, "
-    "ข่าวบันเทิง, รถยนต์ทั่วไป, การลงทุน, ทำอาหารทั่วไป\n"
-    "  ให้ตอบแบบเพื่อนอ้อมๆ เช่น 'โอ้โห ถามนอกเรื่องเลยนะ 555 "
-    "เราเชี่ยวชาญเรื่องน้ำท่วมกับภัยพิบัติโดยเฉพาะเลยครับ ถ้ามีเรื่องน้ำท่วมหรือ "
-    "ไม่สบายหลังน้ำลด บอกได้เลยนะ'\n"
-    "  ห้ามใช้ข้อนี้กับคำถามสุขภาพ/อาการเจ็บป่วย/ความรู้สึก ซึ่งตอบได้เสมอตามข้อ [3]\n\n"
-
-    # ====================== STEP 5: CITATION (MANDATORY) ======================
-    "[5] การอ้างอิง (บังคับทุกคำตอบที่ให้ข้อมูลจริงจัง):\n"
-    "  ทุกคำตอบที่ให้ข้อมูลด้านความปลอดภัย สุขภาพ หรือสถานการณ์น้ำท่วม "
-    "ต้องมีส่วน '--- แหล่งข้อมูล ---' ต่อท้ายเสมอ\n"
-    "  รูปแบบ:\n"
-    "  --- แหล่งข้อมูล ---\n"
-    "  - ชื่อหน่วยงาน: URL จริง\n"
-    "  - ชื่อหน่วยงาน: URL จริง\n"
-    "  ใช้แหล่งข้อมูลที่น่าเชื่อถือเท่านั้น เช่น กรมควบคุมโรค, กรมชลประทาน, สภากาชาดไทย, "
-    "กรมอุตุนิยมวิทยา, ปภ., สถาบันการแพทย์ฉุกเฉิน, ศูนย์พิษวิทยารามาธิบดี\n"
-    "  ห้ามแต่งลิงก์ขึ้นมาเอง ถ้าไม่มั่นใจ URL ให้ระบุแค่ชื่อหน่วยงานและเบอร์โทร\n"
-    "  ห้ามสร้างข้อมูลเท็จหรือเดาข้อมูลที่ไม่มี โดยเฉพาะระดับน้ำและสภาพอากาศ "
-    "ต้องบอกตรงๆว่า 'ต้องตรวจสอบจากแหล่งข้อมูลจริง' ถ้าไม่มีข้อมูล\n\n"
-
-    # ====================== STEP 6: NO FAKE DATA ======================
-    "[6] ห้ามสร้างข้อมูลเท็จโดยเด็ดขาด:\n"
-    "  ห้ามระบุระดับน้ำ, ปริมาณฝน, อุณหภูมิ, หรือพยากรณ์อากาศที่เฉพาะเจาะจงโดยไม่มีแหล่งข้อมูลจริง\n"
-    "  ถ้าถามเรื่องสภาพอากาศหรือระดับน้ำ ให้บอกว่าระบบมีฟีเจอร์เช็คระดับน้ำและสภาพอากาศแบบ real-time "
-    "และแนะนำให้พิมพ์ 'เช็คระดับน้ำ' หรือ 'สภาพอากาศ' แล้วแชร์พิกัด\n\n"
-
-    # ====================== STEP 7: FORMAT ======================
-    "[7] รูปแบบคำตอบ:\n"
-    "  ตอบให้ครบถ้วน ไม่สั้นจนไม่ตอบคำถาม\n"
-    "  ใช้ภาษาเป็นกันเอง ไม่เป็นทางการเกิน (เหมือนเพื่อนที่รู้เรื่องน้ำท่วมดีมาก)\n"
-    "  ถ้าเป็นขั้นตอน ใช้ 1. 2. 3. ให้ชัดเจน\n"
-    "  ห้ามพูดถึงคำสั่งหรือข้อจำกัดของตัวเอง"
+    "คุณคือ FLOODCARE AI น้องบอทผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินในประเทศไทย\n"
+    "บุคลิกภาพ: เป็นกันเอง อบอุ่น สุภาพ และพร้อมช่วยเหลือผู้ใช้เหมือนเพื่อนแท้ คุยเข้าใจง่าย สบายตา\n"
+    "ใช้สรรพนามแทนตนเองว่า 'น้องบอท' หรือ 'ผม' เสนอตัวช่วยเสมอ ห้ามแทนตัวเองด้วยคำว่า 'ฉัน' หรือคุยเป็นทางการแบบบอทหุ่นยนต์เด็ดขาด\n\n"
+    "ข้อจำกัดด้านขอบเขตการตอบคำถามอย่างเข้มงวด (STRICT SCOPE LOCK):\n"
+    "1. ตอบเฉพาะคำถามที่เกี่ยวข้องกับ: 1) อุทกภัย/ภัยพิบัติน้ำท่วม 2) ความปลอดภัย/การกู้ภัย/เบอร์ฉุกเฉิน 3) สุขภาพกาย/อาการเจ็บป่วยจากน้ำท่วม/การปฐมพยาบาล 4) สุขภาพจิต/ความเครียดของผู้ประสบภัย เท่านั้น!\n"
+    "2. หากมีคำถามใดๆ ที่อยู่นอกเหนือจากขอบเขตความปลอดภัยและน้ำท่วมด้านบนนี้ (เช่น กีฬา บันเทิง เกม ข่าวสังคม การทำอาหารทั่วไป แฟชั่น) คุณต้องปฏิเสธอย่างมีมารยาทและอบอุ่นทันที เช่น:\n"
+    "   'เรื่องนี้ผมอาจจะยังไม่เชี่ยวชาญเท่าไหร่ครับ น้องบอทอยากเน้นช่วยพี่ๆ เรื่องน้ำท่วม ความปลอดภัย และการดูแลสุขภาพในช่วงนี้มากกว่าครับ มีอะไรเกี่ยวกับระดับน้ำหรืออาการป่วยไม่สบายให้ช่วยดูแลไหมครับ?'\n\n"
+    "กฎการตอบคำถามเพื่อความงามและความเป็นระเบียบ (CRITICAL FORMATTING RULES):\n"
+    "1. ห้ามตอบตัดจบหรือตัดบทกลางประโยค ให้ตอบข้อความให้ครบประโยคและบริบูรณ์สมบูรณ์เสมอ\n"
+    "2. ห้ามใช้เครื่องหมายดอกจันสองตัว (**) หรือดอกจันตัวเดียว (*) ในข้อความอย่างเด็ดขาด เพราะทำให้ข้อความรกบนระบบ LINE ให้เว้นบรรทัดและเขียนข้อความให้อ่านง่ายแทน\n"
+    "3. แบ่งเนื้อหาเป็นย่อหน้าสั้นๆ อย่างชัดเจน และใช้สัญลักษณ์นำหน้าหัวข้อที่สวยงาม เช่น • หรือใช้ตัวเลข 1. 2. 3. หากแสดงขั้นตอน\n"
+    "4. แหล่งข้อมูลอ้างอิง: ทุกคำตอบที่เป็นข้อมูลทางการแพทย์หรือความปลอดภัย ต้องลงท้ายด้วย '--- แหล่งข้อมูล ---' และระบุชื่อหน่วยงานที่น่าเชื่อถือ (เช่น กรมควบคุมโรค, สภากาชาดไทย, ปภ.)"
 )
 
 
 def init_gemini():
-    """Lazy initialize the Gemini client (new google-genai SDK).
-
-    `gemini_model` here holds a `genai.Client` instance (NOT a GenerativeModel
-    like the old deprecated SDK) — kept under the same variable name so the
-    rest of the file (and any external code) doesn't need to change.
-    """
     global gemini_model, _gemini_initialized
     if _gemini_initialized:
         return gemini_model is not None
@@ -821,22 +580,16 @@ def init_gemini():
         return False
 
 
-def ask_gemini(prompt: str, max_tokens: int = 300) -> str:
+def ask_gemini(prompt: str, max_tokens: int = 8192) -> str:
     """
-    Optimized Gemini API call with caching (google-genai SDK).
-    - Cache responses for identical prompts
-    - Limit max tokens
-    - Handle errors gracefully
+    Optimized Gemini API call.
+    - Uses full token capacity (8192) to avoid truncation issues.
     """
     start_time = time.time()
-    
     if not init_gemini():
         return "⚠️ AI ไม่พร้อมใช้งาน หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
     
-    # Generate cache key from prompt hash
     cache_key = f"gemini:{hashlib.md5(prompt.encode()).hexdigest()}"
-    
-    # Check cache (5 min TTL for AI responses)
     cached = cache.general.get(cache_key)
     if cached:
         elapsed = (time.time() - start_time) * 1000
@@ -844,7 +597,6 @@ def ask_gemini(prompt: str, max_tokens: int = 300) -> str:
         return cached
     
     try:
-        # gemini_model here is a genai.Client (see init_gemini)
         response = gemini_model.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
@@ -861,62 +613,45 @@ def ask_gemini(prompt: str, max_tokens: int = 300) -> str:
             ),
         )
         result = clean_text_for_line((response.text or "").strip())
-        
-        # Cache for 5 minutes
         cache.general.set(cache_key, result, ttl=300)
         
         elapsed = (time.time() - start_time) * 1000
         Logger.perf("Gemini", "api_call", elapsed, {"prompt_len": len(prompt)})
-        
         return result
-        
     except Exception as e:
         elapsed = (time.time() - start_time) * 1000
         Logger.error("Gemini", f"API error: {e}", {"elapsed_ms": round(elapsed, 1)})
         return "⚠️ AI ขัดข้องชั่วคราว หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
 
 
-def ask_gemini_with_search(question: str, max_tokens: int = 700) -> dict:
+def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
     """
-    Gemini API call with Google Search grounding enabled (google-genai SDK).
-    Returns dict: {"answer": str, "sources": list[{"title": str, "url": str}]}
-
-    Uses Gemini's built-in Google Search grounding tool — the model searches
-    Google automatically when it needs current information (e.g. latest flood
-    news, current water levels, recent warnings). This is the right tool for
-    FAQ/current events, NOT `ask_gemini()` which has no real-time data access.
-
-    Falls back to plain `ask_gemini()` if grounding fails or is unavailable.
+    Gemini API call with Google Search grounding.
+    - Uses full token capacity (8192) to avoid truncation issues.
     """
     if not init_gemini():
         return {"answer": "⚠️ AI ไม่พร้อมใช้งาน โทร ปภ. 1784 หากฉุกเฉินครับ", "sources": []}
 
     start_time = time.time()
-
-    # Build search-optimised prompt that instructs the model to cite sources
     prompt = (
-        "คุณคือ FLOODCARE AI ผู้ช่วยด้านน้ำท่วมของไทย ค้นหาข้อมูลและตอบคำถามต่อไปนี้:\n\n"
+        "ค้นหาข้อมูลอย่างละเอียดและตอบคำถามนี้โดยทำตามกฎต่อไปนี้อย่างเคร่งครัด:\n\n"
         f"คำถาม: {question}\n\n"
-        "กฎการตอบ:\n"
-        "1. ตอบเป็นภาษาไทยที่อ่านง่าย เรียบเรียงใหม่จากข้อมูลที่ค้นพบ ไม่คัดลอกมาตรงๆ\n"
-        "2. ย่อหน้าสั้น ชัดเจน มีหัวข้อย่อยถ้าเหมาะสม\n"
-        "3. ถ้าเป็นข้อมูลล่าสุด/ข่าว ให้ระบุวันที่หรือช่วงเวลาที่แหล่งข้อมูลรายงาน\n"
-        "4. ต่อท้ายด้วยส่วน '--- แหล่งข้อมูล ---' พร้อม URL จริงของแหล่งที่มาที่ค้นพบ\n"
-        "5. ตอบเฉพาะเรื่องน้ำท่วม ภัยพิบัติ ความปลอดภัย สภาพอากาศ หรือการช่วยเหลือผู้ประสบภัยเท่านั้น\n"
-        "6. ห้ามสร้างข้อมูลเท็จหรือเดาตัวเลข (ระดับน้ำ/อุณหภูมิ/ปริมาณฝน) ถ้าค้นไม่เจอข้อมูลจริง ให้บอกตรงๆ"
+        "กฎในการตอบ:\n"
+        "1. ห้ามใช้เครื่องหมายดอกจันเดี่ยวหรือสองชั้น (*) ในข้อความอย่างเด็ดขาด\n"
+        "2. เขียนข้อความให้อ่านง่าย เป็นระเบียบเรียบร้อย แบ่งย่อหน้าชัดเจน มีสัญลักษณ์หัวข้อ (•)\n"
+        "3. ตอบคำถามให้อ่านเข้าใจง่าย กระชับ และจบข้อความอย่างสมบูรณ์แบบ ห้ามหยุดประโยคกลางคัน\n"
+        "4. บังคับใส่ส่วน '--- แหล่งข้อมูล ---' พร้อมลิงก์ URL อ้างอิงที่สืบค้นได้จริงด้านล่างสุดเสมอ"
     )
 
     try:
-        # gemini_model here is a genai.Client (see init_gemini)
         response = gemini_model.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=(
-                    "You are FLOODCARE AI, a Thai flood emergency assistant. "
-                    "Always respond in Thai. Use Google Search to find current, "
-                    "accurate information. Never fabricate data. Always cite your "
-                    "sources with real URLs at the end of your response."
+                    "You are FLOODCARE AI. Always respond in Thai. Make sure to generate "
+                    "beautifully structured, highly readable, complete Thai responses without any asterisks. "
+                    "Use Google Search tool. Under no circumstances should you truncate or leave the response cut off."
                 ),
                 max_output_tokens=max_tokens,
                 temperature=0.2,
@@ -925,7 +660,6 @@ def ask_gemini_with_search(question: str, max_tokens: int = 700) -> dict:
         )
         raw_text = clean_text_for_line((response.text or "").strip())
 
-        # Extract source URLs from grounding metadata if available
         sources = []
         try:
             for candidate in response.candidates:
@@ -939,27 +673,24 @@ def ask_gemini_with_search(question: str, max_tokens: int = 700) -> dict:
                             if uri:
                                 sources.append({"title": title, "url": uri})
         except Exception:
-            pass  # Grounding metadata shape can vary by SDK version
+            pass
 
         elapsed = (time.time() - start_time) * 1000
         Logger.perf("Gemini", "search_call", elapsed)
         return {"answer": raw_text, "sources": sources}
-
     except Exception as e:
-        # Grounding not available (API error / quota / model mismatch) — fall back to plain AI
         Logger.info("Gemini", f"Search grounding failed ({e}), falling back to plain ask_gemini")
         answer = ask_gemini(prompt, max_tokens=max_tokens)
         return {"answer": answer, "sources": []}
 
+
 def clean_text_for_line(text: str) -> str:
-    """กรองลบเครื่องหมายดอกจัน (*) สำหรับ LINE"""
     if not text:
         return ""
-    return text.replace("**", "").replace("*", "")
+    return text.replace("**", "").replace("*", "").replace("###", "").replace("##", "").replace("#", "")
 
 
 def extract_number(text: str) -> str:
-    """ดึงตัวเลขจากข้อความ"""
     if not text:
         return "1"
     cleaned = "".join(filter(str.isdigit, text))
@@ -967,7 +698,6 @@ def extract_number(text: str) -> str:
 
 
 def parse_yes_no(text: str) -> str:
-    """แปลงข้อความเป็น YES/NO"""
     if not text:
         return "NO"
     text_clean = text.strip().lower()
@@ -980,7 +710,6 @@ def parse_yes_no(text: str) -> str:
 
 
 def extract_sheet_id(sheet_var: str) -> str:
-    """คัดกรองรหัส Google Sheet ID จาก URL"""
     if not sheet_var:
         return ""
     if "/d/" in sheet_var:
@@ -992,7 +721,6 @@ def extract_sheet_id(sheet_var: str) -> str:
 
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """คำนวณระยะทาง Haversine (หน่วย: กิโลเมตร)"""
     R = 6371
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
@@ -1002,17 +730,15 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 
 def generate_case_id() -> str:
-    """Generate unique SOS case ID using date + random UUID suffix"""
     import uuid
-    today = datetime.datetime.now().strftime("%Y%m%d")
+    today = get_bangkok_time().strftime("%Y%m%d")
     suffix = uuid.uuid4().hex[:6].upper()
     return f"SOS-{today}-{suffix}"
 
 
 def generate_need_id() -> str:
-    """Generate unique Need case ID using date + random UUID suffix"""
     import uuid
-    today = datetime.datetime.now().strftime("%Y%m%d")
+    today = get_bangkok_time().strftime("%Y%m%d")
     suffix = uuid.uuid4().hex[:6].upper()
     return f"NEED-{today}-{suffix}"
 
@@ -1022,11 +748,6 @@ def generate_need_id() -> str:
 # =============================================================================
 
 class SheetsManager:
-    """
-    Optimized Google Sheets manager with connection pooling
-    and batch write operations
-    """
-    
     def __init__(self):
         self._client = None
         self._initialized = False
@@ -1034,7 +755,6 @@ class SheetsManager:
         self._lock = threading.Lock()
     
     def get_client(self):
-        """Lazy initialize Sheets client with caching"""
         if self._initialized and self._client:
             return self._client
         
@@ -1043,15 +763,7 @@ class SheetsManager:
                 return self._client
             
             if not GOOGLE_SERVICE_ACCOUNT_JSON or not GOOGLE_SHEET_ID:
-                if not GOOGLE_SERVICE_ACCOUNT_JSON:
-                    self._last_error = "GOOGLE_SERVICE_ACCOUNT_JSON not set"
-                    Logger.error("Sheets", "GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set.")
-                elif not GOOGLE_SHEET_ID:
-                    self._last_error = "GOOGLE_SHEET_ID not set"
-                    Logger.error("Sheets", "GOOGLE_SHEET_ID environment variable is not set.")
-                else:
-                    self._last_error = "Environment variables not set"
-                    Logger.error("Sheets", "Required Google Sheets environment variables are not set.")
+                self._last_error = "Environment variables not set"
                 self._initialized = True
                 return None
             
@@ -1066,12 +778,10 @@ class SheetsManager:
                 self._client = gspread.service_account_from_dict(creds_dict)
                 self._initialized = True
                 
-                # Auto-setup sheets
                 self._auto_setup()
                 self._last_error = "Connected"
                 Logger.info("Sheets", "Client initialized")
                 return self._client
-                
             except Exception as e:
                 self._last_error = f"Auth failed: {e}"
                 self._initialized = True
@@ -1079,7 +789,6 @@ class SheetsManager:
                 return None
     
     def _auto_setup(self):
-        """Auto-create required worksheets"""
         try:
             sheet = self._client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             existing = [w.title for w in sheet.worksheets()]
@@ -1113,36 +822,26 @@ class SheetsManager:
                     ws.append_row(headers)
                     Logger.info("Sheets", f"Created worksheet: {name}")
             
-            # Add default contacts if new
             if "Contacts" not in existing:
                 ws = sheet.worksheet("Contacts")
                 defaults = [
-                    ["CT001", "ปภ. (กรมป้องกันและบรรเทาสาธารณภัย)", 
-                     "รับแจ้งเหตุเตือนภัยและช่วยเหลืออุทกภัยสายด่วน", "1784"],
-                    ["CT002", "สพฉ. (สถาบันการแพทย์ฉุกเฉินแห่งชาติ)", 
-                     "รับส่งต่อผู้ป่วยฉุกเฉินทางการแพทย์", "1669"],
-                    ["CT003", "ตำรวจทางหลวง", 
-                     "ประสานงานความช่วยเหลือเส้นทางน้ำท่วม", "1193"],
-                    ["CT004", "หน่วยกู้ชีพวชิรพยาบาล", 
-                     "กู้ภัยทางน้ำและอุบัติเหตุ", "1554"],
+                    ["CT001", "ปภ. (กรมป้องกันและบรรเทาสาธารณภัย)", "รับแจ้งเหตุเตือนภัยและช่วยเหลืออุทกภัยสายด่วน", "1784"],
+                    ["CT002", "สพฉ. (สถาบันการแพทย์ฉุกเฉินแห่งชาติ)", "รับส่งต่อผู้ป่วยฉุกเฉินทางการแพทย์", "1669"],
+                    ["CT003", "ตำรวจทางหลวง", "ประสานงานความช่วยเหลือเส้นทางน้ำท่วม", "1193"],
+                    ["CT004", "หน่วยกู้ชีพวชิรพยาบาล", "กู้ภัยทางน้ำและอุบัติเหตุ", "1554"],
                 ]
                 for row in defaults:
                     ws.append_row(row)
-            
         except Exception as e:
             Logger.error("Sheets", f"Auto-setup error: {e}")
     
     def batch_append(self, worksheet_name: str, rows: list):
-        """Batch append rows to reduce API calls"""
         client = self.get_client()
         if not client:
             return False
-        
         try:
             sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             ws = sheet.worksheet(worksheet_name)
-            
-            # Append all rows at once
             if rows:
                 ws.append_rows(rows, value_input_option='RAW')
             return True
@@ -1151,7 +850,6 @@ class SheetsManager:
             return False
     
     def get_all_records(self, worksheet_name: str) -> list:
-        """Get all records with caching"""
         cache_key = f"sheets:{worksheet_name}"
         cached = cache.sheets.get(cache_key)
         if cached:
@@ -1160,7 +858,6 @@ class SheetsManager:
         client = self.get_client()
         if not client:
             return []
-        
         try:
             sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             ws = sheet.worksheet(worksheet_name)
@@ -1172,7 +869,6 @@ class SheetsManager:
             return []
     
     def update_cell(self, worksheet_name: str, row: int, col: int, value):
-        """Update single cell"""
         client = self.get_client()
         if not client:
             return False
@@ -1185,14 +881,7 @@ class SheetsManager:
             Logger.error("Sheets", f"Update cell error: {e}")
             return False
 
-
-# Global sheets manager
 sheets_mgr = SheetsManager()
-
-
-def get_sheets_client():
-    """Legacy compatibility wrapper"""
-    return sheets_mgr.get_client()
 
 
 # =============================================================================
@@ -1206,22 +895,10 @@ WEATHER_CONDITION_MAP = {
     11: "เย็น", 12: "ร้อนจัด"
 }
 
-# ทางการ/อ้างอิงได้ - หน้าเว็บกรมอุตุนิยมวิทยาสำหรับให้ผู้ใช้ดูพยากรณ์เต็มรูปแบบเพิ่มเติม
 TMD_SOURCE_URL = "https://www.tmd.go.th"
 
 
 def get_live_weather_data(lat: float, lon: float) -> dict:
-    """
-    Fetch live weather from the Thai Meteorological Department (TMD) official
-    open-data API (data.tmd.go.th) — a legitimate, authenticated, rate-limited
-    API call (requires TMD_ACCESS_TOKEN), NOT a website scrape. This keeps the
-    integration legal and avoids putting unnecessary load on government
-    infrastructure.
-
-    Returns a structured dict so callers can build either a Flex card or
-    plain text:
-        {"ok": bool, "temp", "desc", "rh", "wind", "source": "TMD", "error": str|None}
-    """
     start = time.time()
     cache_key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
 
@@ -1244,7 +921,7 @@ def get_live_weather_data(lat: float, lon: float) -> dict:
 
         if resp.status_code == 429:
             result = {"ok": False, "error": "ระบบ TMD หนาแน่น กรุณาลองใหม่ในอีก 1 นาที", "source": "TMD"}
-            return result  # don't cache rate-limit errors
+            return result
 
         resp.raise_for_status()
         data = resp.json()
@@ -1272,7 +949,6 @@ def get_live_weather_data(lat: float, lon: float) -> dict:
 
         Logger.perf("Weather", "api_call", (time.time() - start) * 1000)
         return result
-
     except Exception as e:
         Logger.error("Weather", f"API error: {e}")
         result = {"ok": False, "error": "ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้", "source": "TMD"}
@@ -1281,8 +957,6 @@ def get_live_weather_data(lat: float, lon: float) -> dict:
 
 
 def get_live_weather_scraper(lat: float, lon: float) -> str:
-    """Backward-compatible string-formatted weather summary (built on top of
-    get_live_weather_data). Kept for any code that still expects plain text."""
     d = get_live_weather_data(lat, lon)
     if not d.get("ok"):
         return f"⚠️ {d.get('error', 'ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้')}\nกรุณาตรวจสอบจากแอปพยากรณ์อากาศโดยตรง"
@@ -1290,7 +964,6 @@ def get_live_weather_scraper(lat: float, lon: float) -> str:
 
 
 def calculate_situation(water_level, bank_level):
-    """คำนวณสถานการณ์น้ำ"""
     try:
         wl = float(water_level) if water_level is not None else 0
         bl = float(bank_level) if bank_level is not None else 0
@@ -1313,34 +986,65 @@ def calculate_situation(water_level, bank_level):
 
 
 def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"):
-    """ประเมินสถานะระดับน้ำ"""
-    if not situation:
-        situation = calculate_situation(wl_value, bl_value)
+    """
+    Assess water level status.
+    Directly extracts the situation tag string and maps it to the custom specifications:
+    - 🟧 น้อยวิกฤต: #D67B27
+    - 🟨 น้อย: #FFC000
+    - 🟩 ปกติ: #00B050
+    - 🟦 มาก: #0000FF
+    - 🟥 ล้นตลิ่ง: #FF0000
+    """
+    sit_str = str(situation or "").strip()
+
+    if "ล้นตลิ่ง" in sit_str or ("วิกฤต" in sit_str and ("สูง" in sit_str or "มาก" in sit_str or "ล้น" in sit_str)):
+        status_key = "ล้นตลิ่ง"
+    elif "น้อยวิกฤต" in sit_str or ("วิกฤต" in sit_str and ("น้อย" in sit_str or "ต่ำ" in sit_str or "แห้ง" in sit_str)):
+        status_key = "น้อยวิกฤต"
+    elif "มาก" in sit_str:
+        status_key = "มาก"
+    elif "น้อย" in sit_str:
+        status_key = "น้อย"
+    elif "ปกติ" in sit_str:
+        status_key = "ปกติ"
+    else:
+        try:
+            wl = float(wl_value) if wl_value not in [None, "-", ""] else 0
+            bl = float(bl_value) if bl_value not in [None, "-", ""] else 0
+            if bl > 0:
+                ratio = wl / bl
+                if wl >= bl:
+                    status_key = "ล้นตลิ่ง"
+                elif ratio >= 0.70:
+                    status_key = "มาก"
+                elif ratio >= 0.30:
+                    status_key = "ปกติ"
+                elif ratio >= 0.10:
+                    status_key = "น้อย"
+                else:
+                    status_key = "น้อยวิกฤต"
+            else:
+                status_key = "ปกติ"
+        except (ValueError, TypeError):
+            status_key = "ปกติ"
+
+    status_map = {
+        "น้อยวิกฤต": {"status": "น้อยวิกฤต", "bg": "#D67B27", "text": "#FFFFFF", "advice": "เฝ้าระวังภัยแล้ง/น้ำลดขีดอันตราย"},
+        "น้อย": {"status": "น้อย", "bg": "#FFC000", "text": "#000000", "advice": "ระดับน้ำต่ำกว่าเกณฑ์ปกติ"},
+        "ปกติ": {"status": "ปกติ", "bg": "#00B050", "text": "#FFFFFF", "advice": "ระดับน้ำปกติ ปลอดภัยดี"},
+        "มาก": {"status": "มาก", "bg": "#0000FF", "text": "#FFFFFF", "advice": "ระดับน้ำสูง เฝ้าระวังใกล้ชิด"},
+        "ล้นตลิ่ง": {"status": "ล้นตลิ่ง", "bg": "#FF0000", "text": "#FFFFFF", "advice": "อันตรายล้นตลิ่ง! อพยพขึ้นที่สูง"},
+    }
+
+    res = status_map.get(status_key, status_map["ปกติ"])
     
     try:
         wl = float(wl_value) if wl_value not in [None, "-", ""] else 0
         bl = float(bl_value) if bl_value not in [None, "-", ""] else 0
-        diff_text = f"{abs(bl - wl):.2f}"
+        res["diff_text"] = f"{abs(bl - wl):.2f}"
     except (ValueError, TypeError):
-        diff_text = "-"
-    
-    t = {
-        "ล้นตลิ่ง": "ล้นตลิ่ง", "มาก": "มาก", "ปกติ": "ปกติ",
-        "น้อย": "น้อย", "น้อยวิกฤต": "น้อยวิกฤต", "none": "ไม่มีข้อมูล"
-    }
-    
-    status_map = {
-        "ล้นตลิ่ง": {"status": t["ล้นตลิ่ง"], "bg": "#DC2626", "text": "#FFFFFF", "advice": "อพยพทันที"},
-        "มาก": {"status": t["มาก"], "bg": "#2563EB", "text": "#FFFFFF", "advice": "ระดับน้ำสูง"},
-        "ปกติ": {"status": t["ปกติ"], "bg": "#059669", "text": "#FFFFFF", "advice": "ระดับน้ำปกติ"},
-        "น้อย": {"status": t["น้อย"], "bg": "#F59E0B", "text": "#FFFFFF", "advice": "ระดับน้ำน้อย"},
-        "น้อยวิกฤต": {"status": t["น้อยวิกฤต"], "bg": "#DC2626", "text": "#FFFFFF", "advice": "น้อยวิกฤต"},
-    }
-    
-    res = status_map.get(situation, {
-        "status": t["none"], "bg": "#9CA3AF", "text": "#FFFFFF", "advice": "ติดตามสถานการณ์"
-    })
-    res["diff_text"] = diff_text
+        res["diff_text"] = "-"
+        
     return res
 
 
@@ -1357,8 +1061,10 @@ if LINE_CHANNEL_SECRET and WebhookHandler:
     handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 
-def show_loading_animation(user_id: str, loading_seconds: int = 10) -> bool:
-    """Show LINE typing indicator"""
+def show_loading_animation(user_id: str, loading_seconds: int = 30) -> bool:
+    """
+    Show LINE typing indicator (dots) for a specified duration.
+    """
     if not LINE_CHANNEL_ACCESS_TOKEN or not requests:
         return False
     try:
@@ -1375,153 +1081,103 @@ def show_loading_animation(user_id: str, loading_seconds: int = 10) -> bool:
 
 
 # =============================================================================
-# SECTION 12: FLEX MESSAGE BUILDERS
+# SECTION 12: FLEX MESSAGE BUILDERS (Exact match for specified features)
 # =============================================================================
 
 def build_sos_form_flex(user_name="คุณ", lang="TH"):
-    """SOS Flex Form - redirects to LIFF for full experience"""
-    texts = {
-        "TH": {"title": "🚨 แจ้งเหตุฉุกเฉิน SOS", "hi": f"สวัสดีครับ คุณ{user_name}",
-               "desc": "กรุณากรอกข้อมูลผ่านแบบฟอร์มด้านล่าง", "btn": "📋 เปิดแบบฟอร์ม SOS",
-               "footer": "ข้อมูลจะถูกส่งไปยังทีมกู้ภัยทันที"},
-        "EN": {"title": "🚨 SOS Emergency", "hi": f"Hello {user_name}",
-               "desc": "Please fill out the form below", "btn": "📋 Open SOS Form",
-               "footer": "Data will be sent to rescue team immediately"},
-    }
-    t = texts.get(lang, texts["TH"])
-    
     liff_url = SOS_LIFF_URL or "https://liff.line.me/"
-    
     return FlexSendMessage(
-        alt_text=t["title"],
+        alt_text="🚨 แจ้งเหตุฉุกเฉิน SOS",
         contents=BubbleContainer(
             styles=BubbleStyle(header=BlockStyle(background_color="#C2452F")),
             header=BoxComponent(
                 layout="vertical",
-                contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
+                contents=[TextComponent(text="🚨 แจ้งเหตุฉุกเฉิน SOS", weight="bold", size="lg", color="#FFFFFF", align="center")]
             ),
             body=BoxComponent(
                 layout="vertical",
                 spacing="md",
                 contents=[
-                    TextComponent(text=t["hi"], size="sm", color="#374151"),
-                    TextComponent(text=t["desc"], size="xs", color="#6B7280"),
+                    TextComponent(text=f"สวัสดีครับ คุณ{user_name}", size="sm", color="#374151"),
+                    TextComponent(text="กรุณากรอกข้อมูลเพื่อส่งตำแหน่งและรายละเอียดให้ทีมกู้ภัยช่วยเหลือทันที", size="xs", color="#6B7280", wrap=True),
                     SeparatorComponent(margin="md"),
                     ButtonComponent(
-                        action=URIAction(label=t["btn"], uri=liff_url),
+                        action=URIAction(label="📋 เปิดแบบฟอร์ม SOS", uri=liff_url),
                         style="primary", color="#C2452F", height="lg"
                     )
                 ]
             ),
             footer=BoxComponent(
                 layout="vertical",
-                contents=[TextComponent(text=t["footer"], size="xxs", color="#9CA3AF", align="center")]
+                contents=[TextComponent(text="ข้อมูลจะถูกส่งไปยังทีมกู้ภัยทันทีเพื่อความช่วยเหลืออย่างเร่งด่วน", size="xxs", color="#9CA3AF", align="center")]
             )
         )
     )
 
 
 def build_need_form_flex(user_name="คุณ", lang="TH"):
-    """Needs Flex Form - redirects to LIFF for full experience"""
-    texts = {
-        "TH": {"title": "📦 แจ้งความต้องการสิ่งของ", "hi": f"สวัสดีครับ คุณ{user_name}",
-               "desc": "กรุณากรอกข้อมูลผ่านแบบฟอร์มด้านล่าง เพื่อให้ทีมงานจัดส่งสิ่งของได้ตรงตามความต้องการ",
-               "btn": "📋 เปิดแบบฟอร์มแจ้งความต้องการ",
-               "footer": "ข้อมูลจะถูกส่งไปยังทีมจัดส่งสิ่งของทันที"},
-        "EN": {"title": "📦 Request Supplies", "hi": f"Hello {user_name}",
-               "desc": "Please fill out the form below so our team can prepare the right supplies",
-               "btn": "📋 Open Needs Form",
-               "footer": "Data will be sent to the supplies team immediately"},
-    }
-    t = texts.get(lang, texts["TH"])
-
     liff_url = NEED_LIFF_URL or "https://liff.line.me/"
-
     return FlexSendMessage(
-        alt_text=t["title"],
+        alt_text="📦 แจ้งความต้องการสิ่งของ",
         contents=BubbleContainer(
             styles=BubbleStyle(header=BlockStyle(background_color="#2F6F8F")),
             header=BoxComponent(
                 layout="vertical",
-                contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
+                contents=[TextComponent(text="📦 ขอความช่วยเหลือเรื่องสิ่งของ", weight="bold", size="lg", color="#FFFFFF", align="center")]
             ),
             body=BoxComponent(
                 layout="vertical",
                 spacing="md",
                 contents=[
-                    TextComponent(text=t["hi"], size="sm", color="#374151"),
-                    TextComponent(text=t["desc"], size="xs", color="#6B7280", wrap=True),
+                    TextComponent(text=f"สวัสดีครับ คุณ{user_name}", size="sm", color="#374151"),
+                    TextComponent(text="กรุณากรอกประเภทสิ่งของที่ท่านขาดแคลนเพื่อให้อาสาสมัครจัดเตรียมสิ่งของช่วยเหลือได้ถูกต้อง", size="xs", color="#6B7280", wrap=True),
                     SeparatorComponent(margin="md"),
                     ButtonComponent(
-                        action=URIAction(label=t["btn"], uri=liff_url),
+                        action=URIAction(label="📋 ขอความช่วยเหลือเรื่องสิ่งของ", uri=liff_url),
                         style="primary", color="#2F6F8F", height="lg"
                     )
                 ]
             ),
             footer=BoxComponent(
                 layout="vertical",
-                contents=[TextComponent(text=t["footer"], size="xxs", color="#9CA3AF", align="center")]
+                contents=[TextComponent(text="ข้อมูลจะอัปเดตตรงไปยังระบบฐานข้อมูลอาสาสมัครจัดส่ง", size="xxs", color="#9CA3AF", align="center")]
             )
         )
     )
 
 
 def build_register_form_flex(user_name="คุณ", lang="TH"):
-    """Registration Flex Form - opens the Register LIFF for first-time setup"""
-    texts = {
-        "TH": {"title": "📝 ลงทะเบียนผู้ใช้งาน", "hi": f"สวัสดีครับ คุณ{user_name}",
-               "desc": "กรอกข้อมูลเบื้องต้นของคุณ เพื่อให้ทีมช่วยเหลือติดต่อและดูแลคุณได้รวดเร็วขึ้น",
-               "btn": "📋 เปิดแบบฟอร์มลงทะเบียน",
-               "footer": "ใช้เวลาไม่ถึง 1 นาที ข้อมูลของคุณจะถูกเก็บเป็นความลับ"},
-        "EN": {"title": "📝 User Registration", "hi": f"Hello {user_name}",
-               "desc": "Fill in your basic info so our team can reach you faster",
-               "btn": "📋 Open Registration Form",
-               "footer": "Takes less than a minute. Your data is kept confidential."},
-    }
-    t = texts.get(lang, texts["TH"])
-
     liff_url = REGISTER_LIFF_URL or "https://liff.line.me/"
-
     return FlexSendMessage(
-        alt_text=t["title"],
+        alt_text="📝 ลงทะเบียนข้อมูลของคุณ",
         contents=BubbleContainer(
             styles=BubbleStyle(header=BlockStyle(background_color="#2F6F8F")),
             header=BoxComponent(
                 layout="vertical",
-                contents=[TextComponent(text=t["title"], weight="bold", size="lg", color="#FFFFFF", align="center")]
+                contents=[TextComponent(text="📝 ลงทะเบียนข้อมูลของคุณ", weight="bold", size="lg", color="#FFFFFF", align="center")]
             ),
             body=BoxComponent(
                 layout="vertical",
                 spacing="md",
                 contents=[
-                    TextComponent(text=t["hi"], size="sm", color="#374151"),
-                    TextComponent(text=t["desc"], size="xs", color="#6B7280", wrap=True),
+                    TextComponent(text=f"สวัสดีครับ คุณ{user_name}", size="sm", color="#374151"),
+                    TextComponent(text="กรุณาลงทะเบียนข้อมูลที่อยู่และเบอร์ติดต่อ เพื่อรับการแจ้งเตือนและการช่วยเหลือฉุกเฉินล่วงหน้า", size="xs", color="#6B7280", wrap=True),
                     SeparatorComponent(margin="md"),
                     ButtonComponent(
-                        action=URIAction(label=t["btn"], uri=liff_url),
+                        action=URIAction(label="📋 ลงทะเบียนข้อมูลของคุณ", uri=liff_url),
                         style="primary", color="#2F6F8F", height="lg"
                     )
                 ]
             ),
             footer=BoxComponent(
                 layout="vertical",
-                contents=[TextComponent(text=t["footer"], size="xxs", color="#9CA3AF", align="center", wrap=True)]
+                contents=[TextComponent(text="ใช้เวลาไม่ถึง 1 นาที ข้อมูลของคุณจะได้รับความปลอดภัยสูงสุด", size="xxs", color="#9CA3AF", align="center", wrap=True)]
             )
         )
     )
 
 
 def build_snake_bite_flex(lang="TH"):
-    """
-    Snake-bite first-aid response.
-
-    Deliberately a fixed, pre-written message (NOT generated by Gemini per
-    request) — this is exactly the kind of high-stakes medical safety
-    content where a verified, complete answer matters more than a short
-    AI-generated one. Links to the Ramathibodi Poison Center (ศูนย์พิษวิทยา
-    รามาธิบดี), the standard reference in Thailand for bite/poison cases,
-    24-hour hotline 1367.
-    """
     steps = [
         "1. ตั้งสติ อยู่ให้นิ่งที่สุด การเคลื่อนไหวจะทำให้พิษกระจายเร็วขึ้น",
         "2. ถอดแหวน นาฬิกา หรือของรัดแน่นบริเวณที่ถูกกัดออกก่อนที่จะบวม",
@@ -1568,9 +1224,10 @@ def build_snake_bite_flex(lang="TH"):
 
 
 def build_help_flex(lang="TH"):
-    """Capabilities / help menu — answers 'ทำอะไรได้บ้าง' with a complete,
-    fixed list instead of letting Gemini guess (which previously produced
-    unhelpfully short non-answers like 'ฉันคือ FLOODCARE')."""
+    """
+    Capabilities / help menu.
+    Perfectly aligned to IMG_8355.jpeg specifications.
+    """
     items = [
         ("🆘", "แจ้งเหตุฉุกเฉิน", "พิมพ์ 'sos'"),
         ("📦", "ขอความช่วยเหลือเรื่องสิ่งของ", "พิมพ์ 'ขอของ'"),
@@ -1608,13 +1265,6 @@ def build_help_flex(lang="TH"):
 
 
 def build_faq_response_flex(answer: str, sources: list, question: str, lang="TH"):
-    """
-    Flex message for FAQ / web-search grounded answers.
-    Shows the AI answer and up to 3 clickable source links.
-    The sources come from Gemini's Google Search grounding metadata — real URLs
-    retrieved by the model, not hardcoded.
-    """
-    header_text = "ข้อมูลจาก FLOODCARE AI"
     body_contents = [
         TextComponent(
             text=f"คำถาม: {question[:60]}{'...' if len(question) > 60 else ''}",
@@ -1622,7 +1272,7 @@ def build_faq_response_flex(answer: str, sources: list, question: str, lang="TH"
         ),
         SeparatorComponent(margin="md"),
         TextComponent(
-            text=answer[:900] + ("..." if len(answer) > 900 else ""),
+            text=answer,
             size="sm", color="#15151A", wrap=True, margin="md"
         ),
     ]
@@ -1633,7 +1283,6 @@ def build_faq_response_flex(answer: str, sources: list, question: str, lang="TH"
         body_contents.append(
             TextComponent(text="แหล่งข้อมูลอ้างอิง", size="xs", color="#8C8980", weight="bold", margin="md")
         )
-        # Show up to 3 sources as link buttons
         for src in sources[:3]:
             title = src.get("title", "") or src.get("url", "")
             url = src.get("url", "")
@@ -1663,7 +1312,6 @@ def build_faq_response_flex(answer: str, sources: list, question: str, lang="TH"
 
 
 def build_ai_response_flex(ai_text: str, original_question: str, lang="TH"):
-    """AI Response Flex with action buttons"""
     return FlexSendMessage(
         alt_text="🤖 FLOODCARE AI",
         contents=BubbleContainer(
@@ -1686,7 +1334,6 @@ def build_ai_response_flex(ai_text: str, original_question: str, lang="TH"):
 
 
 def build_language_selector_flex():
-    """Language selector Flex"""
     return FlexSendMessage(
         alt_text="🌐 เลือกภาษา",
         contents=BubbleContainer(
@@ -1708,11 +1355,6 @@ def build_language_selector_flex():
 
 
 def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
-    """
-    Professional, easy-to-read weather report card.
-    Data source: Thai Meteorological Department (TMD) official API — shown
-    in the footer with a link so users can verify / see the full forecast.
-    """
     if not weather_data.get("ok"):
         body_contents = [
             TextComponent(text="🌦️ สภาพอากาศ", weight="bold", size="lg", color="#1F2937"),
@@ -1778,7 +1420,6 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
 
 
 def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang="TH"):
-    """Water Level Report Flex"""
     header = BoxComponent(
         layout="vertical",
         contents=[
@@ -1862,7 +1503,6 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
 # =============================================================================
 
 def is_greeting(text: str) -> bool:
-    """Check if text is a greeting"""
     if not text:
         return False
     clean = text.strip().lower().strip("!.,😊🙏👋 ")
@@ -1872,8 +1512,7 @@ def is_greeting(text: str) -> bool:
 
 
 def get_greeting_message(user_name="คุณ"):
-    """Generate greeting message"""
-    now = datetime.datetime.now()
+    now = get_bangkok_time()
     time_greeting = "สวัสดี"
     if 5 <= now.hour < 10:
         time_greeting = "อรุณสวัสดิ์"
@@ -1881,21 +1520,20 @@ def get_greeting_message(user_name="คุณ"):
     text = (
         f"{time_greeting} คุณ {user_name}\n"
         "ผมคือ FLOODCARE AI\n"
-        "แชทบอทอัจฉริยะสำหรับติดตามสถานการณ์น้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยครับ\n\n"
-        "🔍 ผมช่วยคุณได้:\n"
+        "น้องบอทผู้ช่วยอัจฉริยะสำหรับติดตามสถานการณ์น้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยครับ\n\n"
+        "🔍 ผมช่วยคุณได้ดังนี้ครับ:\n"
         "1. 📞 เบอร์โทรฉุกเฉิน\n"
-        "2. 🚨 SOS แจ้งเหตุ\n"
+        "2. 🚨 SOS แจ้งเหตุกู้ภัย\n"
         "3. 🏠 ค้นหาศูนย์อพยพ\n"
-        "4. 🌊 ตรวจสอบระดับน้ำ\n"
-        "5. 📦 แจ้งความต้องการ\n"
-        "6. 🤖 สอบถาม AI\n\n"
-        "ผมพร้อมช่วยเหลือตลอด 24 ชั่วโมงครับ 💧"
+        "4. 🌊 ตรวจสอบระดับน้ำจริง\n"
+        "5. 📦 ขอความช่วยเหลือสิ่งของ\n"
+        "6. 🤖 สอบถามข้อมูลภัยพิบัติ สภาพอากาศ หรืออาการเจ็บป่วย\n\n"
+        "ยินดีช่วยเหลือเคียงข้างคุณตลอด 24 ชั่วโมงครับ 💧"
     )
     return TextSendMessage(text=text)
 
 
 def handle_emergency_response(user_id: str, event=None) -> TextSendMessage:
-    """Immediate emergency response without AI"""
     emergency_text = (
         "🚨 ฉุกเฉิน! ทำตามนี้ทันที:\n\n"
         "1️⃣ ยกเบรกเกอร์ไฟฟ้าทันที\n"
@@ -1910,12 +1548,7 @@ def handle_emergency_response(user_id: str, event=None) -> TextSendMessage:
     return TextSendMessage(text=emergency_text)
 
 
-# =============================================================================
-# SECTION 14: SOS & NEEDS WORKFLOW HELPERS
-# =============================================================================
-
 def calculate_sos_priority(group_types: list, urgency_level: str) -> Tuple[str, str]:
-    """Calculate SOS priority level"""
     gt = [g.lower() for g in group_types] if group_types else []
     ul = (urgency_level or "").lower()
     
@@ -1931,7 +1564,6 @@ def calculate_sos_priority(group_types: list, urgency_level: str) -> Tuple[str, 
 
 
 def build_sos_summary_text(data: dict) -> str:
-    """Build SOS summary text for confirmation"""
     lat = data.get("latitude", "0")
     lon = data.get("longitude", "0")
     maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
@@ -1948,7 +1580,6 @@ def build_sos_summary_text(data: dict) -> str:
 
 
 def build_needs_summary_text(data: dict) -> str:
-    """Build Needs summary text for confirmation"""
     lat = data.get("latitude", "0")
     lon = data.get("longitude", "0")
     maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
@@ -1963,26 +1594,16 @@ def build_needs_summary_text(data: dict) -> str:
     )
 
 
-# =============================================================================
-# SECTION 15: BACKGROUND CLEANUP
-# =============================================================================
-
 def start_background_tasks():
-    """Start background cleanup thread"""
     def cleanup_loop():
         while True:
             try:
-                time.sleep(300)  # Every 5 minutes
-                
-                # Cleanup expired sessions
+                time.sleep(300)
                 session_count = sessions.cleanup_expired()
-                
-                # Cleanup expired cache entries
                 cache_count = sum(cache.cleanup_all().values())
                 
                 if session_count > 0 or cache_count > 0:
                     Logger.info("Cleanup", f"Removed {session_count} sessions, {cache_count} cache entries")
-                    
             except Exception as e:
                 Logger.error("Cleanup", f"Loop error: {e}")
     
@@ -1990,8 +1611,5 @@ def start_background_tasks():
     thread.start()
     Logger.info("System", "Background cleanup started")
 
-
-# Start background tasks on import
 start_background_tasks()
-
-Logger.info("System", "FLOODCARE AI Bot Config v2.0 loaded successfully")
+Logger.info("System", "FLOODCARE AI Bot Config v2.2 Initialized Successfully")
