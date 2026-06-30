@@ -782,7 +782,13 @@
         async function initLIFF() {
             try {
                 await liff.init({ liffId: getLiffId() });
-                if (liff.isLoggedIn()) {
+                
+                // CRITICAL AUTH GUARD: Redirect to LINE Login instantly if not logged in
+                if (!liff.isLoggedIn()) {
+                    console.log("LIFF: Unauthorized. Forcing LINE Single Sign-On Login...");
+                    liff.login();
+                } else {
+                    console.log("LIFF: Authorized successfully");
                     const profile = await liff.getProfile();
                     formData.userId = profile.userId;
                     formData.idToken = liff.getIDToken();
