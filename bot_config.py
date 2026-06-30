@@ -3,7 +3,7 @@ FLOODCARE AI - Optimized Bot Configuration
 ============================================
 Architecture: Modular | Class-Based State Machine | Intent Classification
 Author: Senior Software Architect
-Version: 2.4 (Production-Ready / Localized Timezone & Custom Water Status)
+Version: 2.5 (Production-Ready / Localized Timezone & Concise Responses with Citations)
 
 Key Optimizations:
 - Intent Classification: Reduces Gemini API calls by ~80%
@@ -13,6 +13,7 @@ Key Optimizations:
 - Localized Timezone: Standardized Thai timezone (Asia/Bangkok / UTC+7) for all systems
 - Custom Water Status Mapping: Uses official Thaiwater status keys with specified hex colors
 - Strictly Limited Scope: Only answers floods, safety, and health queries. Refuses all else.
+- CONCISE MODE (New): Enforces extremely short responses (max 3 lines) with brief inline source citations.
 """
 
 import os
@@ -538,7 +539,7 @@ def update_legacy_state(user_id: str, state: str, data: dict = None):
 
 
 # =============================================================================
-# SECTION 7: GEMINI AI OPTIMIZATION (Optimized & Beautiful Responses)
+# SECTION 7: GEMINI AI OPTIMIZATION (Concise Responses with Citations)
 # =============================================================================
 
 gemini_model = None
@@ -553,9 +554,9 @@ FLOODCARE_SYSTEM_INSTRUCTION = (
     "2. หากมีคำถามใดๆ ที่อยู่นอกเหนือจากขอบเขตความปลอดภัยและน้ำท่วมด้านบนนี้ (เช่น กีฬา บันเทิง เกม ข่าวสังคม การทำอาหารทั่วไป แฟชั่น) คุณต้องปฏิเสธอย่างมีมารยาทและอบอุ่นทันที เช่น:\n"
     "   'เรื่องนี้ผมอาจจะยังไม่เชี่ยวชาญเท่าไหร่ครับ น้องบอทอยากเน้นช่วยพี่ๆ เรื่องน้ำท่วม ความปลอดภัย และการดูแลสุขภาพในช่วงนี้มากกว่าครับ มีอะไรเกี่ยวกับระดับน้ำหรืออาการป่วยไม่สบายให้ช่วยดูแลไหมครับ?'\n\n"
     "กฎการตอบคำถามเพื่อความงาม ความกระชับ และความเป็นระเบียบ (CRITICAL FORMATTING RULES):\n"
-    "1. ตอบเฉพาะเนื้อหาสำคัญที่ตรงคำถามเท่านั้น พยายามตอบให้สั้น กระชับ และตรงประเด็น ทันที ไม่เกริ่นประโยคยาวเวิ่นเว้อ\n"
-    "2. ห้ามใช้เครื่องหมายดอกจันสองตัว (**) หรือดอกจันตัวเดียว (*) ในข้อความอย่างเด็ดขาด เพราะทำให้ข้อความรกบนระบบ LINE ให้เว้นบรรทัดและเขียนข้อความให้อ่านง่ายแทน\n"
-    "3. แบ่งเนื้อหาเป็นย่อหน้าสั้นๆ อย่างชัดเจน และใช้สัญลักษณ์นำหน้าหัวข้อที่สวยงาม เช่น • หรือใช้ตัวเลข 1. 2. 3. หากแสดงขั้นตอน\n"
+    "1. **เน้นตอบให้สั้นและกระชับที่สุด (จำกัดความยาวไม่เกิน 2-3 บรรทัด หรือไม่เกิน 60-80 คำ)** เพื่อให้ผู้ประสบภัยในพื้นที่สัญญาณอินเทอร์เน็ตต่ำอ่านข้อมูลสำคัญได้ทันทีโดยไม่ต้องเลื่อนหน้าจอ\n"
+    "2. **ระบุแหล่งที่มา (Citation) สั้นๆ ในวงเล็บปิดท้ายข้อความเสมอ** เช่น (ที่มา: กรมอุตุนิยมวิทยา) หรือ (ข้อมูลจาก: ปภ. 1784) โดยห้ามละเลยการระบุแหล่งที่มาเด็ดขาดเพื่อให้ข้อมูลมีความน่าเชื่อถือ\n"
+    "3. ห้ามใช้เครื่องหมายดอกจันสองตัว (**) หรือดอกจันตัวเดียว (*) ในข้อความอย่างเด็ดขาด เพราะทำให้ข้อความรกบนระบบ LINE ให้เว้นบรรทัดและเขียนข้อความให้อ่านง่ายแทน\n"
     "4. ทุกข้อความคำตอบต้องจบอย่างบริบูรณ์สมบูรณ์ ห้ามจบกลางประโยคเด็ดขาด\n"
     "5. หากมีลิงก์อ้างอิงให้จัดเก็บไว้ในโครงสร้างส่วนท้ายของการ์ดหรือแสดงผลเป็นรูปแบบปุ่มกดให้เรียบร้อยสวยงาม ไม่เขียนลิงก์ยาวเปลือยในตัวข้อความหลัก"
 )
@@ -637,11 +638,12 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
     prompt = (
         "ค้นหาข้อมูลอย่างละเอียดและตอบคำถามนี้โดยทำตามกฎต่อไปนี้อย่างเคร่งครัด:\n\n"
         f"คำถาม: {question}\n\n"
-        "กฎในการตอบ:\n"
+        "กฎในการตอบเพื่อความปลอดภัยและกะทัดรัด:\n"
         "1. ห้ามใช้เครื่องหมายดอกจันเดี่ยวหรือสองชั้น (*) ในข้อความอย่างเด็ดขาด\n"
-        "2. เขียนข้อความให้อ่านง่าย กระชับ สั้นลงทันที ไม่พูดยาวเกินจำเป็น แบ่งย่อหน้าชัดเจน\n"
-        "3. จบข้อความอย่างสมบูรณ์แบบ ห้ามหยุดประโยคกลางคัน\n"
-        "4. ลิงก์ URL อ้างอิงทั้งหมดจะถูกแยกไปแสดงด้านล่าง ไม่ต้องระบุลิงก์ยาวในย่อหน้าหลัก"
+        "2. เขียนข้อความให้อ่านง่าย สั้นและตรงประเด็นที่สุด (ความยาวห้ามเกิน 2-3 บรรทัด หรือ 80 คำ)\n"
+        "3. **ต้องระบุแหล่งที่มาอย่างกระชับในวงเล็บท้ายประโยค** เช่น (ที่มา: กรมอุตุนิยมวิทยา) หรือ (ข้อมูลจาก: ปภ.) เพื่ออ้างอิงแหล่งข้อมูล\n"
+        "4. จบข้อความอย่างสมบูรณ์แบบ ห้ามหยุดประโยคกลางคัน\n"
+        "5. ลิงก์ URL อ้างอิงทั้งหมดจะถูกแยกไปแสดงด้านล่าง ไม่ต้องระบุลิงก์ยาวในย่อหน้าหลัก"
     )
 
     try:
@@ -651,7 +653,8 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
             config=genai_types.GenerateContentConfig(
                 system_instruction=(
                     "You are FLOODCARE AI. Always respond in Thai. Make sure to generate "
-                    "short, beautifully structured, highly readable, complete Thai responses without any asterisks. "
+                    "extremely short (max 2-3 lines), concise, highly readable, complete Thai responses without any asterisks. "
+                    "Always include a brief source citation in parentheses, e.g., (ที่มา: ...). "
                     "Use Google Search tool. Under no circumstances should you truncate or leave the response cut off."
                 ),
                 max_output_tokens=max_tokens,
@@ -1795,4 +1798,4 @@ def start_background_tasks():
     Logger.info("System", "Background cleanup started")
 
 start_background_tasks()
-Logger.info("System", "FLOODCARE AI Bot Config v2.4 Initialized Successfully")
+Logger.info("System", "FLOODCARE AI Bot Config v2.5 Initialized Successfully")
