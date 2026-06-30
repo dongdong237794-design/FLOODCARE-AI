@@ -714,7 +714,7 @@
 
                 <div class="category-grid">
                     <button class="category-btn" id="cat-food" onclick="toggleCategory('food', 'อาหาร')">
-                        <svg viewBox="0 0 24 24"><path d="M11 9H9V2H7v7H5V2H3v7c0 2.12 1.66 3.84 3.75 3.97V22h2.5v-10.03c2.09-.13 3.75-1.85 3.75-3.97V2h-2v7zm10-4c0-1.66-1.34-3-3-3s-3 1.34-3 3v8h4.5v10h2V5z"/></svg>
+                        <svg viewBox="0 0 24 24"><path d="M11 9H9V2H7v7H5V2H3v7c0 2.12 1.66 3.84 3.75 3.97V22h2.5v-10.03c2.09-.13 3.75-1.85 3.75-3.97V22h-2v7zm10-4c0-1.66-1.34-3-3-3s-3 1.34-3 3v8h4.5v10h2V5z"/></svg>
                         <span>อาหาร</span>
                     </button>
                     <button class="category-btn" id="cat-water" onclick="toggleCategory('water', 'น้ำดื่ม')">
@@ -922,7 +922,8 @@
             details: '',
             urgency: null,
             urgencyLabel: '',
-            userId: null
+            userId: null,
+            idToken: null
         };
 
         function showCustomAlert(message, type = 'error') {
@@ -960,18 +961,24 @@
         async function initLIFF() {
             try {
                 await liff.init({ liffId: getLiffId() });
-                if (liff.isLoggedIn()) {
+                
+                // CRITICAL AUTH GUARD: If user is not logged in, enforce redirect to SSO immediately
+                if (!liff.isLoggedIn()) {
+                    console.log("LIFF: Not logged in. Bypassing anonymous session to prevent backend errors...");
+                    liff.login(); 
+                } else {
+                    console.log("LIFF: Successfully authorized");
                     const profile = await liff.getProfile();
                     formData.userId = profile.userId;
                     formData.idToken = liff.getIDToken();
+                    getGPS();
                 }
-                getGPS();
             } catch (err) {
                 console.error('LIFF init failed:', err);
                 const statusEl = document.getElementById('gpsStatus');
                 statusEl.classList.remove('hidden');
                 statusEl.className = 'gps-status error';
-                statusEl.innerHTML = 'กรุณาเปิดจาก LINE APP';
+                statusEl.innerHTML = 'กรุณาเปิดจาก LINE APP เท่านั้น';
             }
         }
 
