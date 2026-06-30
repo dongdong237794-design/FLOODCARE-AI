@@ -729,6 +729,7 @@ def init_gemini():
     
     try:
         _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+
         _gemini_initialized = True
         Logger.info("Gemini", "Initialized successfully")
         return True
