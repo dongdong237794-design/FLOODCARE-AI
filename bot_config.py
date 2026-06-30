@@ -3,7 +3,7 @@ FLOODCARE AI - Optimized Bot Configuration
 ============================================
 Architecture: Modular | Class-Based State Machine | Intent Classification
 Author: Senior Software Architect
-Version: 2.2 (Production-Ready / Localized Timezone & Custom Water Status)
+Version: 2.3 (Production-Ready / Localized Timezone & Custom Water Status)
 
 Key Optimizations:
 - Intent Classification: Reduces Gemini API calls by ~80%
@@ -552,11 +552,12 @@ FLOODCARE_SYSTEM_INSTRUCTION = (
     "1. ตอบเฉพาะคำถามที่เกี่ยวข้องกับ: 1) อุทกภัย/ภัยพิบัติน้ำท่วม 2) ความปลอดภัย/การกู้ภัย/เบอร์ฉุกเฉิน 3) สุขภาพกาย/อาการเจ็บป่วยจากน้ำท่วม/การปฐมพยาบาล 4) สุขภาพจิต/ความเครียดของผู้ประสบภัย เท่านั้น!\n"
     "2. หากมีคำถามใดๆ ที่อยู่นอกเหนือจากขอบเขตความปลอดภัยและน้ำท่วมด้านบนนี้ (เช่น กีฬา บันเทิง เกม ข่าวสังคม การทำอาหารทั่วไป แฟชั่น) คุณต้องปฏิเสธอย่างมีมารยาทและอบอุ่นทันที เช่น:\n"
     "   'เรื่องนี้ผมอาจจะยังไม่เชี่ยวชาญเท่าไหร่ครับ น้องบอทอยากเน้นช่วยพี่ๆ เรื่องน้ำท่วม ความปลอดภัย และการดูแลสุขภาพในช่วงนี้มากกว่าครับ มีอะไรเกี่ยวกับระดับน้ำหรืออาการป่วยไม่สบายให้ช่วยดูแลไหมครับ?'\n\n"
-    "กฎการตอบคำถามเพื่อความงามและความเป็นระเบียบ (CRITICAL FORMATTING RULES):\n"
-    "1. ห้ามตอบตัดจบหรือตัดบทกลางประโยค ให้ตอบข้อความให้ครบประโยคและบริบูรณ์สมบูรณ์เสมอ\n"
+    "กฎการตอบคำถามเพื่อความงาม ความกระชับ และความเป็นระเบียบ (CRITICAL FORMATTING RULES):\n"
+    "1. ตอบเฉพาะเนื้อหาสำคัญที่ตรงคำถามเท่านั้น พยายามตอบให้สั้น กระชับ และตรงประเด็น ทันที ไม่เกริ่นประโยคยาวเวิ่นเว้อ\n"
     "2. ห้ามใช้เครื่องหมายดอกจันสองตัว (**) หรือดอกจันตัวเดียว (*) ในข้อความอย่างเด็ดขาด เพราะทำให้ข้อความรกบนระบบ LINE ให้เว้นบรรทัดและเขียนข้อความให้อ่านง่ายแทน\n"
     "3. แบ่งเนื้อหาเป็นย่อหน้าสั้นๆ อย่างชัดเจน และใช้สัญลักษณ์นำหน้าหัวข้อที่สวยงาม เช่น • หรือใช้ตัวเลข 1. 2. 3. หากแสดงขั้นตอน\n"
-    "4. แหล่งข้อมูลอ้างอิง: ทุกคำตอบที่เป็นข้อมูลทางการแพทย์หรือความปลอดภัย ต้องลงท้ายด้วย '--- แหล่งข้อมูล ---' และระบุชื่อหน่วยงานที่น่าเชื่อถือ (เช่น กรมควบคุมโรค, สภากาชาดไทย, ปภ.)"
+    "4. ทุกข้อความคำตอบต้องจบอย่างบริบูรณ์สมบูรณ์ ห้ามจบกลางประโยคเด็ดขาด\n"
+    "5. หากมีลิงก์อ้างอิงให้จัดเก็บไว้ในโครงสร้างส่วนท้ายของการ์ดหรือแสดงผลเป็นรูปแบบปุ่มกดให้เรียบร้อยสวยงาม ไม่เขียนลิงก์ยาวเปลือยในตัวข้อความหลัก"
 )
 
 
@@ -638,9 +639,9 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
         f"คำถาม: {question}\n\n"
         "กฎในการตอบ:\n"
         "1. ห้ามใช้เครื่องหมายดอกจันเดี่ยวหรือสองชั้น (*) ในข้อความอย่างเด็ดขาด\n"
-        "2. เขียนข้อความให้อ่านง่าย เป็นระเบียบเรียบร้อย แบ่งย่อหน้าชัดเจน มีสัญลักษณ์หัวข้อ (•)\n"
-        "3. ตอบคำถามให้อ่านเข้าใจง่าย กระชับ และจบข้อความอย่างสมบูรณ์แบบ ห้ามหยุดประโยคกลางคัน\n"
-        "4. บังคับใส่ส่วน '--- แหล่งข้อมูล ---' พร้อมลิงก์ URL อ้างอิงที่สืบค้นได้จริงด้านล่างสุดเสมอ"
+        "2. เขียนข้อความให้อ่านง่าย กระชับ สั้นลงทันที ไม่พูดยาวเกินจำเป็น แบ่งย่อหน้าชัดเจน\n"
+        "3. จบข้อความอย่างสมบูรณ์แบบ ห้ามหยุดประโยคกลางคัน\n"
+        "4. ลิงก์ URL อ้างอิงทั้งหมดจะถูกแยกไปแสดงด้านล่าง ไม่ต้องระบุลิงก์ยาวในย่อหน้าหลัก"
     )
 
     try:
@@ -650,7 +651,7 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
             config=genai_types.GenerateContentConfig(
                 system_instruction=(
                     "You are FLOODCARE AI. Always respond in Thai. Make sure to generate "
-                    "beautifully structured, highly readable, complete Thai responses without any asterisks. "
+                    "short, beautifully structured, highly readable, complete Thai responses without any asterisks. "
                     "Use Google Search tool. Under no circumstances should you truncate or leave the response cut off."
                 ),
                 max_output_tokens=max_tokens,
@@ -990,16 +991,16 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
     Assess water level status.
     Directly extracts the situation tag string and maps it to the custom specifications:
     - 🟧 น้อยวิกฤต: #D67B27
-    - 🟨 น้อย: #FFC000
-    - 🟩 ปกติ: #00B050
-    - 🟦 มาก: #0000FF
-    - 🟥 ล้นตลิ่ง: #FF0000
+    - 🟨 น้อย: #FFC000 (UI Specs: Background: #FFF3CD, Text: #856404)
+    - 🟩 ปกติ: #00B050 (UI Specs: Background: #D4EDDA, Text: #155724)
+    - 🟦 มาก: #0000FF (UI Specs: Background: #CCE5FF, Text: #004085)
+    - 🟥 ล้นตลิ่ง: #FF0000 (UI Specs: Background: #F8D7DA, Text: #721C24)
     """
     sit_str = str(situation or "").strip()
 
-    if "ล้นตลิ่ง" in sit_str or ("วิกฤต" in sit_str and ("สูง" in sit_str or "มาก" in sit_str or "ล้น" in sit_str)):
+    if "ล้นตลิ่ง" in sit_str or "วิกฤต" in sit_str and ("สูง" in sit_str or "มาก" in sit_str or "ล้น" in sit_str):
         status_key = "ล้นตลิ่ง"
-    elif "น้อยวิกฤต" in sit_str or ("วิกฤต" in sit_str and ("น้อย" in sit_str or "ต่ำ" in sit_str or "แห้ง" in sit_str)):
+    elif "น้อยวิกฤต" in sit_str or "วิกฤต" in sit_str and ("น้อย" in sit_str or "ต่ำ" in sit_str or "แห้ง" in sit_str):
         status_key = "น้อยวิกฤต"
     elif "มาก" in sit_str:
         status_key = "มาก"
@@ -1029,11 +1030,41 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
             status_key = "ปกติ"
 
     status_map = {
-        "น้อยวิกฤต": {"status": "น้อยวิกฤต", "bg": "#D67B27", "text": "#FFFFFF", "advice": "เฝ้าระวังภัยแล้ง/น้ำลดขีดอันตราย"},
-        "น้อย": {"status": "น้อย", "bg": "#FFC000", "text": "#000000", "advice": "ระดับน้ำต่ำกว่าเกณฑ์ปกติ"},
-        "ปกติ": {"status": "ปกติ", "bg": "#00B050", "text": "#FFFFFF", "advice": "ระดับน้ำปกติ ปลอดภัยดี"},
-        "มาก": {"status": "มาก", "bg": "#0000FF", "text": "#FFFFFF", "advice": "ระดับน้ำสูง เฝ้าระวังใกล้ชิด"},
-        "ล้นตลิ่ง": {"status": "ล้นตลิ่ง", "bg": "#FF0000", "text": "#FFFFFF", "advice": "อันตรายล้นตลิ่ง! อพยพขึ้นที่สูง"},
+        "น้อยวิกฤต": {
+            "status": "น้อยวิกฤต",
+            "bg": "#F8E9DC",
+            "text": "#D67B27",
+            "advice": "เฝ้าระวังภัยแล้ง/น้ำลดขีดอันตราย",
+            "label_pill": "น้อยวิกฤต"
+        },
+        "น้อย": {
+            "status": "น้อย",
+            "bg": "#FFF3CD",
+            "text": "#856404",
+            "advice": "ระดับน้ำน้อย",
+            "label_pill": "น้อย"
+        },
+        "ปกติ": {
+            "status": "ปกติ",
+            "bg": "#D4EDDA",
+            "text": "#155724",
+            "advice": "ระดับน้ำปกติ ปลอดภัยดี",
+            "label_pill": "ปกติ"
+        },
+        "มาก": {
+            "status": "มาก",
+            "bg": "#CCE5FF",
+            "text": "#004085",
+            "advice": "ค่อนข้างสูง",
+            "label_pill": "มาก"
+        },
+        "ล้นตลิ่ง": {
+            "status": "วิกฤต",
+            "bg": "#F8D7DA",
+            "text": "#721C24",
+            "advice": "ระดับน้ำล้นตลิ่ง",
+            "label_pill": "วิกฤต"
+        },
     }
 
     res = status_map.get(status_key, status_map["ปกติ"])
@@ -1041,8 +1072,10 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
     try:
         wl = float(wl_value) if wl_value not in [None, "-", ""] else 0
         bl = float(bl_value) if bl_value not in [None, "-", ""] else 0
+        res["diff"] = bl - wl
         res["diff_text"] = f"{abs(bl - wl):.2f}"
     except (ValueError, TypeError):
+        res["diff"] = 0
         res["diff_text"] = "-"
         
     return res
@@ -1420,20 +1453,25 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
 
 
 def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang="TH"):
+    """
+    Modern Minimalist Water Level Report using Soft Pastel Status Pills & Spacing.
+    Fully compliant with ThaiWater Hex specification.
+    """
     header = BoxComponent(
         layout="vertical",
+        spacing="xs",
         contents=[
-            TextComponent(text="🌊 ระดับน้ำใกล้คุณ", weight="bold", size="xl", color="#1F2937"),
-            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#6B7280"),
-            TextComponent(text=f"🕒 {timestamp}", size="xs", color="#9CA3AF")
+            TextComponent(text="🌊 รายงานระดับน้ำจากสถานีใกล้คุณ", weight="bold", size="md", color="#1F2937"),
+            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#4B5563"),
+            TextComponent(text=f"🕒 อัปเดตวันนี้ {timestamp}", size="xs", color="#9CA3AF")
         ]
     )
     
-    stations_box = BoxComponent(layout="vertical", spacing="md", margin="lg", contents=[])
+    stations_box = BoxComponent(layout="vertical", spacing="xl", margin="lg", contents=[])
     
     if not stations:
         stations_box.contents.append(
-            TextComponent(text="⚠️ ไม่พบสถานีในพื้นที่ใกล้เคียง", size="sm", color="#EF4444")
+            TextComponent(text="⚠️ ไม่พบสถานีวัดระดับน้ำในพื้นที่ใกล้คุณ", size="sm", color="#EF4444", align="center")
         )
     else:
         for st in stations:
@@ -1451,27 +1489,92 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                 except (ValueError, TypeError):
                     pass
             
+            bl_val = st.get("bank_level", "-")
+            
+            # Format text label next to the Status Pill
+            lbl_pill = assessment.get("label_pill", "ปกติ")
+            status_desc = assessment.get("advice", "ระดับน้ำปกติ ปลอดภัยดี")
+            
+            # Safe parsing for diff calculation
+            diff_text_formatted = "-"
+            diff_prefix = "ต่ำกว่าตลิ่ง: "
+            if wl_val != "-" and bl_val != "-":
+                try:
+                    wl_f = float(wl_val)
+                    bl_f = float(bl_val)
+                    diff_val = bl_f - wl_f
+                    if diff_val < 0:
+                        diff_prefix = "สูงกว่าตลิ่ง: "
+                        diff_text_formatted = f"{abs(diff_val):.2f} ม."
+                    else:
+                        diff_text_formatted = f"{diff_val:.2f} ม."
+                except Exception:
+                    pass
+
             card = BoxComponent(
                 layout="vertical",
+                spacing="sm",
                 contents=[
+                    # Station Name & Distance (Clean spacing)
                     TextComponent(text=f"{st['stationName']} (ห่าง {dist:.2f} กม.)", 
-                                 weight="bold", size="sm", color="#1F2937"),
+                                 weight="bold", size="sm", color="#111827"),
+                    
+                    # Status Pill Layout (Rounded Pill + Description)
                     BoxComponent(
-                        layout="horizontal", margin="sm", spacing="sm",
+                        layout="horizontal",
+                        spacing="md",
                         contents=[
+                            # Status Pill Capsule
                             BoxComponent(
                                 layout="vertical",
-                                background_color=assessment.get("bg", "#9CA3AF"),
-                                corner_radius="xl",
-                                padding_all="sm",
-                                contents=[TextComponent(text=assessment["status"], size="xs",
-                                          color=assessment.get("text", "#FFF"), weight="bold", align="center")]
+                                background_color=assessment.get("bg", "#E5E7EB"),
+                                corner_radius="xxl",
+                                padding_start="md",
+                                padding_end="md",
+                                padding_top="xs",
+                                padding_bottom="xs",
+                                flex=0,
+                                contents=[
+                                    TextComponent(
+                                        text=lbl_pill,
+                                        size="xs",
+                                        color=assessment.get("text", "#1F2937"),
+                                        weight="bold",
+                                        align="center"
+                                    )
+                                ]
                             ),
-                            TextComponent(text=assessment["advice"], size="xs", color="#4B5563", gravity="center")
+                            # Advice description next to the pill
+                            TextComponent(
+                                text=status_desc,
+                                size="xs",
+                                color="#4B5563",
+                                gravity="center"
+                            )
                         ]
                     ),
-                    TextComponent(text=f"ระดับน้ำ: {wl_val} ม. | ตลิ่ง: {st.get('bank_level', '-')}",
-                                 size="xs", color="#4B5563", margin="sm")
+                    
+                    # Measurement Values with Bold Highlight
+                    BoxComponent(
+                        layout="vertical",
+                        spacing="xxs",
+                        margin="xs",
+                        contents=[
+                            TextComponent(
+                                text=f"ระดับน้ำ: {wl_val} ม. | ตลิ่ง: {bl_val} ม.",
+                                size="xs",
+                                color="#4B5563"
+                            ),
+                            # Highlights the distance difference to bank
+                            BoxComponent(
+                                layout="horizontal",
+                                contents=[
+                                    TextComponent(text=diff_prefix, size="xs", color="#4B5563", flex=0),
+                                    TextComponent(text=diff_text_formatted, size="xs", weight="bold", color="#111827", flex=1)
+                                ]
+                            )
+                        ]
+                    )
                 ]
             )
             stations_box.contents.append(card)
@@ -1479,18 +1582,29 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
     bubble = BubbleContainer(
         body=BoxComponent(
             layout="vertical",
-            contents=[header, SeparatorComponent(margin="md"), stations_box]
+            contents=[
+                header,
+                SeparatorComponent(margin="md", color="#E5E7EB"),
+                stations_box
+            ]
         ),
         footer=BoxComponent(
             layout="vertical",
+            spacing="sm",
             contents=[
                 ButtonComponent(
-                    action=URIAction(label="🔗 ดูแผนที่ระดับน้ำทั้งประเทศ (Thaiwater)", uri=WATER_LEVEL_SOURCE_URL),
-                    style="secondary", color="#F3F4F6", height="sm"
+                    action=URIAction(label="ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=WATER_LEVEL_SOURCE_URL),
+                    style="secondary",
+                    color="#F3F4F6",
+                    height="sm"
                 ),
                 TextComponent(
-                    text="ข้อมูลอ้างอิง: สถาบันสารสนเทศทรัพยากรน้ำ (สสน.) - thaiwater.net",
-                    size="xxs", color="#9CA3AF", align="center", margin="sm", wrap=True
+                    text="สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)",
+                    size="xxs",
+                    color="#9CA3AF",
+                    align="center",
+                    margin="xs",
+                    wrap=True
                 )
             ]
         )
@@ -1612,4 +1726,4 @@ def start_background_tasks():
     Logger.info("System", "Background cleanup started")
 
 start_background_tasks()
-Logger.info("System", "FLOODCARE AI Bot Config v2.2 Initialized Successfully")
+Logger.info("System", "FLOODCARE AI Bot Config v2.3 Initialized Successfully")
