@@ -822,7 +822,7 @@ def init_gemini():
         return False
 
 
-def ask_gemini(prompt: str, max_tokens: int = 300) -> str:
+def ask_gemini(prompt: str, max_tokens: int = 2048) -> str:
     """
     Optimized Gemini API call with caching (google-genai SDK).
     - Cache responses for identical prompts
@@ -877,7 +877,7 @@ def ask_gemini(prompt: str, max_tokens: int = 300) -> str:
         return "⚠️ AI ขัดข้องชั่วคราว หากตกอยู่ในอันตราย โทร ปภ. 1784 ทันทีครับ"
 
 
-def ask_gemini_with_search(question: str, max_tokens: int = 700) -> dict:
+def ask_gemini_with_search(question: str, max_tokens: int = 2048) -> dict:
     """
     Gemini API call with Google Search grounding enabled (google-genai SDK).
     Returns dict: {"answer": str, "sources": list[{"title": str, "url": str}]}
