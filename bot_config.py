@@ -3,7 +3,7 @@ FLOODCARE AI - Optimized Bot Configuration
 ============================================
 Architecture: Modular | Class-Based State Machine | Intent Classification
 Author: Senior Software Architect
-Version: 2.3 (Production-Ready / Localized Timezone & Custom Water Status)
+Version: 2.4 (Production-Ready / Localized Timezone & Custom Water Status)
 
 Key Optimizations:
 - Intent Classification: Reduces Gemini API calls by ~80%
@@ -886,7 +886,7 @@ sheets_mgr = SheetsManager()
 
 
 # =============================================================================
-# SECTION 10: WEATHER & FLOOD DATA (Optimized)
+# SECTION 10: WEATHER & FLOOD DATA (With Real-time Direct ThaiWater Connection)
 # =============================================================================
 
 WEATHER_CONDITION_MAP = {
@@ -986,10 +986,79 @@ def calculate_situation(water_level, bank_level):
     return "น้อยวิกฤต"
 
 
+def get_live_water_levels_from_api() -> list:
+    """
+    Directly pulls real-time water levels from ThaiWater V3 API as an automatic fallback
+    when Google Sheets is empty.
+    """
+    start_time = time.time()
+    cache_key = "thaiwater:water_levels_live"
+    cached = cache.water.get(cache_key)
+    if cached:
+        Logger.perf("WaterLevelAPI", "cache_hit", (time.time() - start_time) * 1000)
+        return cached
+
+    if not requests:
+        Logger.error("WaterLevelAPI", "Requests library is not installed.")
+        return []
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(THAIWATER_V3_API, headers=headers, timeout=12)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        raw_stations = data.get("data", [])
+        parsed_stations = []
+        
+        for item in raw_stations:
+            station = item.get("station", {})
+            geocode = station.get("geocode", {})
+            
+            lat_val = geocode.get("lat")
+            lon_val = geocode.get("lng") or geocode.get("lon")
+            if lat_val is None or lon_val is None:
+                continue
+                
+            wl_val = item.get("water_level")
+            bl_val = item.get("ground_level") or item.get("bank_high")
+            if bl_val is None:
+                bl_val = station.get("bank_high") or "-"
+                
+            situation = item.get("water_situation", {}).get("name", "ปกติ")
+            trend = item.get("water_trend", {}).get("name", "คงที่")
+            measure_time = item.get("datetime", "-")
+            
+            # Formats exactly matching the sheet headers schema to preserve code portability
+            parsed_stations.append({
+                "StationCode": station.get("code", ""),
+                "Name": station.get("name", {}).get("th", "ไม่ระบุ"),
+                "River": station.get("river", {}).get("th", "ไม่ระบุ"),
+                "Location": geocode.get("province", {}).get("name", {}).get("th", ""),
+                "Lat": float(lat_val),
+                "Lon": float(lon_val),
+                "WaterLevel": wl_val if wl_val is not None else "-",
+                "BankLevel": bl_val,
+                "Situation": situation,
+                "Trend": trend,
+                "Time": measure_time
+            })
+            
+        cache.water.set(cache_key, parsed_stations, ttl=900)  # Cached for 15 minutes
+        Logger.perf("WaterLevelAPI", "fetched_live", (time.time() - start_time) * 1000, {"count": len(parsed_stations)})
+        return parsed_stations
+    except Exception as e:
+        Logger.error("WaterLevelAPI", f"Failed to pull live water level telemetry from API: {e}")
+        return []
+
+
 def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"):
     """
     Assess water level status.
-    Directly extracts the situation tag string and maps it to the custom specifications:
+    Directly extracts the situation tag string and maps it to the custom specifications.
+    Uses .copy() to secure from memory mutation corruption across array rendering.
     - 🟧 น้อยวิกฤต: #D67B27
     - 🟨 น้อย: #FFC000 (UI Specs: Background: #FFF3CD, Text: #856404)
     - 🟩 ปกติ: #00B050 (UI Specs: Background: #D4EDDA, Text: #155724)
@@ -998,9 +1067,9 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
     """
     sit_str = str(situation or "").strip()
 
-    if "ล้นตลิ่ง" in sit_str or "วิกฤต" in sit_str and ("สูง" in sit_str or "มาก" in sit_str or "ล้น" in sit_str):
+    if "ล้นตลิ่ง" in sit_str or ("วิกฤต" in sit_str and ("สูง" in sit_str or "มาก" in sit_str or "ล้น" in sit_str)):
         status_key = "ล้นตลิ่ง"
-    elif "น้อยวิกฤต" in sit_str or "วิกฤต" in sit_str and ("น้อย" in sit_str or "ต่ำ" in sit_str or "แห้ง" in sit_str):
+    elif "น้อยวิกฤต" in sit_str or ("วิกฤต" in sit_str and ("น้อย" in sit_str or "ต่ำ" in sit_str or "แห้ง" in sit_str)):
         status_key = "น้อยวิกฤต"
     elif "มาก" in sit_str:
         status_key = "มาก"
@@ -1067,7 +1136,7 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
         },
     }
 
-    res = status_map.get(status_key, status_map["ปกติ"])
+    res = status_map.get(status_key, status_map["ปกติ"]).copy()
     
     try:
         wl = float(wl_value) if wl_value not in [None, "-", ""] else 0
@@ -1652,7 +1721,7 @@ def handle_emergency_response(user_id: str, event=None) -> TextSendMessage:
         "🚨 ฉุกเฉิน! ทำตามนี้ทันที:\n\n"
         "1️⃣ ยกเบรกเกอร์ไฟฟ้าทันที\n"
         "2️⃣ ขึ้นที่สูงที่สุดเท่าที่ทำได้\n"
-        "3️⃣ โทรแจ้งเจ้าหน้าที่:\n"
+        "3️⃣ โทยแจ้งเจ้าหน้าที่:\n"
         "   📞 ปภ. 1784\n"
         "   📞 สพฉ. 1669\n"
         "   📞 ตำรวจทางหลวง 1193\n\n"
@@ -1726,4 +1795,4 @@ def start_background_tasks():
     Logger.info("System", "Background cleanup started")
 
 start_background_tasks()
-Logger.info("System", "FLOODCARE AI Bot Config v2.3 Initialized Successfully")
+Logger.info("System", "FLOODCARE AI Bot Config v2.4 Initialized Successfully")
