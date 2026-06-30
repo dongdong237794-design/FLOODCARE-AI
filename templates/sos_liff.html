@@ -29,87 +29,1145 @@
             --radius-lg: 20px;
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        body { font-family: 'Inter', 'Kanit', sans-serif; background-color: var(--bg-color); color: var(--text-primary); min-height: 100vh; padding-bottom: 48px; display: flex; flex-direction: column; align-items: center; }
-        .app-container { width: 100%; max-width: 480px; padding: 24px 20px; display: flex; flex-direction: column; gap: 24px; }
-        .header-section { display: flex; align-items: center; justify-content: space-between; background: var(--surface-color); padding: 20px; border-radius: var(--radius-xl); box-shadow: var(--shadow-subtle); border: 1px solid var(--border-soft); }
-        .profile-info { display: flex; align-items: center; gap: 16px; }
-        .avatar-container { width: 52px; height: 52px; border-radius: 50%; background: var(--primary-accent-light); display: flex; align-items: center; justify-content: center; overflow: hidden; border: 2px solid var(--surface-color); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        .avatar-container svg { width: 28px; height: 28px; fill: var(--primary-accent); }
-        .welcome-text h1 { font-size: 20px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; }
-        .welcome-text p { font-size: 13px; color: var(--text-secondary); }
-        .stepper-container { display: flex; justify-content: space-between; align-items: center; background: var(--surface-color); padding: 16px 24px; border-radius: var(--radius-lg); box-shadow: var(--shadow-subtle); border: 1px solid var(--border-soft); }
-        .step-node { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; background: var(--bg-color); color: var(--text-secondary); font-weight: 600; font-size: 14px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-        .step-node.active { background: var(--primary-accent); color: var(--surface-color); }
-        .step-node.completed { background: var(--success-accent); color: var(--surface-color); }
-        .step-divider { flex-grow: 1; height: 3px; background: var(--border-soft); margin: 0 8px; border-radius: 2px; }
-        .step-divider.completed { background: var(--success-accent); }
-        .card { background: var(--surface-color); border-radius: var(--radius-xl); padding: 28px 24px; box-shadow: var(--shadow-subtle); border: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 20px; }
-        .card-title-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-        .card-title-group h2 { font-size: 22px; font-weight: 700; color: var(--text-primary); }
-        .card-title-group p { font-size: 14px; color: var(--text-secondary); }
-        .form-group { display: flex; flex-direction: column; gap: 8px; }
-        .form-input { width: 100%; border-radius: var(--radius-lg); border: 1px solid var(--border-soft); background-color: var(--bg-color); padding: 18px 20px; font-size: 16px; font-weight: 500; outline: none; }
-        .selection-grid { display: flex; flex-direction: column; gap: 12px; }
-        .select-card-btn { background: var(--surface-color); border: 1px solid var(--border-soft); border-radius: var(--radius-lg); padding: 18px 20px; display: flex; align-items: center; gap: 16px; cursor: pointer; width: 100%; text-align: left; }
-        .select-card-btn.selected { background-color: var(--primary-accent-light); border-color: var(--primary-accent); }
-        .gps-status { padding: 16px 20px; border-radius: var(--radius-lg); font-size: 14px; font-weight: 500; }
-        .gps-status.loading { background-color: var(--info-accent-light); color: var(--info-accent); }
-        .gps-status.success { background-color: var(--success-accent-light); color: var(--success-accent); }
-        .gps-status.error { background-color: var(--primary-accent-light); color: var(--primary-accent); }
-        .map-container { width: 100%; height: 240px; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border-soft); position: relative; margin-top: 10px; }
-        .btn-modern { width: 100%; height: 58px; border-radius: var(--radius-lg); font-size: 16px; font-weight: 600; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-        .btn-primary { background-color: var(--primary-accent); color: var(--surface-color); }
-        .btn-secondary { background-color: var(--surface-color); color: var(--text-primary); border: 1px solid var(--border-soft); }
-        .hidden { display: none !important; }
-        .spinner { width: 24px; height: 24px; border: 3px solid rgba(0,0,0,0.1); border-top-color: var(--primary-accent); border-radius: 50%; animation: spin 1s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Inter', 'Kanit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding-bottom: 48px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 480px;
+            padding: 24px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* Profile Header */
+        .header-section {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface-color);
+            padding: 20px;
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-subtle);
+            border: 1px solid var(--border-soft);
+        }
+
+        .profile-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .avatar-container {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: var(--primary-accent-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 2px solid var(--surface-color);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+
+        .avatar-container svg {
+            width: 28px;
+            height: 28px;
+            fill: var(--primary-accent);
+        }
+
+        .welcome-text h1 {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
+        }
+
+        .welcome-text p {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* Stepper Navigation */
+        .stepper-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--surface-color);
+            padding: 16px 24px;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-subtle);
+            border: 1px solid var(--border-soft);
+        }
+
+        .step-node {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: var(--bg-color);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .step-node.active {
+            background: var(--primary-accent);
+            color: var(--surface-color);
+            box-shadow: 0 4px 14px rgba(224, 83, 83, 0.3);
+        }
+
+        .step-node.completed {
+            background: var(--success-accent);
+            color: var(--surface-color);
+        }
+
+        .step-divider {
+            flex-grow: 1;
+            height: 3px;
+            background: var(--border-soft);
+            margin: 0 8px;
+            border-radius: 2px;
+        }
+
+        .step-divider.completed {
+            background: var(--success-accent);
+        }
+
+        /* Cards and Elements */
+        .card {
+            background: var(--surface-color);
+            border-radius: var(--radius-xl);
+            padding: 28px 24px;
+            box-shadow: var(--shadow-subtle);
+            border: 1px solid var(--border-soft);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .card-title-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .card-title-group h2 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.5px;
+        }
+
+        .card-title-group p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* Form elements */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .form-input {
+            width: 100%;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-soft);
+            background-color: var(--bg-color);
+            padding: 18px 20px;
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+            transition: all 0.25s ease;
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        .form-input:focus {
+            border-color: var(--primary-accent);
+            background-color: var(--surface-color);
+            box-shadow: 0 0 0 4px var(--primary-accent-light);
+        }
+
+        textarea.form-input {
+            height: 120px;
+            resize: none;
+        }
+
+        /* Dynamic Selector Buttons */
+        .selection-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .select-card-btn {
+            background: var(--surface-color);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-lg);
+            padding: 18px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: left;
+            width: 100%;
+            outline: none;
+        }
+
+        .select-card-btn.selected {
+            background-color: var(--primary-accent-light);
+            border-color: var(--primary-accent);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(224, 83, 83, 0.08);
+        }
+
+        .select-indicator-dot {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 2px solid var(--border-soft);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            background: var(--surface-color);
+        }
+
+        .select-card-btn.selected .select-indicator-dot {
+            border-color: var(--primary-accent);
+            background: var(--primary-accent);
+        }
+
+        .select-card-btn.selected .select-indicator-dot::after {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--surface-color);
+        }
+
+        .btn-label-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .btn-label-sub {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 400;
+            margin-top: 2px;
+        }
+
+        /* Group Multi-select Buttons */
+        .multi-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .multi-btn {
+            background: var(--surface-color);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-lg);
+            padding: 20px 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .multi-btn svg {
+            width: 28px;
+            height: 28px;
+            fill: var(--text-secondary);
+        }
+
+        .multi-btn.selected {
+            background-color: var(--info-accent-light);
+            border-color: var(--info-accent);
+        }
+
+        .multi-btn.selected svg {
+            fill: var(--info-accent);
+        }
+
+        .multi-btn.selected span {
+            color: var(--info-accent);
+            font-weight: 600;
+        }
+
+        .multi-btn span {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        /* Number Counter component */
+        .counter-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-color);
+            padding: 16px 24px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-soft);
+        }
+
+        .counter-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 1px solid var(--border-soft);
+            background: var(--surface-color);
+            font-size: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.02);
+        }
+
+        .counter-display {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--primary-accent);
+        }
+
+        /* GPS Actions & Maps */
+        .gps-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            border-radius: var(--radius-lg);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .gps-status.loading {
+            background-color: var(--info-accent-light);
+            color: var(--info-accent);
+        }
+
+        .gps-status.success {
+            background-color: var(--success-accent-light);
+            color: var(--success-accent);
+        }
+
+        .gps-status.error {
+            background-color: var(--primary-accent-light);
+            color: var(--primary-accent);
+        }
+
+        .map-container {
+            width: 100%;
+            height: 240px;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            border: 1px solid var(--border-soft);
+            position: relative;
+        }
+
+        .map-hint-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        /* Summary Item Row */
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 0;
+            border-bottom: 1px solid var(--border-soft);
+        }
+
+        .summary-row:last-child {
+            border-bottom: none;
+        }
+
+        .summary-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .summary-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-align: right;
+            max-width: 60%;
+        }
+
+        /* Survival Instruction details */
+        .survival-box {
+            background-color: var(--primary-accent-light);
+            padding: 24px;
+            border-radius: var(--radius-xl);
+            border: 1px solid rgba(224, 83, 83, 0.1);
+        }
+
+        .survival-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--primary-accent);
+            margin-bottom: 12px;
+        }
+
+        .survival-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .survival-item {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #7A2828;
+            font-weight: 500;
+        }
+
+        /* Buttons Styling */
+        .btn-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn-modern {
+            width: 100%;
+            height: 58px;
+            border-radius: var(--radius-lg);
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn-modern:active {
+            transform: scale(0.98);
+        }
+
+        .btn-primary {
+            background-color: var(--primary-accent);
+            color: var(--surface-color);
+            box-shadow: var(--shadow-button);
+        }
+
+        .btn-primary:disabled {
+            background-color: #D1D5DB;
+            color: #9CA3AF;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background-color: var(--surface-color);
+            color: var(--text-primary);
+            border: 1px solid var(--border-soft);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--bg-color);
+        }
+
+        /* Custom alert overlay */
+        .custom-alert {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(31, 34, 38, 0.4);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            backdrop-filter: blur(8px);
+        }
+
+        .custom-alert-box {
+            background: var(--surface-color);
+            border-radius: var(--radius-xl);
+            padding: 32px 24px;
+            width: 100%;
+            max-width: 380px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .alert-icon-wrap {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .alert-message {
+            font-size: 16px;
+            color: var(--text-primary);
+            font-weight: 600;
+            line-height: 1.6;
+        }
+
+        /* Transitions */
+        .fade-in {
+            animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(0, 0, 0, 0.08);
+            border-top-color: var(--primary-accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Success elements */
+        .success-illustration {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto;
+            background: var(--success-accent-light);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .success-illustration svg {
+            width: 40px;
+            height: 40px;
+            fill: none;
+            stroke: var(--success-accent);
+            stroke-width: 4;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
     </style>
 </head>
 <body>
     <div class="app-container">
+
+        <!-- Profile Header -->
         <div class="header-section">
             <div class="profile-info">
-                <div class="avatar-container"><svg viewBox="0 0 24 24"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></div>
-                <div class="welcome-text"><p>FLOODCARE AI</p><h1>แจ้งเหตุฉุกเฉิน SOS</h1></div>
+                <div class="avatar-container">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+                    </svg>
+                </div>
+                <div class="welcome-text">
+                    <p>FLOODCARE AI</p>
+                    <h1>แจ้งเหตุฉุกเฉิน SOS</h1>
+                </div>
             </div>
         </div>
 
+        <!-- Stepper -->
+        <div class="stepper-container">
+            <div class="step-node active" id="step1-dot">1</div>
+            <div class="step-divider" id="line1"></div>
+            <div class="step-node" id="step2-dot">2</div>
+            <div class="step-divider" id="line2"></div>
+            <div class="step-node" id="step3-dot">3</div>
+            <div class="step-divider" id="line3"></div>
+            <div class="step-node" id="step4-dot">4</div>
+            <div class="step-divider" id="line4"></div>
+            <div class="step-node" id="step5-dot">5</div>
+        </div>
+
+        <!-- ========== STEP 1: Address & Location ========== -->
         <div id="step1" class="fade-in">
             <div class="card">
-                <div class="card-title-group"><h2>ตำแหน่งเกิดภัย</h2><p>ยืนยันพิกัดที่คุณต้องการให้กู้ภัยช่วยเหลือ</p></div>
-                <button class="btn-modern btn-primary" id="btnGetGPS" onclick="getGPS()">ดึงพิกัดปัจจุบัน</button>
+                <div class="card-title-group">
+                    <h2>ตำแหน่งเกิดภัย</h2>
+                    <p>กดปุ่มด้านล่างเพื่อยืนยันพิกัดที่คุณต้องการให้เจ้าหน้าที่เข้าไปช่วยเหลือ</p>
+                </div>
+
+                <button class="btn-modern btn-primary" id="btnGetGPS" onclick="getGPS()">ดึงพิกัดตำแหน่งของฉัน</button>
                 <div class="gps-status loading hidden" id="gpsStatus"></div>
-                <div class="map-container hidden" id="mapContainer"><div id="liffMap" style="width:100%; height:100%;"></div></div>
+
+                <div class="map-container hidden" id="mapContainer">
+                    <div id="liffMap" style="width:100%; height:100%;"></div>
+                </div>
+                <div class="map-hint-text hidden" id="mapHint">ลากหมุดบนแผนที่เพื่อระบุตำแหน่งให้ตรงจุดเกิดเหตุมากที่สุด</div>
+
+                <div id="gpsResult" class="hidden" style="display: flex; flex-direction: column;">
+                    <div class="summary-row">
+                        <span class="summary-label">ละติจูด/ลองจิจูด</span>
+                        <span class="summary-value" id="coordsValue">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">ที่อยู่ประมาณ</span>
+                        <span class="summary-value" id="addressValue">-</span>
+                    </div>
+                </div>
+
                 <button class="btn-modern btn-primary hidden" id="btnNext1" onclick="goToStep(2)">ดำเนินการต่อ</button>
             </div>
         </div>
-        <!-- Steps 2-5 remain largely the same in logic -->
+
+        <!-- ========== STEP 2: Severity Level ========== -->
+        <div id="step2" class="hidden">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>ระดับความรุนแรง</h2>
+                    <p>ประเมินและเลือกระดับภัยน้ำท่วมจริงในพิกัดของคุณขณะนี้</p>
+                </div>
+
+                <div class="selection-grid">
+                    <button class="select-card-btn" id="sev-critical" onclick="selectSeverity('critical', 'วิกฤต - มิดหัว/ติดหลังคา')">
+                        <div class="select-indicator-dot"></div>
+                        <div>
+                            <div class="btn-label-title" style="color:var(--primary-accent);">วิกฤตสูงสุด</div>
+                            <div class="btn-label-sub">ระดับน้ำสูงมิดศีรษะ หรือผู้คนต้องหลบภัยอยู่บนหลังคา</div>
+                        </div>
+                    </button>
+                    <button class="select-card-btn" id="sev-high" onclick="selectSeverity('high', 'สูง - ระดับอก/เกิน 1 เมตร')">
+                        <div class="select-indicator-dot"></div>
+                        <div>
+                            <div class="btn-label-title" style="color:var(--warning-accent);">อันตรายสูง</div>
+                            <div class="btn-label-sub">ระดับน้ำสูงเทียบเท่าอก (หรือสูงเกิน 1 เมตรขึ้นไป)</div>
+                        </div>
+                    </button>
+                    <button class="select-card-btn" id="sev-medium" onclick="selectSeverity('medium', 'ปานกลาง - ระดับเอว')">
+                        <div class="select-indicator-dot"></div>
+                        <div>
+                            <div class="btn-label-title" style="color:var(--info-accent);">ปานกลาง</div>
+                            <div class="btn-label-sub">ระดับน้ำสูงเทียบเท่าเอว (ประมาณ 50-80 เซนติเมตร)</div>
+                        </div>
+                    </button>
+                    <button class="select-card-btn" id="sev-low" onclick="selectSeverity('low', 'ต่ำ - ระดับหน้าแข้ง')">
+                        <div class="select-indicator-dot"></div>
+                        <div>
+                            <div class="btn-label-title" style="color:var(--success-accent);">ระดับต่ำ</div>
+                            <div class="btn-label-sub">ระดับน้ำสูงเทียบเท่าหน้าแข้งหรือเข่า เดินผ่านได้ลำบาก</div>
+                        </div>
+                    </button>
+                </div>
+
+                <button class="btn-modern btn-secondary" onclick="goToStep(1)">ย้อนกลับ</button>
+            </div>
+        </div>
+
+        <!-- ========== STEP 3: Victim Count ========== -->
+        <div id="step3" class="hidden">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>จำนวนผู้ประสบภัย</h2>
+                    <p>ระบุจำนวนสมาชิกที่กำลังรอการช่วยเหลือในจุดเกิดเหตุ</p>
+                </div>
+
+                <div class="counter-box">
+                    <button class="counter-btn" onclick="changeCount(-1)">−</button>
+                    <span class="counter-display" id="victimCount">1</span>
+                    <button class="counter-btn" onclick="changeCount(1)">+</button>
+                </div>
+
+                <div class="btn-stack">
+                    <button class="btn-modern btn-primary" onclick="goToStep(4)">ดำเนินการต่อ</button>
+                    <button class="btn-modern btn-secondary" onclick="goToStep(2)">ย้อนกลับ</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== STEP 4: Vulnerable Groups ========== -->
+        <div id="step4" class="hidden">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>สมาชิกกลุ่มเปราะบาง</h2>
+                    <p>เลือกกลุ่มที่ต้องการดูแลพิเศษหรือกู้ภัยฉุกเฉินก่อน (เลือกได้หลายกลุ่ม)</p>
+                </div>
+
+                <div class="multi-grid">
+                    <button class="multi-btn" id="group-child" onclick="toggleGroup('child', 'เด็กเล็ก')">
+                        <svg viewBox="0 0 24 24"><path d="M12 6c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 3c-1.1 0-2 .9-2 2v5h1.5v6h1v-6H14v-5c0-1.1-.9-2-2-2z"/></svg>
+                        <span>เด็กเล็ก</span>
+                    </button>
+                    <button class="multi-btn" id="group-elderly" onclick="toggleGroup('elderly', 'ผู้สูงอายุ')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+                        <span>ผู้สูงอายุ</span>
+                    </button>
+                    <button class="multi-btn" id="group-disabled" onclick="toggleGroup('disabled', 'ผู้พิการ')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm4 7h-1.75l-1.75-2.25V4c0-1.1-.9-2-2-2s-2 .9-2 2v5.5l2.25 2.25H16v2h-4.5L9.25 11H7v2h1.5L10 14.5V19h2v-4h3c1.1 0 2-.9 2-2V9h-1z"/></svg>
+                        <span>ผู้พิการ</span>
+                    </button>
+                    <button class="multi-btn" id="group-bedridden" onclick="toggleGroup('bedridden', 'ผู้ป่วยติดเตียง')">
+                        <svg viewBox="0 0 24 24"><path d="M20 10H4v2h16v-2zm-1-4H5c-1.1 0-2 .9-2 2v10h18V8c0-1.1-.9-2-2-2zm1 12H4v-4h16v-4z"/></svg>
+                        <span>ผู้ป่วยติดเตียง</span>
+                    </button>
+                    <button class="multi-btn" id="group-pregnant" onclick="toggleGroup('pregnant', 'หญิงตั้งครรภ์')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 13h-2v-2h2v2zm0-4h-2V7h2v4z"/></svg>
+                        <span>หญิงตั้งครรภ์</span>
+                    </button>
+                    <button class="multi-btn" id="group-pet" onclick="toggleGroup('pet', 'สัตว์เลี้ยง')">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5.5 14H16c-.28 0-.5-.22-.5-.5s.22-.5.5-.5h1.5c.28 0 .5.22.5.5s-.22.5-.5.5z"/></svg>
+                        <span>สัตว์เลี้ยง</span>
+                    </button>
+                </div>
+
+                <div class="form-group" style="margin-top: 12px;">
+                    <label class="form-label">รายละเอียดสิ่งของที่ต้องการด่วนที่สุด</label>
+                    <textarea class="form-input" id="detailsInput" placeholder="กรอกเพิ่มเติม เช่น ต้องการเรือมารับเพื่อพาไปฟอกไต มีผู้ป่วยติดเตียงต้องการออกซิเจน..."></textarea>
+                </div>
+
+                <div class="btn-stack">
+                    <button class="btn-modern btn-primary" onclick="goToStep(5)">ดำเนินการต่อ</button>
+                    <button class="btn-modern btn-secondary" onclick="goToStep(3)">ย้อนกลับ</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== STEP 5: Summary & Submit ========== -->
+        <div id="step5" class="hidden">
+            <div class="card">
+                <div class="card-title-group">
+                    <h2>สรุปใบแจ้งเหตุ</h2>
+                    <p>ตรวจสอบข้อมูลความถูกต้องของใบสรุปรายการ ก่อนจัดส่งข้อมูลให้แก่ทีมกู้ภัย</p>
+                </div>
+
+                <div>
+                    <div class="summary-row">
+                        <span class="summary-label">พิกัดแจ้งเหตุ</span>
+                        <span class="summary-value" id="sumGPS">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">ระดับภัยพิบัติ</span>
+                        <span class="summary-value" id="sumSeverity">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">ยอดจำนวนคน</span>
+                        <span class="summary-value" id="sumCount">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">กลุ่มพิเศษ</span>
+                        <span class="summary-value" id="sumGroups">-</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">ข้อความรายละเอียด</span>
+                        <span class="summary-value" id="sumDetails">-</span>
+                    </div>
+                </div>
+
+                <div class="btn-stack">
+                    <button class="btn-modern btn-primary" id="btnSubmit" onclick="submitSOS()">ส่งสัญญาณช่วยเหลือ SOS</button>
+                    <button class="btn-modern btn-secondary" onclick="goToStep(4)">ย้อนกลับแก้ไข</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== SUCCESS SCREEN ========== -->
+        <div id="successScreen" class="hidden">
+            <div class="card" style="gap: 28px; text-align: center;">
+                <div class="success-illustration">
+                    <svg viewBox="0 0 24 24">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+                <div class="card-title-group" style="align-items: center;">
+                    <h2 style="color:var(--success-accent)">ส่งสัญญาณสำเร็จแล้ว</h2>
+                    <p style="text-align: center;">รหัสแจ้งเคสกรณีของท่านคือ</p>
+                    <div style="font-size: 24px; font-weight: 700; color: var(--primary-accent); background: var(--primary-accent-light); padding: 12px 24px; border-radius: 16px; margin: 12px 0;" id="caseId">-</div>
+                    <p style="text-align: center; font-size: 14px;">เราได้ส่งแจ้งเหตุไปยังระบบศูนย์ประสานงานร่วม เรียบร้อยแล้ว</p>
+                </div>
+
+                <!-- Survival list -->
+                <div class="survival-box">
+                    <div class="survival-title">คำแนะนำการเอาตัวรอด</div>
+                    <div class="survival-list">
+                        <div class="survival-item">1. รีบสับคัตเอาท์เพื่อตัดกระแสไฟของที่อยู่อาศัย</div>
+                        <div class="survival-item">2. หลีกเลี่ยงการเดินลุยน้ำโดยไม่มีรองเท้าหุ้มส้น</div>
+                        <div class="survival-item">3. ประหยัดพลังงานแบตเตอรี่โทรศัพท์ให้ได้มากที่สุด</div>
+                    </div>
+                </div>
+
+                <button class="btn-modern btn-secondary" onclick="closeLIFF()">ปิดหน้าต่างนี้</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Custom Modern Alert Dialog -->
+    <div id="customAlert" class="custom-alert hidden">
+        <div class="custom-alert-box">
+            <div class="alert-icon-wrap" id="alertIconBg" style="background-color: var(--primary-accent-light);">
+                <svg id="alertIcon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--primary-accent)" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+            </div>
+            <span id="customAlertMessage" class="alert-message">-</span>
+            <button class="btn-modern btn-primary" style="height:48px; border-radius:14px;" onclick="closeCustomAlert()">ตกลง</button>
+        </div>
     </div>
 
     <script>
-        let liffId = "{{ liff_id }}"; // ใส่ LIFF ID ผ่าน Flask template engine
-        
+        let currentStep = 1;
+        let formData = {
+            latitude: null,
+            longitude: null,
+            severity: null,
+            severityLabel: '',
+            victimCount: 1,
+            vulnerableGroups: [],
+            details: '',
+            userId: null
+        };
+
+        function showCustomAlert(message, type = 'error') {
+            const modal = document.getElementById('customAlert');
+            const alertBg = document.getElementById('alertIconBg');
+            const alertIcon = document.getElementById('alertIcon');
+            const msgText = document.getElementById('customAlertMessage');
+            
+            msgText.textContent = message;
+            if (type === 'success') {
+                alertBg.style.backgroundColor = 'var(--success-accent-light)';
+                alertIcon.setAttribute('stroke', 'var(--success-accent)');
+                alertIcon.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
+            } else {
+                alertBg.style.backgroundColor = 'var(--primary-accent-light)';
+                alertIcon.setAttribute('stroke', 'var(--primary-accent)');
+                alertIcon.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>';
+            }
+            modal.classList.remove('hidden');
+        }
+
+        function closeCustomAlert() {
+            document.getElementById('customAlert').classList.add('hidden');
+        }
+
+        L.Marker.prototype.options.icon = L.icon({
+            iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
+
         async function initLIFF() {
             try {
-                if (!liffId || liffId.includes('{{')) {
-                    throw new Error("Missing LIFF ID configuration");
-                }
-                await liff.init({ liffId: liffId });
-                if (!liff.isLoggedIn()) {
-                    liff.login();
-                } else {
+                await liff.init({ liffId: getLiffId() });
+                if (liff.isLoggedIn()) {
                     const profile = await liff.getProfile();
-                    // บันทึก userId สำหรับใช้ภายหลัง
+                    formData.userId = profile.userId;
+                    formData.idToken = liff.getIDToken();
                 }
                 getGPS();
             } catch (err) {
                 console.error('LIFF init failed:', err);
-                // จัดการ Error เช่น แสดงข้อความในหน้าจอ
+                const statusEl = document.getElementById('gpsStatus');
+                statusEl.classList.remove('hidden');
+                statusEl.className = 'gps-status error';
+                statusEl.innerHTML = 'กรุณาเปิดจากระบบแอปพลิเคชัน LINE เท่านั้น';
             }
         }
-        
-        // ฟังก์ชันอื่นๆ ...
+
+        function getLiffId() {
+            const flaskLiffId = "{{ liff_id }}";
+            if (flaskLiffId && !flaskLiffId.startsWith('{')) {
+                return flaskLiffId;
+            }
+            const params = new URLSearchParams(window.location.search);
+            return params.get('liffId') || '';
+        }
+
+        let liffMap = null;
+        let liffMarker = null;
+
+        function initOrUpdateMap(lat, lon) {
+            document.getElementById('mapContainer').classList.remove('hidden');
+            document.getElementById('mapHint').classList.remove('hidden');
+
+            if (!liffMap) {
+                liffMap = L.map('liffMap', { zoomControl: true, attributionControl: true }).setView([lat, lon], 16);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap'
+                }).addTo(liffMap);
+
+                liffMarker = L.marker([lat, lon], { draggable: true }).addTo(liffMap);
+
+                liffMarker.on('dragend', () => {
+                    const pos = liffMarker.getLatLng();
+                    updatePinPosition(pos.lat, pos.lng);
+                });
+
+                liffMap.on('click', (e) => {
+                    liffMarker.setLatLng(e.latlng);
+                    updatePinPosition(e.latlng.lat, e.latlng.lng);
+                });
+
+                setTimeout(() => liffMap.invalidateSize(), 200);
+            } else {
+                liffMap.setView([lat, lon], 16);
+                liffMarker.setLatLng([lat, lon]);
+            }
+        }
+
+        function updatePinPosition(lat, lon) {
+            formData.latitude = lat.toFixed(6);
+            formData.longitude = lon.toFixed(6);
+            document.getElementById('coordsValue').textContent = `${formData.latitude}, ${formData.longitude}`;
+            getAddress(formData.latitude, formData.longitude);
+        }
+
+        function getGPS() {
+            const statusEl = document.getElementById('gpsStatus');
+            statusEl.classList.remove('hidden');
+            statusEl.className = 'gps-status loading';
+            statusEl.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;margin-right:8px;"></div>กำลังตรวจวัดตำแหน่งของคุณ...';
+
+            if (!navigator.geolocation) {
+                statusEl.className = 'gps-status error';
+                statusEl.innerHTML = 'ระบบนี้ไม่เปิดบริการระบบ GPS — โปรดจิ้มปักหมุดบนหน้าจอ';
+                document.getElementById('gpsResult').classList.remove('hidden');
+                document.getElementById('btnNext1').classList.remove('hidden');
+                updatePinPosition(13.7563, 100.5018);
+                initOrUpdateMap(13.7563, 100.5018);
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    updatePinPosition(lat, lon);
+                    initOrUpdateMap(lat, lon);
+                    
+                    document.getElementById('gpsResult').classList.remove('hidden');
+                    statusEl.className = 'gps-status success';
+                    statusEl.innerHTML = 'ค้นพบพิกัดของท่านเสร็จสมบูรณ์';
+                    document.getElementById('btnNext1').classList.remove('hidden');
+                },
+                (error) => {
+                    statusEl.className = 'gps-status error';
+                    statusEl.innerHTML = 'สัญญาณ GPS อ่อน — กรุณาเลือกพิกัดด้วยตัวเองบนแผนที่';
+                    document.getElementById('gpsResult').classList.remove('hidden');
+                    document.getElementById('btnNext1').classList.remove('hidden');
+                    updatePinPosition(13.7563, 100.5018);
+                    initOrUpdateMap(13.7563, 100.5018);
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            );
+        }
+
+        async function getAddress(lat, lon) {
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`);
+                const data = await res.json();
+                const addr = data.address;
+                const display = addr ? 
+                    `${addr.subdistrict || ''} ${addr.district || ''} ${addr.city || addr.province || ''}` : 
+                    'พิกัดไม่ถูกระบุที่อยู่แน่ชัด';
+                document.getElementById('addressValue').textContent = display;
+                formData.address = display;
+            } catch (e) {
+                document.getElementById('addressValue').textContent = 'ระบุข้อมูลเฉพาะพิกัดตัวเลข';
+            }
+        }
+
+        function goToStep(step) {
+            for (let i = 1; i <= 5; i++) {
+                document.getElementById('step' + i).classList.add('hidden');
+            }
+            document.getElementById('step' + step).classList.remove('hidden');
+            document.getElementById('step' + step).classList.add('fade-in');
+            
+            for (let i = 1; i <= 5; i++) {
+                const dot = document.getElementById('step' + i + '-dot');
+                const line = document.getElementById('line' + i);
+                
+                dot.classList.remove('active', 'completed');
+                if (line) line.classList.remove('completed');
+                
+                if (i < step) {
+                    dot.classList.add('completed');
+                    dot.innerHTML = '<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:white;stroke-width:3;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                    if (line) line.classList.add('completed');
+                } else if (i === step) {
+                    dot.classList.add('active');
+                    dot.textContent = i;
+                } else {
+                    dot.textContent = i;
+                }
+            }
+            currentStep = step;
+            if (step === 5) {
+                updateSummary();
+            }
+            window.scrollTo(0, 0);
+        }
+
+        function selectSeverity(level, label) {
+            formData.severity = level;
+            formData.severityLabel = label;
+            
+            document.querySelectorAll('.select-card-btn').forEach(btn => btn.classList.remove('selected'));
+            document.getElementById('sev-' + level).classList.add('selected');
+            
+            setTimeout(() => goToStep(3), 300);
+        }
+
+        function changeCount(delta) {
+            formData.victimCount = Math.max(1, formData.victimCount + delta);
+            document.getElementById('victimCount').textContent = formData.victimCount;
+        }
+
+        function toggleGroup(id, label) {
+            const btn = document.getElementById('group-' + id);
+            const idx = formData.vulnerableGroups.indexOf(label);
+            
+            if (idx > -1) {
+                formData.vulnerableGroups.splice(idx, 1);
+                btn.classList.remove('selected');
+            } else {
+                formData.vulnerableGroups.push(label);
+                btn.classList.add('selected');
+            }
+        }
+
+        function updateSummary() {
+            formData.details = document.getElementById('detailsInput').value || '-';
+            
+            document.getElementById('sumGPS').textContent = 
+                formData.latitude ? `${formData.latitude}, ${formData.longitude}` : 'ยังไม่ได้ปักพิกัด';
+            document.getElementById('sumSeverity').textContent = formData.severityLabel || 'ไม่ระบุ';
+            document.getElementById('sumCount').textContent = formData.victimCount + ' คน';
+            document.getElementById('sumGroups').textContent = 
+                formData.vulnerableGroups.length > 0 ? formData.vulnerableGroups.join(', ') : 'ไม่มี';
+            document.getElementById('sumDetails').textContent = formData.details;
+        }
+
+        async function submitSOS() {
+            const btn = document.getElementById('btnSubmit');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;border-width:2px;display:inline-block;margin-right:8px;border-top-color:white;"></div>กำลังบันทึกส่งเรื่อง...';
+            
+            let priority = 'NORMAL';
+            if (formData.severity === 'critical') priority = 'CRITICAL';
+            else if (formData.severity === 'high') priority = 'HIGH';
+            else if (formData.vulnerableGroups.some(g => ['เด็กเล็ก', 'ผู้สูงอายุ', 'ผู้ป่วยติดเตียง'].includes(g))) 
+                priority = 'HIGH';
+            
+            const payload = {
+                user_id: formData.userId || 'unknown',
+                latitude: formData.latitude,
+                longitude: formData.longitude,
+                water_level_status: formData.severityLabel,
+                victim_count: formData.victimCount,
+                vulnerable_groups: formData.vulnerableGroups.join(', '),
+                group_types: 'ผู้ประสบภัย',
+                urgency_level: formData.severity === 'critical' ? 'วิกฤต' : 
+                               formData.severity === 'high' ? 'สูง' : 
+                               formData.severity === 'medium' ? 'ปานกลาง' : 'ต่ำ',
+                details: formData.details,
+                priority: priority,
+                photo_url: '-'
+            };
+            
+            try {
+                const response = await fetch('/api/sos/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + (formData.idToken || '')
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('caseId').textContent = result.case_id;
+                    document.getElementById('step5').classList.add('hidden');
+                    document.getElementById('successScreen').classList.remove('hidden');
+                    document.getElementById('successScreen').classList.add('fade-in');
+                } else {
+                    throw new Error(result.error || 'ระบบเซิร์ฟเวอร์ขัดข้อง');
+                }
+            } catch (error) {
+                btn.disabled = false;
+                btn.innerHTML = 'ส่งเรื่องขอสัญญาณ SOS';
+                showCustomAlert('ไม่สามารถทำการส่งสัญญาณ SOS: ' + error.message, 'error');
+            }
+        }
+
+        function closeLIFF() {
+            if (liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                window.close();
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', initLIFF);
     </script>
 </body>
