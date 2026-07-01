@@ -387,7 +387,7 @@ class IntentClassifier:
             "evacuation center", "shelter", "ไปไหนดี", "พักที่ไหน", "ห้างน้ำท่วม"
         ],
         "WATER_LEVEL": [
-            "ระดับน้ำ", "น้ำท่วม", "น้ำสูง", "เช็คน้ำ", "ตรวจน้ำ", "water level", 
+            "ระดับน้ำ", "น้ำสูง", "เช็คน้ำ", "ตรวจน้ำ", "water level", 
             "flood level", "น้ำขึ้น", "น้ำลด", "สถานการณ์น้ำ", "check water"
         ],
         "WEATHER": [
