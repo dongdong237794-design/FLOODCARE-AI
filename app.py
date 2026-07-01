@@ -26,7 +26,6 @@ import datetime
 from typing import Optional
 from flask import Flask, request, abort, jsonify, render_template_string, render_template, g, session, redirect, url_for
 
-# Imports configuration from bot_config (floodcare_ai_optimized_bot_config.py saved as bot_config.py)
 import bot_config
 from bot_config import (
     # Core systems
@@ -44,13 +43,16 @@ from bot_config import (
     build_language_selector_flex, build_water_level_flex_message,
     build_register_form_flex, build_snake_bite_flex, build_help_flex,
     build_need_form_flex, build_weather_flex, build_faq_response_flex,
+    build_shelter_flex_message,
+    # Shelter data
+    find_nearest_shelters,
     # Response handlers
     get_greeting_message, handle_emergency_response,
     build_sos_summary_text, build_needs_summary_text,
     calculate_sos_priority,
     # Services
     ask_gemini, ask_gemini_with_search, get_live_weather_scraper, get_live_weather_data, sheets_mgr,
-    get_live_water_levels_from_api, assess_water_level_status, calculate_situation,
+    assess_water_level_status, calculate_situation,
     # Legacy state
     USER_STATES, USER_DATA, update_legacy_state,
     # Config
@@ -116,7 +118,7 @@ def _push_save_confirmation(user_id: Optional[str], message: str) -> None:
 
 
 # =============================================================================
-# LIFF API AUTH (Robust and Fallback Friendly)
+# LIFF API AUTH
 # =============================================================================
 
 import urllib.request as _urllib_request
@@ -125,9 +127,8 @@ import hmac as _hmac
 def _verify_liff_token(id_token: str, liff_id: str) -> Optional[str]:
     if not id_token or not liff_id:
         return None
-    # Filter out common string placeholders when LIFF is not initialized or runs on external browser
-    if id_token.lower() in ("null", "undefined", "", "bearer", "bearer null", "bearer undefined"):
-        Logger.info("Auth", "id_token has placeholder value — LIFF might be in standalone/test mode")
+    if id_token.lower() in ("null", "undefined", ""):
+        Logger.info("Auth", "id_token is null/undefined — LIFF may not be fully initialized")
         return None
     try:
         channel_id = liff_id.split("-")[0] if "-" in liff_id else liff_id
@@ -146,7 +147,7 @@ def _verify_liff_token(id_token: str, liff_id: str) -> Optional[str]:
             body = json.loads(resp.read())
             return body.get("sub")
     except Exception as e:
-        Logger.info("Auth", f"LIFF token verification failed on LINE API: {e}")
+        Logger.info("Auth", f"LIFF token verify failed: {e}")
         return None
 
 
@@ -157,60 +158,58 @@ def _require_liff_auth(expected_liff_id: str):
     def decorator(fn):
         @wraps(fn)
         def wrapped(*args, **kwargs):
-            # Skip token validation if the LIFF ID is not configured in the system environment
             if not expected_liff_id:
                 Logger.info("Auth", f"LIFF_ID not configured — skipping token verify for {fn.__name__}")
-                g.verified_user_id = "unknown"
+                g.verified_user_id = None
                 return fn(*args, **kwargs)
 
             auth_header = request.headers.get("Authorization", "")
-            id_token = ""
-            
-            # Extract Bearer token safely
-            if auth_header.startswith("Bearer ") and len(auth_header) > 7:
-                id_token = auth_header[7:].strip()
 
-            # Prevent passing literal placeholder strings to validation
-            if id_token.lower() in ("null", "undefined", ""):
-                id_token = ""
+            if not auth_header.startswith("Bearer ") or auth_header == "Bearer ":
+                try:
+                    body_data = request.get_json(silent=True) or {}
+                    fallback_uid = body_data.get("user_id", "")
+                    if fallback_uid and fallback_uid != "unknown":
+                        Logger.info(
+                            "Auth",
+                            f"No valid Authorization header for {fn.__name__} — "
+                            f"accepting payload user_id (unverified)."
+                        )
+                        g.verified_user_id = fallback_uid
+                        if not check_rate_limit(fallback_uid):
+                            return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+                        return fn(*args, **kwargs)
+                except Exception:
+                    pass
+                Logger.security("Auth", "Missing Authorization header and no user_id in body", "unknown", {})
+                return jsonify({"success": False, "error": "Unauthorized"}), 401
 
-            user_id = None
-            if id_token:
-                user_id = _verify_liff_token(id_token, expected_liff_id)
+            id_token = auth_header[len("Bearer "):]
+            user_id = _verify_liff_token(id_token, expected_liff_id)
+            if not user_id:
+                try:
+                    body_data = request.get_json(silent=True) or {}
+                    fallback_uid = body_data.get("user_id", "")
+                    if fallback_uid and fallback_uid != "unknown":
+                        Logger.info(
+                            "Auth",
+                            f"LIFF token verify failed for {fn.__name__} — "
+                            f"accepting payload user_id (unverified)."
+                        )
+                        g.verified_user_id = fallback_uid
+                        if not check_rate_limit(fallback_uid):
+                            return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
+                        return fn(*args, **kwargs)
+                except Exception:
+                    pass
+                Logger.security("Auth", "Invalid LIFF token and no fallback user_id", "unknown", {})
+                return jsonify({"success": False, "error": "Unauthorized"}), 401
 
-            if user_id:
-                # Flow A: Verified User successfully validated through LINE Server
-                if not check_rate_limit(user_id):
-                    return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
-                g.verified_user_id = user_id
-                return fn(*args, **kwargs)
+            if not check_rate_limit(user_id):
+                return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
 
-            # Flow B: Token invalid/absent (Fallback checking request body)
-            try:
-                body_data = request.get_json(silent=True) or {}
-                fallback_uid = body_data.get("user_id", "")
-                
-                # Check for other potential parameters
-                if not fallback_uid:
-                    fallback_uid = body_data.get("userId", "")
-
-                # Validate and clean fallback User ID
-                if fallback_uid and str(fallback_uid).lower() not in ("null", "undefined", "", "unknown"):
-                    Logger.info(
-                        "Auth",
-                        f"LIFF validation bypassed/failed for {fn.__name__} — "
-                        f"accepting request body user_id: {fallback_uid} (unverified)."
-                    )
-                    g.verified_user_id = str(fallback_uid)
-                    if not check_rate_limit(g.verified_user_id):
-                        return jsonify({"success": False, "error": "Rate limit exceeded"}), 429
-                    return fn(*args, **kwargs)
-            except Exception as e:
-                Logger.error("Auth", f"Fallback identification error: {e}")
-
-            # Flow C: Fully unauthorized access (No valid token, no valid body UID)
-            Logger.security("Auth", f"Denied access on {fn.__name__} - missing or invalid authorization keys", "unknown")
-            return jsonify({"success": False, "error": "Unauthorized"}), 401
+            g.verified_user_id = user_id
+            return fn(*args, **kwargs)
         return wrapped
     return decorator
 
@@ -283,7 +282,7 @@ def handle_text_message(event):
     if not check_rate_limit(user_id):
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="⏳ คุณส่งข้อความเร็วเกินไป กรุณารอสักครู่ครับ")
+            TextSendMessage(text="⏳ ขออภัยครับ ตอนนี้มีข้อความเข้ามาเยอะ รบกวนรอสักครู่แล้วลองส่งใหม่อีกครั้งนะครับ หากเป็นเหตุฉุกเฉินร้ายแรง โทร ปภ. 1784 ได้ทันทีครับ")
         )
         return
     
@@ -313,7 +312,7 @@ def handle_text_message(event):
         update_legacy_state(user_id, "IDLE", {})
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ คุณสามารถกดใช้งานเมนูหลักใหม่ได้ทันทีครับ")
+            TextSendMessage(text="❌ ยกเลิกขั้นตอนก่อนหน้าเรียบร้อยแล้วครับ พิมพ์ 'เมนู' หรือเลือกจากเมนูหลักเพื่อเริ่มใช้งานใหม่ได้ทันทีครับ")
         )
         return
     
@@ -387,7 +386,7 @@ def handle_text_message(event):
         update_legacy_state(user_id, "IDLE", {})
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="❌ ยกเลิกขั้นตอนเรียบร้อยแล้วครับ")
+            TextSendMessage(text="❌ ยกเลิกขั้นตอนก่อนหน้าเรียบร้อยแล้วครับ พิมพ์ 'เมนู' หรือเลือกจากเมนูหลักเพื่อเริ่มใช้งานใหม่ได้ทันทีครับ")
         )
         return
     
@@ -408,17 +407,13 @@ def handle_text_message(event):
     
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text="🤔 ไม่เข้าใจคำถาม กรุณาลองใหม่หรือเลือกจากเมนูครับ")
+        TextSendMessage(text="🤔 ขออภัยครับ น้องบอทยังไม่เข้าใจข้อความนี้ ลองพิมพ์ใหม่อีกครั้ง หรือพิมพ์ 'เมนู' เพื่อดูสิ่งที่ช่วยได้ครับ หากอยู่ในสถานการณ์ฉุกเฉิน พิมพ์ 'ช่วยด้วย' หรือโทร ปภ. 1784 ได้ทันทีครับ")
     )
 
 
 # =============================================================================
 # LOCATION MESSAGE HANDLER
 # =============================================================================
-
-@app.route("/callback/location", methods=['POST']) # Endpoint mapping placeholder if needed
-def handle_location_callback():
-    return 'OK', 200
 
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location_message(event):
@@ -449,7 +444,7 @@ def handle_location_message(event):
     update_legacy_state(user_id, "IDLE", {})
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text="📍 ได้รับพิกัดแล้วครับ หากต้องการใช้งาน กรุณาเลือกจากเมนูหลักครับ")
+        TextSendMessage(text="📍 ได้รับพิกัดของคุณแล้วครับ ตอนนี้ยังไม่ได้อยู่ในขั้นตอนที่ต้องใช้พิกัด ลองพิมพ์ 'ศูนย์พักพิง' 'เช็คน้ำ' หรือ 'สภาพอากาศ' เพื่อค้นหาข้อมูลใกล้ตำแหน่งนี้ได้เลยครับ")
     )
 
 
@@ -462,7 +457,7 @@ def handle_image_message(event):
     user_id = event.source.user_id
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text="📸 ได้รับรูปภาพแล้วครับ หากต้องการส่งรูปเพื่อรายงานอุทกภัยหรือขอความช่วยเหลือกรุณาเลือกปุ่มเมนู SOS หรือ ขอความช่วยเหลือเรื่องสิ่งของ และส่งรูปในแบบฟอร์มเว็บไซต์ครับ")
+        TextSendMessage(text="📸 ได้รับรูปภาพของคุณแล้วครับ หากต้องการแนบรูปเพื่อแจ้งเหตุฉุกเฉินหรือขอความช่วยเหลือเรื่องสิ่งของ กรุณากดเมนู 'SOS' หรือ 'ขอความช่วยเหลือเรื่องสิ่งของ' แล้วแนบรูปในแบบฟอร์มได้เลยครับ")
     )
 
 
@@ -551,31 +546,25 @@ def _handle_weather_request(event, user_id):
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(
-            text="🌦️ ตรวจสอบสภาพอากาศปัจจุบัน\n\n"
-                 "โปรดกดแชร์พิกัดเพื่อรับรายงานสภาพอากาศจากกรมอุตุฯ:",
+            text="🌦️ ตรวจสอบสภาพอากาศปัจจุบัน\n\nโปรดกดแชร์พิกัดเพื่อรับรายงานสภาพอากาศจากกรมอุตุฯ:",
             quick_reply=quick_reply
         )
     )
 
 
 # =============================================================================
-# CHAT AI HANDLERS (With Typing Indicators & Concise Citations)
+# CHAT AI HANDLERS (With Typing Indicators)
 # =============================================================================
 
 def _handle_faq_query(event, user_id, user_text, timestamp):
     show_loading_animation(user_id, loading_seconds=30)
 
-    # Enforces concise rule in the FAQ prompt level
-    result = ask_gemini_with_search(
-        f"วิเคราะห์ข้อมูลและตอบกลับคำถามนี้ให้กระชับมากที่สุด (ไม่เกิน 2-3 บรรทัด) "
-        f"พร้อมระบุชื่อแหล่งอ้างอิงไว้ในวงเล็บอย่างสั้นด้วยครับ:\n\n{user_text}",
-        max_tokens=8192
-    )
+    result = ask_gemini_with_search(user_text, max_tokens=8192)
     answer = result.get("answer", "")
     sources = result.get("sources", [])
 
     if not answer:
-        answer = "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติในคำถามนี้ (ข้อมูลจาก: FLOODCARE AI)"
+        answer = "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติหรือความปลอดภัยในคำถามนี้ กรุณาลองสอบถามใหม่อีกครั้งครับ"
 
     flex_msg = build_faq_response_flex(answer, sources, user_text)
     line_bot_api.reply_message(event.reply_token, flex_msg)
@@ -592,11 +581,10 @@ def _handle_faq_query(event, user_id, user_text, timestamp):
 def _handle_ai_query(event, user_id, user_text, timestamp):
     show_loading_animation(user_id, loading_seconds=30)
 
-    # Strongly forces Gemini to yield a very brief response
     result = ask_gemini_with_search(
-        "ประเมินตามกฎเงื่อนไข System Instruction: ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ ความปลอดภัย "
-        "และสุขภาพอย่างเข้มงวด โดยปฏิเสธเรื่องนอกขอบเขตอย่างอบอุ่น "
-        "และ**สรุปคำตอบให้สั้นที่สุดไม่เกิน 2-3 บรรทัดเท่านั้น** พร้อมระบุแหล่งอ้างอิงสั้นๆ ในวงเล็บ:\n\n"
+        "ประเมินตามกฎและเงื่อนไข System Instruction (น้องบอท): ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ "
+        "ความปลอดภัย และสุขภาพของผู้เจ็บป่วยหรือเครียดเท่านั้น ปฏิเสธเรื่องนอกขอบเขตอย่างสุภาพและอบอุ่น "
+        "และตอบคำถามดังต่อไปนี้โดยไม่ใช้เครื่องหมายดอกจันเด็ดขาด:\n\n"
         f"คำถาม: {user_text}",
         max_tokens=8192
     )
@@ -604,7 +592,7 @@ def _handle_ai_query(event, user_id, user_text, timestamp):
     sources = result.get("sources", [])
 
     if not ai_response:
-        ai_response = "น้องบอทไม่พร้อมใช้งานชั่วคราวครับ หากมีเหตุฉุกเฉินรบกวนโทร ปภ. 1784 ทันทีครับ"
+        ai_response = "น้องบอทไม่พร้อมใช้งานชั่วคราวครับ หากฉุกเฉินรบกวนโทร ปภ. 1784 ได้ทันทีครับ"
 
     if sources:
         flex_msg = build_faq_response_flex(ai_response, sources, user_text)
@@ -628,75 +616,34 @@ def _handle_ai_query(event, user_id, user_text, timestamp):
 
 def _process_shelter_search(event, lat, lon, user_id):
     session = sessions.get(user_id)
-    records = sheets_mgr.get_all_records("Shelters")
-    
-    shelters = []
-    for r in records:
-        if str(r.get("Status", "")).strip() == "ปิดทำการ":
-            continue
-        try:
-            sh_lat = float(r.get("Latitude", 0))
-            sh_lon = float(r.get("Longitude", 0))
-            dist = calculate_distance(lat, lon, sh_lat, sh_lon)
-            cap = int(r.get("Capacity", 100))
-            occ = int(r.get("Occupancy", 0))
-            remaining = max(0, cap - occ)
-            
-            if remaining <= 0:
-                status = "🔴 เต็ม"
-            elif occ >= cap * 0.8:
-                status = f"🟡 ใกล้เต็ม (ว่าง {remaining})"
-            else:
-                status = f"🟢 มีที่ว่าง (ว่าง {remaining})"
-            
-            shelters.append({
-                "name": r.get("Name", "ไม่ระบุ"),
-                "distance": dist,
-                "status": status,
-                "lat": sh_lat,
-                "lon": sh_lon
-            })
-        except (ValueError, TypeError):
-            continue
-    
-    shelters.sort(key=lambda x: x["distance"])
-    top = shelters[:3]
-    
-    if not top:
-        reply = "📍 ไม่พบข้อมูลศูนย์พักพิงในระยะใกล้เคียงเลยครับ โปรดติดต่อสายด่วน ปภ. 1784 ครับ"
-    else:
-        reply = "📍 ศูนย์พักพิงใกล้บ้านคุณ:\n\n"
-        for i, sh in enumerate(top, 1):
-            reply += (
-                f"{i}. {sh['name']}\n"
-                f"   ห่างจากคุณ: {sh['distance']:.2f} กม.\n"
-                f"   สถานะ: {sh['status']}\n"
-                f"   🧭 ลิงก์นำทาง Google Maps:\n   https://www.google.com/maps/search/?api=1&query={sh['lat']},{sh['lon']}\n\n"
-            )
-        reply += "⚠️ โปรดใช้ความระมัดระวังสูงสุดในการเดินทางช่วงน้ำเชี่ยวครับ"
-    
+
+    shelters = find_nearest_shelters(lat, lon, limit=5)
+
+    if not shelters:
+        reply = (
+            "📍 ขออภัยครับ ตอนนี้ยังไม่พบศูนย์พักพิงในระบบที่อยู่ใกล้ตำแหน่งของคุณ\n\n"
+            "เพื่อความปลอดภัย รบกวนติดต่อสายด่วน ปภ. 1784 เพื่อสอบถามจุดอพยพที่ใกล้ที่สุดในพื้นที่ได้เลยครับ "
+            "น้องบอทจะรีบอัปเดตข้อมูลศูนย์พักพิงเพิ่มเติมโดยเร็วที่สุดครับ"
+        )
+        session.reset()
+        update_legacy_state(user_id, "IDLE", {})
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        return
+
+    flex_msg = build_shelter_flex_message(lat, lon, shelters)
+
     session.reset()
     update_legacy_state(user_id, "IDLE", {})
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+    line_bot_api.reply_message(event.reply_token, flex_msg)
 
 
 def _process_water_level(event, lat, lon, user_id, timestamp):
     session = sessions.get(user_id)
     show_loading_animation(user_id, loading_seconds=10)
     
-    # 1. First attempt to pull manual override records from Google Sheets
-    records = []
-    try:
-        records = sheets_mgr.get_all_records("Water_Levels")
-    except Exception as e:
-        Logger.error("WaterLevel", f"Failed to retrieve data from Google Sheets: {e}")
-        
-    # 2. If Google Sheet has no records (empty sheet), fetch live telemetries directly from ThaiWater API
-    if not records:
-        Logger.info("WaterLevel", "Google Sheet is empty. Automatically fetching live data from official ThaiWater API...")
-        records = get_live_water_levels_from_api()
-    
+    records = sheets_mgr.get_all_records("Water_Levels")
     stations = []
+    
     for r in records:
         try:
             st_lat = float(r.get("Lat", 0))
@@ -722,7 +669,7 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
                 "situation": situation,
                 "trend": trend,
                 "measure_time": r.get("Time", "-"),
-                "source": "api" if "StationCode" in r else "sheets"
+                "source": "sheets"
             })
         except (ValueError, TypeError):
             continue
@@ -778,6 +725,7 @@ def _process_weather(event, lat, lon, user_id, timestamp):
 
 def _render_liff_page(template_name: str, page_label: str):
     try:
+        # Dynamic LIFF ID injection to eliminate manual query parameter breaks
         liff_id = ""
         if "sos" in template_name:
             liff_id = SOS_LIFF_ID
@@ -942,7 +890,7 @@ def api_sos_submit():
             return jsonify({"success": False, "error": "No data"}), 400
 
         verified_uid = g.get("verified_user_id")
-        user_id = verified_uid or data.get("user_id") or data.get("userId") or "unknown"
+        user_id = verified_uid or data.get("user_id", "unknown")
 
         case_id = generate_case_id()
         timestamp = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
@@ -991,7 +939,7 @@ def api_need_submit():
             return jsonify({"success": False, "error": "No data"}), 400
 
         verified_uid = g.get("verified_user_id")
-        user_id = verified_uid or data.get("user_id") or data.get("userId") or "unknown"
+        user_id = verified_uid or data.get("user_id", "unknown")
 
         need_id = generate_need_id()
         timestamp = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
@@ -1035,7 +983,7 @@ def api_register_submit():
             return jsonify({"success": False, "error": "No data"}), 400
 
         verified_uid = g.get("verified_user_id")
-        user_id = verified_uid or data.get("user_id") or data.get("userId") or "unknown"
+        user_id = verified_uid or data.get("user_id", "unknown")
 
         first_name = (data.get("first_name") or "ผู้แจ้ง").strip()
         last_name = (data.get("last_name") or "ทั่วไป").strip()
