@@ -889,6 +889,100 @@ sheets_mgr = SheetsManager()
 
 
 # =============================================================================
+# SECTION 9B: SHELTER (EVACUATION CENTER) DATA
+# =============================================================================
+
+SHELTER_STATUS_MAP = {
+    "เปิดรับ": {"label": "🟢 เปิดรับ", "bg": "#DCFCE7", "text": "#15803D"},
+    "ใกล้เต็ม": {"label": "🟡 ใกล้เต็ม", "bg": "#FEF9C3", "text": "#A16207"},
+    "เต็ม": {"label": "🔴 เต็มแล้ว", "bg": "#FEE2E2", "text": "#B91C1C"},
+    "ปิด": {"label": "⚫ ปิดชั่วคราว", "bg": "#E5E7EB", "text": "#374151"},
+}
+
+
+def get_shelters_from_sheet(force_refresh: bool = False) -> list:
+    """
+    Pulls evacuation-center (shelter) records from the 'Shelters' worksheet.
+    Normalizes numeric fields (Latitude/Longitude/Capacity/Occupancy) and applies
+    a short-lived cache to avoid hammering the Google Sheets API.
+    """
+    start_time = time.time()
+    cache_key = "sheets:shelters:normalized"
+
+    if not force_refresh:
+        cached = cache.sheets.get(cache_key)
+        if cached is not None:
+            Logger.perf("Shelters", "cache_hit", (time.time() - start_time) * 1000)
+            return cached
+
+    raw_records = sheets_mgr.get_all_records("Shelters")
+    shelters = []
+
+    for row in raw_records:
+        try:
+            lat_raw = row.get("Latitude")
+            lon_raw = row.get("Longitude")
+            if lat_raw in (None, "", "-") or lon_raw in (None, "", "-"):
+                continue
+
+            lat = float(lat_raw)
+            lon = float(lon_raw)
+
+            def _to_int(val):
+                try:
+                    return int(float(val))
+                except (TypeError, ValueError):
+                    return 0
+
+            shelters.append({
+                "ShelterID": row.get("ShelterID", ""),
+                "Name": row.get("Name", "ไม่ระบุชื่อ"),
+                "Province": row.get("Province", ""),
+                "District": row.get("District", ""),
+                "Latitude": lat,
+                "Longitude": lon,
+                "Capacity": _to_int(row.get("Capacity")),
+                "Occupancy": _to_int(row.get("Occupancy")),
+                "Status": (row.get("Status") or "เปิดรับ").strip(),
+                "Beds": row.get("Beds", "-"),
+                "Toilets": row.get("Toilets", "-"),
+                "Parking": row.get("Parking", "-"),
+                "Facilities": row.get("Facilities", "-"),
+            })
+        except (ValueError, TypeError) as e:
+            Logger.error("Shelters", f"Skipped malformed row: {e}", {"row": row})
+            continue
+
+    cache.sheets.set(cache_key, shelters, ttl=300)
+    Logger.perf("Shelters", "fetched_from_sheet", (time.time() - start_time) * 1000,
+                {"count": len(shelters)})
+    return shelters
+
+
+def find_nearest_shelters(user_lat: float, user_lon: float, limit: int = 5,
+                           exclude_full: bool = False) -> list:
+    """
+    Returns the `limit` closest shelters to the given coordinates, each annotated
+    with distance_km, sorted nearest-first.
+    """
+    shelters = get_shelters_from_sheet()
+    if not shelters:
+        return []
+
+    results = []
+    for s in shelters:
+        if exclude_full and s.get("Status") == "เต็ม":
+            continue
+        dist = calculate_distance(user_lat, user_lon, s["Latitude"], s["Longitude"])
+        entry = dict(s)
+        entry["distance_km"] = round(dist, 2)
+        results.append(entry)
+
+    results.sort(key=lambda x: x["distance_km"])
+    return results[:limit]
+
+
+# =============================================================================
 # SECTION 10: WEATHER & FLOOD DATA (With Real-time Direct ThaiWater Connection)
 # =============================================================================
 
@@ -1682,6 +1776,119 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
         )
     )
     return FlexSendMessage(alt_text="รายงานระดับน้ำ", contents=bubble)
+
+
+def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
+    """
+    Minimalist Shelter (Evacuation Center) Report card.
+    Mirrors the water-level card's visual language (status pill + spacing).
+    """
+    header = BoxComponent(
+        layout="vertical",
+        spacing="xs",
+        contents=[
+            TextComponent(text="🏠 ศูนย์พักพิงใกล้คุณ", weight="bold", size="md", color="#1F2937"),
+            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#4B5563"),
+            TextComponent(text=f"🕒 อัปเดตวันนี้ {get_bangkok_time().strftime('%H:%M')} น.",
+                          size="xs", color="#9CA3AF")
+        ]
+    )
+
+    shelters_box = BoxComponent(layout="vertical", spacing="xl", margin="lg", contents=[])
+
+    if not shelters:
+        shelters_box.contents.append(
+            TextComponent(text="⚠️ ไม่พบศูนย์พักพิงในพื้นที่ใกล้คุณ", size="sm", color="#EF4444", align="center")
+        )
+    else:
+        for sh in shelters:
+            status_key = sh.get("Status", "เปิดรับ")
+            assessment = SHELTER_STATUS_MAP.get(status_key, SHELTER_STATUS_MAP["เปิดรับ"])
+            dist = sh.get("distance_km", 0)
+            capacity = sh.get("Capacity", 0)
+            occupancy = sh.get("Occupancy", 0)
+            remaining = max(capacity - occupancy, 0) if capacity else None
+
+            capacity_text = (
+                f"ว่าง {remaining}/{capacity} ที่" if remaining is not None else "ไม่ระบุความจุ"
+            )
+
+            card = BoxComponent(
+                layout="vertical",
+                spacing="xs",
+                contents=[
+                    # Name & Distance
+                    BoxComponent(
+                        layout="horizontal",
+                        contents=[
+                            TextComponent(text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold",
+                                        size="sm", color="#111827", flex=1, wrap=True),
+                            TextComponent(text=f"{dist:.1f} กม.", size="xs", color="#6B7280",
+                                        align="end", flex=0)
+                        ]
+                    ),
+                    TextComponent(
+                        text=f"{sh.get('District', '')} {sh.get('Province', '')}".strip(),
+                        size="xs", color="#6B7280"
+                    ),
+                    # Status Pill Layout
+                    BoxComponent(
+                        layout="horizontal",
+                        spacing="md",
+                        contents=[
+                            BoxComponent(
+                                layout="vertical",
+                                background_color=assessment.get("bg", "#E5E7EB"),
+                                corner_radius="xxl",
+                                padding_start="md",
+                                padding_end="md",
+                                padding_top="xs",
+                                padding_bottom="xs",
+                                flex=0,
+                                contents=[
+                                    TextComponent(
+                                        text=assessment.get("label", status_key),
+                                        size="xs",
+                                        color=assessment.get("text", "#1F2937"),
+                                        weight="bold",
+                                        align="center"
+                                    )
+                                ]
+                            ),
+                            TextComponent(
+                                text=capacity_text,
+                                size="xs",
+                                color="#4B5563",
+                                gravity="center"
+                            )
+                        ]
+                    ),
+                    TextComponent(
+                        text=f"🛏️ {sh.get('Beds', '-')} | 🚻 {sh.get('Toilets', '-')} | 🅿️ {sh.get('Parking', '-')}",
+                        size="xs", color="#4B5563", margin="xs"
+                    ),
+                    ButtonComponent(
+                        action=URIAction(
+                            label="🧭 นำทางไปศูนย์พักพิง",
+                            uri=f"https://www.google.com/maps/search/?api=1&query={sh.get('Latitude')},{sh.get('Longitude')}"
+                        ),
+                        style="secondary", color="#F3F4F6", height="sm", margin="sm"
+                    )
+                ]
+            )
+            shelters_box.contents.append(card)
+
+    bubble = BubbleContainer(
+        body=BoxComponent(
+            layout="vertical",
+            contents=[
+                header,
+                SeparatorComponent(margin="md", color="#E5E7EB"),
+                shelters_box
+            ]
+        )
+    )
+    return FlexSendMessage(alt_text="ศูนย์พักพิงใกล้คุณ", contents=bubble)
 
 
 # =============================================================================
