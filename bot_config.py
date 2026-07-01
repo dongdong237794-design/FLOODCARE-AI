@@ -836,6 +836,32 @@ class SheetsManager:
                 ]
                 for row in defaults:
                     ws.append_row(row)
+            
+            # Seed default shelters if the sheet is brand new OR already exists but
+            # has no data rows yet (e.g. headers only, as when the user set it up by hand).
+            shelters_ws = sheet.worksheet("Shelters")
+            shelters_is_empty = len(shelters_ws.get_all_values()) <= 1
+            if shelters_is_empty:
+                ws = shelters_ws
+                shelter_defaults = [
+                    ["S001", "โรงเรียนเทศบาล 2 (มลายูบางกอก)", "ยะลา", "เมืองยะลา",
+                     6.5458, 101.2825, "", "", "เปิดรับ", "", "", "", ""],
+                    ["S002", "โรงเรียนเทศบาล 3 (วัดพุทธภูมิ)", "ยะลา", "เมืองยะลา",
+                     6.5445, 101.2912, "", "", "เปิดรับ", "", "", "", ""],
+                    ["S003", "โรงเรียนเทศบาล 4 (ธนวิถี)", "ยะลา", "เมืองยะลา",
+                     6.5401, 101.2833, "", "", "เปิดรับ", "", "", "", ""],
+                    ["S004", "โรงเรียนเทศบาล 5 (บ้านตลาดเก่า)", "ยะลา", "เมืองยะลา",
+                     6.5385, 101.2980, "", "", "เปิดรับ", "", "", "", ""],
+                    ["S005", "ศูนย์เยาวชน (TK Park)", "ยะลา", "เมืองยะลา",
+                     6.5470, 101.2905, "", "", "เปิดรับ", "", "", "", ""],
+                    # NOTE: S006 has no verified Lat/Long yet. get_shelters_from_sheet()
+                    # will silently skip this row until coordinates are filled in.
+                    ["S006", "อาคารศรีนิบง", "ยะลา", "เมืองยะลา",
+                     "", "", "", "", "เปิดรับ", "", "", "", ""],
+                ]
+                for row in shelter_defaults:
+                    ws.append_row(row)
+                Logger.info("Sheets", f"Seeded {len(shelter_defaults)} default shelter rows")
         except Exception as e:
             Logger.error("Sheets", f"Auto-setup error: {e}")
     
