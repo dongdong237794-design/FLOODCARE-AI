@@ -355,6 +355,32 @@ def hash_user_id(user_id: str) -> str:
     return hashlib.sha256(user_id.encode()).hexdigest()[:12]
 
 
+def generate_household_id(province: str, district: str, sub_district: str,
+                           housing_type: str, house_no: str = "",
+                           condo_floor: str = "", condo_room: str = "") -> str:
+    """
+    Builds a stable Household ID from normalized address parts so that
+    every family member who registers with the *same* address (same house
+    number, or same condo floor+room) is grouped under one household.
+
+    Used to de-duplicate simultaneous SOS reports coming from the same
+    household (see SheetsManager.find_open_case_by_household) and merge
+    them into a single case instead of creating separate ones.
+    """
+    def _norm(v: str) -> str:
+        return "".join((v or "").strip().lower().split())
+
+    housing_type = _norm(housing_type) or "house"
+    if housing_type in ("condo", "คอนโด", "อพาร์ตเมนต์", "apartment"):
+        unit_key = f"condo|{_norm(condo_floor)}|{_norm(condo_room)}"
+    else:
+        unit_key = f"house|{_norm(house_no)}"
+
+    raw = "|".join([_norm(province), _norm(district), _norm(sub_district), unit_key])
+    digest = hashlib.sha256(raw.encode()).hexdigest()[:10].upper()
+    return f"HH-{digest}"
+
+
 # =============================================================================
 # SECTION 5: INTENT CLASSIFICATION SYSTEM
 # =============================================================================
@@ -553,11 +579,11 @@ FLOODCARE_SYSTEM_INSTRUCTION = (
     "1. ตอบเฉพาะคำถามที่เกี่ยวข้องกับ: 1) อุทกภัย/ภัยพิบัติน้ำท่วม 2) ความปลอดภัย/การกู้ภัย/เบอร์ฉุกเฉิน 3) สุขภาพกาย/อาการเจ็บป่วยจากน้ำท่วม/การปฐมพยาบาล 4) สุขภาพจิต/ความเครียดของผู้ประสบภัย เท่านั้น!\n"
     "2. หากมีคำถามใดๆ ที่อยู่นอกเหนือจากขอบเขตความปลอดภัยและน้ำท่วมด้านบนนี้ (เช่น กีฬา บันเทิง เกม ข่าวสังคม การทำอาหารทั่วไป แฟชั่น) คุณต้องปฏิเสธอย่างมีมารยาทและอบอุ่นทันที เช่น:\n"
     "   'เรื่องนี้ผมอาจจะยังไม่เชี่ยวชาญเท่าไหร่ครับ น้องบอทอยากเน้นช่วยพี่ๆ เรื่องน้ำท่วม ความปลอดภัย และการดูแลสุขภาพในช่วงนี้มากกว่าครับ มีอะไรเกี่ยวกับระดับน้ำหรืออาการป่วยไม่สบายให้ช่วยดูแลไหมครับ?'\n\n"
-    "กฎการตอบคำถามเพื่อความงาม ความกระชับ และความเป็นระเบียบ (CRITICAL FORMATTING RULES):\n"
-    "1. **เน้นตอบให้สั้นและกระชับที่สุดและต้องอธิบายและข้อมูลมาจกแหล่งอ้างอิง\n"
-    "2. **ระบุแหล่งที่มา (Citation) สั้นๆ ในวงเล็บปิดท้ายข้อความเสมอ** เช่น (ที่มา: กรมอุตุนิยมวิทยา) หรือ (ข้อมูลจาก: ปภ. 1784) โดยห้ามละเลยการระบุแหล่งที่มาเด็ดขาดเพื่อให้ข้อมูลมีความน่าเชื่อถือ\n"
+    "กฎการตอบคำถามเพื่อความเป็นระเบียบเรียบร้อยและเข้าใจง่าย (CRITICAL FORMATTING RULES):\n"
+    "1. ตอบเป็นข้อๆ เสมอ โดยขึ้นต้นแต่ละประเด็นด้วยเลขข้อ (1. 2. 3. ...) แล้วเว้นบรรทัดระหว่างข้อ ห้ามเขียนเป็นย่อหน้ายาวติดกัน ยกเว้นคำตอบสั้นมากที่มีประเด็นเดียวจริงๆ ให้ตอบเป็นประโยคปกติได้โดยไม่ต้องใส่เลขข้อ\n"
+    "2. **ห้ามระบุแหล่งที่มา/อ้างอิงไว้ในเนื้อความคำตอบเด็ดขาด** (เช่น ห้ามเขียน '(ที่มา: ...)' หรือ '(ข้อมูลจาก: ...)' แทรกในข้อความ) เพราะระบบจะแสดงแหล่งอ้างอิงแยกไว้ด้านล่างของข้อความให้เองโดยอัตโนมัติ ให้เนื้อหาคำตอบเป็นเนื้อข้อมูลล้วนๆ\n"
     "3. ห้ามใช้เครื่องหมายดอกจันสองตัว (**) หรือดอกจันตัวเดียว (*) ในข้อความอย่างเด็ดขาด เพราะทำให้ข้อความรกบนระบบ LINE ให้เว้นบรรทัดและเขียนข้อความให้อ่านง่ายแทน\n"
-    "4. ทุกข้อความคำตอบต้องจบอย่างบริบูรณ์สมบูรณ์ ห้ามจบกลางประโยคเด็ดขาด\n"
+    "4. ทุกข้อความคำตอบต้องตอบให้ครบถ้วนสมบูรณ์และจบประโยคอย่างสมบูรณ์เสมอ ห้ามหยุดหรือตัดจบกลางประโยค กลางคำ หรือกลางรายการเด็ดขาด แม้คำตอบจะยาวก็ให้ตอบต่อจนจบใจความ\n"
     "5. หากมีลิงก์อ้างอิงให้จัดเก็บไว้ในโครงสร้างส่วนท้ายของการ์ดหรือแสดงผลเป็นรูปแบบปุ่มกดให้เรียบร้อยสวยงาม ไม่เขียนลิงก์ยาวเปลือยในตัวข้อความหลัก\n"
     "6. หากคำถามของผู้ใช้สื่อถึงความเครียด ความกลัว หรือความเดือดร้อน (เช่น ถามเรื่องอาการเจ็บป่วยของตนเอง คนในครอบครัว หรือน้ำท่วมบ้านตัวเอง) ให้เปิดประโยคแรกด้วยคำรับรู้ความรู้สึกสั้นๆ ไม่เกิน 1 บรรทัด ก่อนให้ข้อมูล เช่น 'เข้าใจว่าตอนนี้คงเป็นห่วงมากเลยนะครับ' แล้วจึงตอบข้อมูลที่เป็นประโยชน์ต่อทันที ห้ามใส่คำปลอบใจซ้ำหลายประโยคหรือทำให้คำตอบยาวเกินไป"
 )
@@ -639,11 +665,11 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
     prompt = (
         "ค้นหาข้อมูลอย่างละเอียดและตอบคำถามนี้โดยทำตามกฎต่อไปนี้อย่างเคร่งครัด:\n\n"
         f"คำถาม: {question}\n\n"
-        "กฎในการตอบเพื่อความปลอดภัยและกะทัดรัด:\n"
+        "กฎในการตอบเพื่อความเป็นระเบียบ อ่านง่าย และครบถ้วน:\n"
         "1. ห้ามใช้เครื่องหมายดอกจันเดี่ยวหรือสองชั้น (*) ในข้อความอย่างเด็ดขาด\n"
-        "2. เขียนข้อความให้อ่านง่าย สั้นและตรงประเด็นที่สุด (ความยาวห้ามเกิน 2-3 บรรทัด หรือ 80 คำ)\n"
-        "3. **ต้องระบุแหล่งที่มาอย่างกระชับในวงเล็บท้ายประโยค** เช่น (ที่มา: กรมอุตุนิยมวิทยา) หรือ (ข้อมูลจาก: ปภ.) เพื่ออ้างอิงแหล่งข้อมูล\n"
-        "4. จบข้อความอย่างสมบูรณ์แบบ ห้ามหยุดประโยคกลางคัน\n"
+        "2. ตอบเป็นข้อๆ เสมอ โดยขึ้นต้นแต่ละประเด็นด้วยเลขข้อ (1. 2. 3. ...) แล้วเว้นบรรทัดระหว่างข้อ เขียนให้กระชับตรงประเด็นแต่ครบถ้วน ยกเว้นคำตอบสั้นมากที่มีประเด็นเดียวจริงๆ ให้ตอบเป็นประโยคปกติได้โดยไม่ต้องใส่เลขข้อ\n"
+        "3. **ห้ามระบุแหล่งที่มา/อ้างอิงไว้ในเนื้อความคำตอบเด็ดขาด** ห้ามเขียนคำว่า (ที่มา: ...) หรือ (ข้อมูลจาก: ...) แทรกในข้อความ เพราะระบบจะดึงรายชื่อแหล่งอ้างอิงไปแสดงแยกไว้ด้านล่างข้อความให้เองโดยอัตโนมัติ\n"
+        "4. จบข้อความอย่างสมบูรณ์แบบเสมอ ห้ามหยุดหรือตัดจบกลางประโยค กลางคำ หรือกลางรายการเด็ดขาด แม้เนื้อหาจะยาวก็ให้ตอบต่อจนจบใจความ\n"
         "5. ลิงก์ URL อ้างอิงทั้งหมดจะถูกแยกไปแสดงด้านล่าง ไม่ต้องระบุลิงก์ยาวในย่อหน้าหลัก"
     )
 
@@ -653,10 +679,14 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=(
-                    "You are FLOODCARE AI. Always respond in Thai. Make sure to generate "
-                    "extremely short (max 2-3 lines), concise, highly readable, complete Thai responses without any asterisks. "
-                    "Always include a brief source citation in parentheses, e.g., (ที่มา: ...). "
-                    "Use Google Search tool. Under no circumstances should you truncate or leave the response cut off."
+                    "You are FLOODCARE AI. Always respond in Thai. Structure the answer as a "
+                    "numbered list (1. 2. 3. ...) with a line break between each point — only skip "
+                    "numbering for a genuinely single-point, very short answer. No asterisks. Never "
+                    "state or cite sources inline in the answer text (no '(ที่มา: ...)' or similar) — "
+                    "the system displays the reference sources separately below the message "
+                    "automatically. Use the Google Search tool to ground your answer. Always finish "
+                    "your answer completely — under no circumstances should you truncate or stop "
+                    "mid-sentence."
                 ),
                 max_output_tokens=max_tokens,
                 temperature=0.2,
@@ -799,11 +829,12 @@ class SheetsManager:
             existing = [w.title for w in sheet.worksheets()]
             
             required_sheets = {
-                "users": ["user_id", "first_name", "last_name", "phone", "province", 
-                         "district", "sub_district", "gps_lat", "gps_lon", 
-                         "member_count", "emergency_contact", "sms_enabled", 
+                "users": ["user_id", "household_id", "first_name", "last_name", "phone",
+                         "housing_type", "house_no", "condo_floor", "condo_room",
+                         "province", "district", "sub_district", "gps_lat", "gps_lon",
+                         "member_count", "emergency_contact", "sms_enabled",
                          "consent_pdpa", "register_date", "status"],
-                "sos_requests": ["case_id", "user_id", "timestamp", "latitude", "longitude",
+                "sos_requests": ["case_id", "household_id", "user_id", "timestamp", "latitude", "longitude",
                                 "water_level_status", "victim_count", "vulnerable_groups",
                                 "group_types", "urgency_level", "details", "photo_url",
                                 "priority", "status", "responder_name", "responder_notes",
@@ -910,6 +941,79 @@ class SheetsManager:
             return True
         except Exception as e:
             Logger.error("Sheets", f"Update cell error: {e}")
+            return False
+
+    def get_user_record(self, user_id: str) -> Optional[dict]:
+        """Looks up a registered user's row (cached) by LINE user_id."""
+        if not user_id or user_id == "unknown":
+            return None
+        for rec in self.get_all_records("users"):
+            if str(rec.get("user_id", "")) == user_id:
+                return rec
+        return None
+
+    def find_open_case_by_household(self, household_id: str, window_minutes: int = 60):
+        """
+        Looks for the most recent OPEN sos_requests row belonging to the same
+        household within `window_minutes`. Reads live (uncached) so a case
+        created moments ago by another household member is always seen.
+
+        Returns (row_number, record_dict) — row_number is 1-indexed as used by
+        gspread (header = row 1), or (None, None) if no match.
+        """
+        if not household_id or household_id in ("-", ""):
+            return None, None
+        client = self.get_client()
+        if not client:
+            return None, None
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet("sos_requests")
+            records = ws.get_all_records()
+            now = get_bangkok_time()
+
+            best_row, best_record, best_time = None, None, None
+            for idx, rec in enumerate(records, start=2):
+                if str(rec.get("household_id", "")) != household_id:
+                    continue
+                if str(rec.get("status", "")).strip().upper() != "OPEN":
+                    continue
+                ts_raw = str(rec.get("timestamp", ""))
+                try:
+                    ts = datetime.datetime.strptime(ts_raw, "%Y-%m-%d %H:%M:%S")
+                    ts = ts.replace(tzinfo=now.tzinfo)
+                except Exception:
+                    continue
+                age_minutes = (now - ts).total_seconds() / 60
+                if age_minutes < 0 or age_minutes > window_minutes:
+                    continue
+                if best_time is None or ts > best_time:
+                    best_row, best_record, best_time = idx, rec, ts
+            return best_row, best_record
+        except Exception as e:
+            Logger.error("Sheets", f"find_open_case_by_household error: {e}")
+            return None, None
+
+    def merge_sos_case(self, row_number: int, updates: dict) -> bool:
+        """Overwrites specific columns of an existing sos_requests row by name."""
+        client = self.get_client()
+        if not client:
+            return False
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet("sos_requests")
+            header = ws.row_values(1)
+            col_map = {name: i + 1 for i, name in enumerate(header)}
+            cells = [
+                gspread.Cell(row_number, col_map[name], str(value))
+                for name, value in updates.items() if name in col_map
+            ]
+            if cells:
+                ws.update_cells(cells, value_input_option='RAW')
+            cache.sheets.delete("sheets:sos_requests")
+            return True
+        except Exception as e:
+            Logger.error("Sheets", f"merge_sos_case error: {e}")
             return False
 
 sheets_mgr = SheetsManager()
@@ -1647,32 +1751,47 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
 
 def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang="TH"):
     """
-    Modern Minimalist Water Level Report using Soft Pastel Status Pills & Spacing.
-    Fully compliant with ThaiWater Hex specification.
+    Minimal water-level report card.
+    Each station is rendered as a soft, self-contained stat card:
+    name + status pill on one row, then a clean 3-column stat grid
+    (ระดับน้ำ / ระดับตลิ่ง / ต่างจากตลิ่ง) — no clutter, no extra dividers.
     """
     header = BoxComponent(
         layout="vertical",
         spacing="xs",
         contents=[
-            TextComponent(text="🌊 รายงานระดับน้ำจากสถานีใกล้คุณ", weight="bold", size="md", color="#1F2937"),
-            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#4B5563"),
-            TextComponent(text=f"🕒 อัปเดตวันนี้ {timestamp}", size="xs", color="#9CA3AF")
+            TextComponent(text="🌊 ระดับน้ำใกล้คุณ", weight="bold", size="md", color="#1F2937"),
+            TextComponent(
+                text=f"📍 {user_lat:.4f}, {user_lon:.4f}   ·   🕒 {timestamp}",
+                size="xxs", color="#9CA3AF", wrap=True
+            ),
         ]
     )
-    
-    stations_box = BoxComponent(layout="vertical", spacing="xl", margin="lg", contents=[])
-    
+
+    stations_box = BoxComponent(layout="vertical", spacing="md", margin="lg", contents=[])
+
     if not stations:
         stations_box.contents.append(
             TextComponent(text="⚠️ ไม่พบสถานีวัดระดับน้ำในพื้นที่ใกล้คุณ", size="sm", color="#EF4444", align="center")
         )
     else:
+        def _stat_cell(label: str, value: str, value_color: str = "#111827"):
+            return BoxComponent(
+                layout="vertical",
+                flex=1,
+                spacing="xs",
+                contents=[
+                    TextComponent(text=label, size="xxs", color="#9CA3AF"),
+                    TextComponent(text=value, size="sm", weight="bold", color=value_color, wrap=True),
+                ]
+            )
+
         for st in stations:
             wl = st.get("water_level")
             dist = st.get("distance_km", 0)
             wl_val = "-"
             assessment = assess_water_level_status(None)
-            
+
             if wl and wl.get("value") not in [None, "-", ""]:
                 try:
                     wl_val = float(wl["value"])
@@ -1681,109 +1800,97 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                     assessment = assess_water_level_status(wl_val, bl, situation)
                 except (ValueError, TypeError):
                     pass
-            
+
             bl_val = st.get("bank_level", "-")
-            
-            # Format text label next to the Status Pill
             lbl_pill = assessment.get("label_pill", "ปกติ")
-            status_desc = assessment.get("advice", "ระดับน้ำปกติ ปลอดภัยดี")
-            
+
             # Safe parsing for diff calculation
+            diff_label = "ต่างจากตลิ่ง"
             diff_text_formatted = "-"
-            diff_prefix = "ต่ำกว่าตลิ่ง: "
+            diff_color = "#111827"
             if wl_val != "-" and bl_val != "-":
                 try:
                     wl_f = float(wl_val)
                     bl_f = float(bl_val)
                     diff_val = bl_f - wl_f
                     if diff_val < 0:
-                        diff_prefix = "สูงกว่าตลิ่ง: "
-                        diff_text_formatted = f"{abs(diff_val):.2f} ม."
+                        diff_text_formatted = f"สูงกว่า {abs(diff_val):.2f} ม."
+                        diff_color = "#DC2626"
                     else:
-                        diff_text_formatted = f"{diff_val:.2f} ม."
+                        diff_text_formatted = f"ต่ำกว่า {diff_val:.2f} ม."
                 except Exception:
                     pass
 
             card = BoxComponent(
                 layout="vertical",
                 spacing="sm",
+                background_color="#F9FAFB",
+                corner_radius="lg",
+                padding_all="md",
                 contents=[
-                    # Station Name & Distance (Clean spacing)
-                    TextComponent(text=f"{st['stationName']} (ห่าง {dist:.2f} กม.)", 
-                                 weight="bold", size="sm", color="#111827"),
-                    
-                    # Status Pill Layout (Rounded Pill + Description)
+                    # Row 1 — Station name + distance, status pill aligned right
                     BoxComponent(
                         layout="horizontal",
-                        spacing="md",
+                        spacing="sm",
                         contents=[
-                            # Status Pill Capsule
                             BoxComponent(
                                 layout="vertical",
+                                flex=1,
+                                spacing="none",
+                                contents=[
+                                    TextComponent(text=st['stationName'], weight="bold", size="sm", color="#111827", wrap=True),
+                                    TextComponent(text=f"ห่าง {dist:.2f} กม.", size="xxs", color="#9CA3AF"),
+                                ]
+                            ),
+                            BoxComponent(
+                                layout="vertical",
+                                flex=0,
+                                gravity="center",
                                 background_color=assessment.get("bg", "#E5E7EB"),
                                 corner_radius="xxl",
                                 padding_start="md",
                                 padding_end="md",
                                 padding_top="xs",
                                 padding_bottom="xs",
-                                flex=0,
                                 contents=[
                                     TextComponent(
-                                        text=lbl_pill,
-                                        size="xs",
+                                        text=lbl_pill, size="xs",
                                         color=assessment.get("text", "#1F2937"),
-                                        weight="bold",
-                                        align="center"
+                                        weight="bold", align="center"
                                     )
                                 ]
                             ),
-                            # Advice description next to the pill
-                            TextComponent(
-                                text=status_desc,
-                                size="xs",
-                                color="#4B5563",
-                                gravity="center"
-                            )
                         ]
                     ),
-                    
-                    # Measurement Values with Bold Highlight
+                    SeparatorComponent(margin="sm", color="#EEF0F2"),
+                    # Row 2 — Clean 3-column stat grid
                     BoxComponent(
-                        layout="vertical",
-                        spacing="xs",  # FIXED: Changed from "xxs" to "xs" to comply with LINE Flex API
-                        margin="xs",
+                        layout="horizontal",
+                        spacing="md",
+                        margin="sm",
                         contents=[
-                            TextComponent(
-                                text=f"ระดับน้ำ: {wl_val} ม. | ตลิ่ง: {bl_val} ม.",
-                                size="xs",
-                                color="#4B5563"
-                            ),
-                            # Highlights the distance difference to bank
-                            BoxComponent(
-                                layout="horizontal",
-                                contents=[
-                                    TextComponent(text=diff_prefix, size="xs", color="#4B5563", flex=0),
-                                    TextComponent(text=diff_text_formatted, size="xs", weight="bold", color="#111827", flex=1)
-                                ]
-                            )
+                            _stat_cell("ระดับน้ำ", f"{wl_val} ม." if wl_val != "-" else "-"),
+                            _stat_cell("ระดับตลิ่ง", f"{bl_val} ม." if bl_val != "-" else "-"),
+                            _stat_cell(diff_label, diff_text_formatted, diff_color),
                         ]
-                    )
+                    ),
                 ]
             )
             stations_box.contents.append(card)
-    
+
     bubble = BubbleContainer(
         body=BoxComponent(
             layout="vertical",
+            spacing="md",
             contents=[
                 header,
-                SeparatorComponent(margin="md", color="#E5E7EB"),
-                stations_box
+                stations_box,
             ]
         ),
         footer=BoxComponent(
             layout="vertical",
             spacing="sm",
+            padding_top="sm",
             contents=[
                 ButtonComponent(
                     action=URIAction(label="ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=WATER_LEVEL_SOURCE_URL),
