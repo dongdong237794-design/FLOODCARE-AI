@@ -1,3 +1,4 @@
+[README.md](https://github.com/user-attachments/files/29662618/README.md)
 # FLOODCARE AI v2.0 - Production Ready
 
 ระบบแชทบอทอัจฉริยะสำหรับจัดการภัยน้ำท่วม ปรับปรุงประสิทธิภาพครั้งใหญ่ (Major Performance Upgrade)
