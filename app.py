@@ -43,7 +43,7 @@ from bot_config import (
     build_language_selector_flex, build_water_level_flex_message,
     build_register_form_flex, build_snake_bite_flex, build_help_flex,
     build_need_form_flex, build_weather_flex, build_faq_response_flex,
-    build_shelter_flex_message,
+    build_shelter_flex_message, build_prep_guide_flex,
     # Shelter data
     find_nearest_shelters,
     # Response handlers
@@ -328,6 +328,11 @@ def handle_text_message(event):
         line_bot_api.reply_message(event.reply_token, build_snake_bite_flex())
         return
 
+    # PREP GUIDE (วิธีเตรียมตัวก่อนน้ำท่วม)
+    if intent == "PREP_GUIDE":
+        _handle_prep_guide_request(event, user_id)
+        return
+
     # EMERGENCY
     if intent == "EMERGENCY":
         emergency_msg = handle_emergency_response(user_id)
@@ -481,6 +486,23 @@ def _start_registration(event, user_id):
     if not REGISTER_LIFF_URL:
         Logger.info("Register", "REGISTER_LIFF_URL not configured")
     line_bot_api.reply_message(event.reply_token, build_register_form_flex("คุณ"))
+
+
+def _handle_prep_guide_request(event, user_id):
+    """
+    'วิธีเตรียมตัวก่อนน้ำท่วม' — quantities (e.g. drinking water) are
+    personalized using the user's registered household member_count so the
+    checklist reflects their real household size instead of a generic number.
+    """
+    member_count = 1
+    user_record = sheets_mgr.get_user_record(user_id)
+    if user_record:
+        try:
+            member_count = max(1, int(str(user_record.get("member_count", "1")).strip() or 1))
+        except (TypeError, ValueError):
+            member_count = 1
+
+    line_bot_api.reply_message(event.reply_token, build_prep_guide_flex(member_count))
 
 
 def _handle_contact_request(event):
