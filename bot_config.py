@@ -54,7 +54,7 @@ try:
     from linebot.models import (
         FlexSendMessage, BubbleContainer, BoxComponent, TextComponent,
         SeparatorComponent, ButtonComponent, URIAction, TextSendMessage,
-        LocationAction, MessageAction, BubbleStyle, BlockStyle
+        LocationAction, MessageAction, BubbleStyle, BlockStyle, ImageComponent
     )
 except ImportError:
     LineBotApi = None
@@ -98,6 +98,24 @@ WATER_LEVEL_SOURCE_URL = os.environ.get(
 )
 SNAKE_BITE_INFO_URL = "https://www.rama.mahidol.ac.th/poisoncenter/th"
 SNAKE_BITE_HOTLINE = "1367"
+
+# Public HTTPS base URL of this deployment (e.g. https://floodcare.onrender.com)
+# Required so LINE can fetch static "hero" banner images for Flex Message cards
+# (LINE downloads images from a public URL — it cannot read local files).
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+
+
+def hero_image_url(filename: str) -> Optional[str]:
+    """
+    Builds a public URL to a static banner image (served by Flask's /static route)
+    for use as a Flex Message "hero" image. Returns None if PUBLIC_BASE_URL isn't
+    configured yet, so callers can gracefully render the card without a banner
+    instead of sending LINE a broken/local image URL.
+    """
+    if not PUBLIC_BASE_URL:
+        return None
+    return f"{PUBLIC_BASE_URL}/static/banners/{filename}"
+
 
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
@@ -399,6 +417,10 @@ class IntentClassifier:
         ],
         "SNAKE_BITE": [
             "งูกัด", "ถูกงูกัด", "โดนงูกัด", "งูกัดครับ", "งูกัดค่ะ", "ถูกงู", "โดนงู", "งูฉก", "ถูกสัตว์มีพิษกัด"
+        ],
+        "PREP_GUIDE": [
+            "วิธีเตรียมตัว", "เตรียมตัวรับมือ", "เตรียมความพร้อม", "เตรียมของก่อนน้ำท่วม", "เตรียมของ",
+            "ของที่ควรเตรียม", "checklist", "prepare for flood", "how to prepare", "เตรียมรับมือน้ำท่วม"
         ],
         "GREETING": [
             "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า", "ดีคับ", "hello", "hi", "hey", 
@@ -1559,6 +1581,98 @@ def build_snake_bite_flex(lang="TH"):
     )
 
 
+def build_prep_guide_flex(member_count: int = 1, lang="TH"):
+    """
+    'วิธีเตรียมตัวก่อนน้ำท่วม' checklist card.
+    Quantities (drinking water, etc.) are personalized using the user's
+    registered household member_count — real data from the system, not a
+    generic fixed number.
+    """
+    try:
+        member_count = max(1, int(member_count))
+    except (TypeError, ValueError):
+        member_count = 1
+
+    water_liters = member_count * 3
+
+    checklist = [
+        ("💧", "น้ำดื่มสะอาด", f"อย่างน้อย {water_liters} ลิตร (สำหรับ {member_count} คน)"),
+        ("🥫", "อาหารแห้ง", "เก็บได้นาน ทานง่าย"),
+        ("💊", "ยาสามัญประจำบ้าน", "และยาประจำตัว"),
+        ("🔦", "ไฟฉาย / แบตเตอรี่สำรอง", "พร้อมใช้งานเสมอ"),
+        ("📄", "เอกสารสำคัญ", "ใส่ซองกันน้ำ"),
+        ("🔋", "โทรศัพท์ / Power Bank", "ชาร์จให้เต็มอยู่เสมอ"),
+    ]
+
+    body_contents = [
+        TextComponent(text="🎒 วิธีเตรียมตัวก่อนน้ำท่วม", weight="bold", size="lg", color="#1F2937"),
+        TextComponent(
+            text=f"เตรียมพร้อมไว้ ปลอดภัยกว่าแน่นอน · สำหรับสมาชิกในบ้าน {member_count} คน",
+            size="xs", color="#9CA3AF", wrap=True
+        ),
+        SeparatorComponent(margin="md"),
+    ]
+
+    for icon, label, value in checklist:
+        body_contents.append(
+            BoxComponent(
+                layout="horizontal", margin="md", spacing="sm",
+                contents=[
+                    TextComponent(text=f"✅ {icon} {label}", size="sm", color="#374151", flex=3, wrap=True),
+                    TextComponent(text=value, size="xs", color="#6B7280", flex=2, align="end", wrap=True),
+                ]
+            )
+        )
+
+    body_contents.append(
+        BoxComponent(
+            layout="vertical",
+            background_color="#FEF3C7",
+            corner_radius="md",
+            padding_all="md",
+            margin="lg",
+            contents=[
+                TextComponent(
+                    text="⚠️ หากมีคำสั่งอพยพ ให้ปฏิบัติตามทันที และออกจากพื้นที่โดยเร็ว",
+                    size="xs", color="#92400E", wrap=True
+                )
+            ]
+        )
+    )
+
+    hero = None
+    hero_url = hero_image_url("prep_banner.jpg")
+    if hero_url:
+        hero = ImageComponent(
+            url=hero_url,
+            size="full",
+            aspect_ratio="20:13",
+            aspect_mode="cover",
+        )
+
+    return FlexSendMessage(
+        alt_text="🎒 วิธีเตรียมตัวก่อนน้ำท่วม",
+        contents=BubbleContainer(
+            hero=hero,
+            body=BoxComponent(layout="vertical", contents=body_contents),
+            footer=BoxComponent(
+                layout="vertical",
+                spacing="sm",
+                contents=[
+                    ButtonComponent(
+                        action=MessageAction(label="🏠 ศูนย์อพยพใกล้ฉัน", text="ศูนย์พักพิง"),
+                        style="secondary", color="#F3F4F6", height="sm"
+                    ),
+                    ButtonComponent(
+                        action=MessageAction(label="🆘 แจ้งเหตุ SOS", text="sos"),
+                        style="primary", color="#DC2626", height="sm"
+                    ),
+                ]
+            )
+        )
+    )
+
+
 def build_help_flex(lang="TH"):
     """
     Capabilities / help menu.
@@ -1570,6 +1684,7 @@ def build_help_flex(lang="TH"):
         ("🌊", "เช็คระดับน้ำใกล้คุณ", "พิมพ์ 'เช็คระดับน้ำ' แล้วแชร์พิกัด"),
         ("🌦️", "เช็คสภาพอากาศ", "พิมพ์ 'สภาพอากาศ' แล้วแชร์พิกัด"),
         ("🏠", "หาศูนย์พักพิงใกล้คุณ", "พิมพ์ 'ศูนย์พักพิง' แล้วแชร์พิกัด"),
+        ("🎒", "วิธีเตรียมตัวก่อนน้ำท่วม", "พิมพ์ 'วิธีเตรียมตัว'"),
         ("☎️", "เบอร์ติดต่อฉุกเฉิน", "พิมพ์ 'เบอร์โทร'"),
         ("📝", "ลงทะเบียนข้อมูลของคุณ", "พิมพ์ 'ลงทะเบียน'"),
         ("🌐", "เปลี่ยนภาษา", "พิมพ์ 'เปลี่ยนภาษา'"),
@@ -1734,9 +1849,20 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
             )
         )
 
+    hero = None
+    hero_url = hero_image_url("weather_banner.jpg")
+    if hero_url:
+        hero = ImageComponent(
+            url=hero_url,
+            size="full",
+            aspect_ratio="20:13",
+            aspect_mode="cover",
+        )
+
     return FlexSendMessage(
         alt_text="🌦️ รายงานสภาพอากาศ",
         contents=BubbleContainer(
+            hero=hero,
             body=BoxComponent(layout="vertical", contents=body_contents),
             footer=BoxComponent(
                 layout="vertical",
@@ -2060,7 +2186,8 @@ def get_greeting_message(user_name="คุณ"):
         "3. 🏠 ค้นหาศูนย์อพยพ\n"
         "4. 🌊 ตรวจสอบระดับน้ำจริง\n"
         "5. 📦 ขอความช่วยเหลือสิ่งของ\n"
-        "6. 🤖 สอบถามข้อมูลภัยพิบัติ สภาพอากาศ หรืออาการเจ็บป่วย\n\n"
+        "6. 🎒 วิธีเตรียมตัวรับมือน้ำท่วม\n"
+        "7. 🤖 สอบถามข้อมูลภัยพิบัติ สภาพอากาศ หรืออาการเจ็บป่วย\n\n"
         "ยินดีช่วยเหลือเคียงข้างคุณตลอด 24 ชั่วโมงครับ 💧"
     )
     return TextSendMessage(text=text)
