@@ -120,6 +120,13 @@ def hero_image_url(filename: str) -> Optional[str]:
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "")
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "")
 
+# API key for the separately-hosted React dashboard (artifacts/floodcare-dashboard).
+# Unlike DASHBOARD_PASSWORD (session-cookie login for the built-in HTML dashboard),
+# this is a simple bearer token so a dashboard hosted on a different domain can call
+# the JSON API directly (Authorization: Bearer <DASHBOARD_API_KEY>) without needing
+# cross-origin cookies.
+DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "")
+
 # Performance Tuning
 WATER_DATA_MAX_AGE_MINUTES = int(os.environ.get("WATER_DATA_MAX_AGE_MINUTES", "10"))
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
@@ -1042,6 +1049,48 @@ class SheetsManager:
             return True
         except Exception as e:
             Logger.error("Sheets", f"merge_sos_case error: {e}")
+            return False
+
+    def update_sos_status(self, case_id: str, new_status: str, responder_name: str = "-") -> bool:
+        """
+        Updates an sos_requests row's status by case_id (e.g. OPEN -> IN_PROGRESS -> CLOSED),
+        used by the dashboard's "รับเคส" / "ปิดเคส" actions. Also stamps accepted_at /
+        completed_at so responders can see how long a case took to resolve.
+        """
+        client = self.get_client()
+        if not client:
+            return False
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet("sos_requests")
+            records = ws.get_all_records()
+            row_number = None
+            for idx, rec in enumerate(records, start=2):
+                if str(rec.get("case_id", "")) == case_id:
+                    row_number = idx
+                    break
+            if not row_number:
+                return False
+
+            now_str = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
+            updates = {"status": new_status, "responder_name": responder_name or "-"}
+            if new_status == "IN_PROGRESS":
+                updates["accepted_at"] = now_str
+            elif new_status == "CLOSED":
+                updates["completed_at"] = now_str
+
+            header = ws.row_values(1)
+            col_map = {name: i + 1 for i, name in enumerate(header)}
+            cells = [
+                gspread.Cell(row_number, col_map[name], str(value))
+                for name, value in updates.items() if name in col_map
+            ]
+            if cells:
+                ws.update_cells(cells, value_input_option='RAW')
+            cache.sheets.delete("sheets:sos_requests")
+            return True
+        except Exception as e:
+            Logger.error("Sheets", f"update_sos_status error: {e}")
             return False
 
 sheets_mgr = SheetsManager()
