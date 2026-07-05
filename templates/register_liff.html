@@ -397,6 +397,64 @@
             color: var(--text-secondary);
         }
 
+        /* Housing type segmented toggle */
+        .segmented-toggle {
+            display: flex;
+            background: var(--bg-color);
+            border: 1px solid var(--border-soft);
+            border-radius: var(--radius-lg);
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .segmented-option {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            height: 50px;
+            border-radius: 14px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+
+        .segmented-option svg {
+            width: 18px;
+            height: 18px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+        }
+
+        .segmented-option.active {
+            background: var(--surface-color);
+            color: var(--primary-accent);
+            box-shadow: var(--shadow-subtle);
+        }
+
+        .inline-fields {
+            display: flex;
+            gap: 12px;
+        }
+
+        .inline-fields .form-group {
+            flex: 1;
+        }
+
+        .pdpa-note {
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: var(--primary-accent-light);
+            border-radius: var(--radius-lg);
+            padding: 14px 16px;
+            line-height: 1.6;
+        }
+
         /* Summary item */
         .summary-row {
             display: flex;
@@ -650,6 +708,39 @@
                     <label class="form-label">ตำบล/แขวง</label>
                     <input type="text" class="form-input" style="padding-left:20px;" id="subDistrict" placeholder="เช่น คอหงส์">
                 </div>
+
+                <div class="form-group">
+                    <label class="form-label">ลักษณะที่พักอาศัย</label>
+                    <div class="segmented-toggle">
+                        <div class="segmented-option active" id="housingHouseBtn" onclick="setHousingType('house')">
+                            <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+                            บ้าน
+                        </div>
+                        <div class="segmented-option" id="housingCondoBtn" onclick="setHousingType('condo')">
+                            <svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4M9 8h1M14 8h1M9 12h1M14 12h1"/></svg>
+                            คอนโด/อพาร์ตเมนต์
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group" id="houseNoGroup">
+                    <label class="form-label">บ้านเลขที่</label>
+                    <input type="text" class="form-input" style="padding-left:20px;" id="houseNo" placeholder="เช่น 99/1 หมู่ 4">
+                    <div class="form-error" id="houseNoError">กรุณาระบุบ้านเลขที่</div>
+                </div>
+
+                <div class="inline-fields hidden" id="condoGroup">
+                    <div class="form-group">
+                        <label class="form-label">ชั้น</label>
+                        <input type="text" class="form-input" style="padding-left:20px;" id="condoFloor" placeholder="เช่น 7">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">เลขห้อง</label>
+                        <input type="text" class="form-input" style="padding-left:20px;" id="condoRoom" placeholder="เช่น 704">
+                    </div>
+                </div>
+                <div class="form-error" id="condoError">กรุณาระบุชั้นและเลขห้อง</div>
+
                 <div class="form-group">
                     <label class="form-label">จำนวนสมาชิกที่อาศัยในบ้าน</label>
                     <input type="number" class="form-input" style="padding-left:20px;" id="memberCount" placeholder="1" min="1" value="1">
@@ -684,9 +775,17 @@
                         <span class="summary-value" id="sumAddress">-</span>
                     </div>
                     <div class="summary-row">
+                        <span class="summary-label">บ้านเลขที่/ห้อง</span>
+                        <span class="summary-value" id="sumUnit">-</span>
+                    </div>
+                    <div class="summary-row">
                         <span class="summary-label">จำนวนสมาชิก</span>
                         <span class="summary-value" id="sumMembers">-</span>
                     </div>
+                </div>
+
+                <div class="pdpa-note">
+                    💡 ระบบจะใช้ "บ้านเลขที่" หรือ "ชั้น/ห้อง" ของท่านเพื่อสร้าง Household ID สำหรับกลุ่มบ้านของท่านโดยเฉพาะ เพื่อป้องกันไม่ให้เกิดการแจ้งเหตุ SOS ซ้ำซ้อน เมื่อสมาชิกหลายคนในบ้าน/ห้องเดียวกันกดขอความช่วยเหลือพร้อมกัน ระบบจะรวมเป็นเคสเดียวโดยอัตโนมัติ
                 </div>
 
                 <div class="consent-wrapper" onclick="toggleConsent()">
@@ -696,7 +795,7 @@
                             <polyline points="20 6 9 17 4 12"></polyline>
                         </svg>
                     </div>
-                    <span class="consent-text">ฉันยินยอมอย่างเป็นลายลักษณ์อักษรให้ FLOODCARE AI เก็บรวบรวมและวิเคราะห์ข้อมูลพิกัดและที่อยู่ตามหลักคุ้มครองข้อมูลส่วนบุคคล (PDPA) เพื่อประสานการกู้ภัยฉุกเฉิน</span>
+                    <span class="consent-text">ฉันยินยอมอย่างเป็นลายลักษณ์อักษรให้ FLOODCARE AI เก็บรวบรวมและวิเคราะห์ข้อมูลชื่อ-นามสกุล เบอร์ติดต่อ ที่อยู่ บ้านเลขที่/ชั้น-ห้อง และพิกัดของฉัน ตามหลักคุ้มครองข้อมูลส่วนบุคคล (PDPA) เพื่อใช้ประสานการกู้ภัยฉุกเฉิน และเพื่อจัดกลุ่มข้อมูลครัวเรือน (Household ID) สำหรับรวมรายงาน SOS ที่ซ้ำซ้อนจากบ้าน/ห้องเดียวกัน</span>
                 </div>
 
                 <div class="btn-stack">
@@ -885,6 +984,18 @@
             }, { enableHighAccuracy: true, timeout: 10000 });
         }
 
+        let housingType = 'house';
+
+        function setHousingType(type) {
+            housingType = type;
+            document.getElementById('housingHouseBtn').classList.toggle('active', type === 'house');
+            document.getElementById('housingCondoBtn').classList.toggle('active', type === 'condo');
+            document.getElementById('houseNoGroup').classList.toggle('hidden', type !== 'house');
+            document.getElementById('condoGroup').classList.toggle('hidden', type !== 'condo');
+            document.getElementById('houseNoError').classList.remove('show');
+            document.getElementById('condoError').classList.remove('show');
+        }
+
         let currentStep = 1;
 
         function goToStep(step) {
@@ -931,6 +1042,21 @@
                 document.getElementById('phoneError').classList.toggle('show', !ok);
                 valid = ok;
             }
+            if (step === 3) {
+                if (housingType === 'condo') {
+                    const floor = document.getElementById('condoFloor').value.trim();
+                    const room = document.getElementById('condoRoom').value.trim();
+                    const ok = !!floor && !!room;
+                    document.getElementById('condoError').classList.toggle('show', !ok);
+                    document.getElementById('houseNoError').classList.remove('show');
+                    valid = ok;
+                } else {
+                    const houseNo = document.getElementById('houseNo').value.trim();
+                    document.getElementById('houseNoError').classList.toggle('show', !houseNo);
+                    document.getElementById('condoError').classList.remove('show');
+                    valid = !!houseNo;
+                }
+            }
             return valid;
         }
 
@@ -948,6 +1074,15 @@
             const addressParts = [subDistrict, district, province].filter(Boolean);
             document.getElementById('sumAddress').textContent = addressParts.length ? addressParts.join(', ') : 'ไม่ได้ตั้งค่า';
             document.getElementById('sumMembers').textContent = members + ' ท่าน';
+
+            if (housingType === 'condo') {
+                const floor = document.getElementById('condoFloor').value.trim();
+                const room = document.getElementById('condoRoom').value.trim();
+                document.getElementById('sumUnit').textContent = `คอนโด ชั้น ${floor || '-'} ห้อง ${room || '-'}`;
+            } else {
+                const houseNo = document.getElementById('houseNo').value.trim();
+                document.getElementById('sumUnit').textContent = `บ้านเลขที่ ${houseNo || '-'}`;
+            }
         }
 
         function toggleConsent() {
@@ -971,6 +1106,10 @@
                 last_name: document.getElementById('lastName').value.trim(),
                 phone: document.getElementById('phone').value.trim(),
                 emergency_contact: document.getElementById('emergencyContact').value.trim() || '-',
+                housing_type: housingType,
+                house_no: document.getElementById('houseNo').value.trim(),
+                condo_floor: document.getElementById('condoFloor').value.trim(),
+                condo_room: document.getElementById('condoRoom').value.trim(),
                 province: document.getElementById('province').value.trim() || '-',
                 district: document.getElementById('district').value.trim() || '-',
                 sub_district: document.getElementById('subDistrict').value.trim() || '-',
