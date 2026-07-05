@@ -60,7 +60,7 @@ from bot_config import (
     SOS_LIFF_ID, NEED_LIFF_ID,
     REGISTER_LIFF_URL, REGISTER_LIFF_ID,
     WATER_LEVEL_SOURCE_URL, SNAKE_BITE_HOTLINE, SNAKE_BITE_INFO_URL, TMD_SOURCE_URL,
-    DASHBOARD_PASSWORD, FLASK_SECRET_KEY,
+    DASHBOARD_PASSWORD, FLASK_SECRET_KEY, DASHBOARD_API_KEY,
     LINE_CHANNEL_SECRET,
     WATER_DATA_MAX_AGE_MINUTES,
     GEMINI_API_KEY,
@@ -792,6 +792,40 @@ def _dashboard_logged_in() -> bool:
     return bool(session.get("dashboard_authed"))
 
 
+def _dashboard_api_authed() -> bool:
+    """
+    Auth check shared by the JSON dashboard API. Accepts EITHER:
+      - the existing session-cookie login (used by the built-in /dashboard HTML page), or
+      - an 'Authorization: Bearer <DASHBOARD_API_KEY>' header (used by the separately
+        hosted React dashboard, which lives on a different origin and can't rely on cookies).
+    """
+    if _dashboard_logged_in():
+        return True
+    if DASHBOARD_API_KEY:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer ") and auth_header[7:] == DASHBOARD_API_KEY:
+            return True
+    return False
+
+
+@app.before_request
+def _cors_preflight():
+    # Lets a separately-hosted SPA (different domain/port) call /api/dashboard/*
+    # with an Authorization header. Only this API surface is opened up — everything
+    # else (webhook, LIFF forms) is untouched.
+    if request.path.startswith("/api/dashboard") and request.method == "OPTIONS":
+        return ("", 204)
+
+
+@app.after_request
+def _cors_headers(response):
+    if request.path.startswith("/api/dashboard"):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
+
+
 @app.route("/dashboard/login", methods=["GET", "POST"])
 def dashboard_login():
     if not DASHBOARD_PASSWORD:
@@ -831,7 +865,7 @@ def dashboard_home():
 
 @app.route("/api/dashboard/data")
 def api_dashboard_data():
-    if not _dashboard_logged_in():
+    if not _dashboard_api_authed():
         return jsonify({"error": "unauthorized"}), 401
 
     try:
@@ -841,6 +875,12 @@ def api_dashboard_data():
     except Exception as e:
         Logger.error("Dashboard", f"Sheets read error: {e}")
         sos_records, need_records, user_records = [], [], []
+
+    try:
+        shelter_records = bot_config.get_shelters_from_sheet()
+    except Exception as e:
+        Logger.error("Dashboard", f"Shelters read error: {e}")
+        shelter_records = []
 
     def _is_pending(rec, status_field="status"):
         s = str(rec.get(status_field, "")).strip().upper()
@@ -852,6 +892,75 @@ def api_dashboard_data():
     sos_sorted = list(reversed(sos_records))[:100]
     need_sorted = list(reversed(need_records))[:100]
 
+    # --- Normalized data for the React dashboard (artifacts/floodcare-dashboard) ---
+    users_by_id = {str(u.get("user_id", "")): u for u in user_records}
+
+    def _num(val, default=0):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    def _has_keyword(text: str, keywords) -> bool:
+        text = (text or "").lower()
+        return any(k in text for k in keywords)
+
+    sos_cases = []
+    for rec in sos_sorted:
+        user = users_by_id.get(str(rec.get("user_id", "")), {})
+        groups_text = f"{rec.get('vulnerable_groups', '')} {rec.get('group_types', '')}"
+        status = str(rec.get("status", "OPEN")).strip().upper() or "OPEN"
+        if status not in ("OPEN", "IN_PROGRESS", "CLOSED"):
+            status = "OPEN"
+        priority = str(rec.get("priority", "NORMAL")).strip().upper()
+        if priority not in ("CRITICAL", "HIGH", "NORMAL"):
+            priority = "NORMAL"
+
+        try:
+            people_count = int(float(rec.get("victim_count", 1) or 1))
+        except (TypeError, ValueError):
+            people_count = 1
+
+        sos_cases.append({
+            "request_id": rec.get("case_id", "-"),
+            "first_name": user.get("first_name", "") or "ไม่ระบุชื่อ",
+            "last_name": user.get("last_name", "") or "",
+            "phone": user.get("phone", "-") or "-",
+            "people_count": people_count,
+            "bedridden": "YES" if _has_keyword(groups_text, ["ติดเตียง", "bedridden"]) else "NO",
+            "pets": "YES" if _has_keyword(groups_text, ["สัตว์เลี้ยง", "pet"]) else "NO",
+            "water_level": rec.get("water_level_status", "-") or "-",
+            "note": rec.get("details", "-") or "-",
+            "priority": priority,
+            "status": status,
+            "latitude": _num(rec.get("latitude")),
+            "longitude": _num(rec.get("longitude")),
+            "timestamp": rec.get("timestamp", "-"),
+        })
+
+    shelters_out = []
+    for s in shelter_records:
+        capacity = int(s.get("Capacity", 0) or 0)
+        occupancy = int(s.get("Occupancy", 0) or 0)
+        pct = (occupancy / capacity * 100) if capacity > 0 else 0
+        status_label = "เต็ม" if pct >= 100 else "ใกล้เต็ม" if pct >= 80 else "ว่าง"
+        facilities_raw = s.get("Facilities", "-") or "-"
+        facilities = [f.strip() for f in facilities_raw.split(",") if f.strip() and f.strip() != "-"]
+
+        shelters_out.append({
+            "id": s.get("ShelterID", "-"),
+            "name": s.get("Name", "ไม่ระบุชื่อ"),
+            "province": s.get("Province", "-"),
+            "district": s.get("District", "-"),
+            "latitude": s.get("Latitude", 0),
+            "longitude": s.get("Longitude", 0),
+            "capacity": capacity,
+            "occupancy": occupancy,
+            "status": status_label,
+            "contact": "-",
+            "facilities": facilities,
+        })
+
     return jsonify({
         "stats": {
             "sos_total": len(sos_records),
@@ -862,7 +971,82 @@ def api_dashboard_data():
         },
         "sos": sos_sorted,
         "needs": need_sorted,
+        # Normalized data consumed by the React dashboard:
+        "sos_cases": sos_cases,
+        "shelters": shelters_out,
     })
+
+
+@app.route("/api/dashboard/sos/<case_id>/status", methods=["POST"])
+def api_dashboard_update_sos_status(case_id):
+    if not _dashboard_api_authed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    new_status = str(data.get("status", "")).strip().upper()
+    if new_status not in ("IN_PROGRESS", "CLOSED", "OPEN"):
+        return jsonify({"error": "invalid status"}), 400
+
+    responder_name = data.get("responder_name", "-") or "-"
+    success = sheets_mgr.update_sos_status(case_id, new_status, responder_name)
+    if not success:
+        return jsonify({"success": False, "error": "case_not_found_or_sheet_error"}), 404
+
+    return jsonify({"success": True, "case_id": case_id, "status": new_status})
+
+
+@app.route("/api/dashboard/shelters", methods=["POST"])
+def api_dashboard_create_shelter():
+    """Adds a new evacuation shelter row — used by the 'เพิ่มศูนย์พักพิง' form
+    in the React dashboard (artifacts/floodcare-dashboard)."""
+    if not _dashboard_api_authed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+
+    shelter_id = (data.get("id") or "").strip()
+    name = (data.get("name") or "").strip()
+    if not shelter_id or not name:
+        return jsonify({"success": False, "error": "id และ name จำเป็นต้องระบุ"}), 400
+
+    try:
+        latitude = float(data.get("latitude", 0) or 0)
+        longitude = float(data.get("longitude", 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "latitude/longitude ไม่ถูกต้อง"}), 400
+
+    try:
+        capacity = int(data.get("capacity", 0) or 0)
+        occupancy = int(data.get("occupancy", 0) or 0)
+    except (TypeError, ValueError):
+        capacity, occupancy = 0, 0
+
+    pct = (occupancy / capacity * 100) if capacity > 0 else 0
+    status_label = "เต็ม" if pct >= 100 else "ใกล้เต็ม" if pct >= 80 else "ว่าง"
+
+    facilities = data.get("facilities", [])
+    facilities_str = ", ".join(facilities) if isinstance(facilities, list) else str(facilities or "-")
+
+    success = sheets_mgr.batch_append("Shelters", [[
+        shelter_id,
+        name,
+        data.get("province", "-") or "-",
+        data.get("district", "-") or "-",
+        latitude,
+        longitude,
+        capacity,
+        occupancy,
+        status_label,
+        "-", "-", "-",
+        facilities_str or "-",
+    ]])
+
+    if success:
+        cache.sheets.delete("sheets:Shelters")
+        cache.sheets.delete("sheets:shelters:normalized")
+
+    return jsonify({"success": success, "id": shelter_id})
+
 
 
 _DASHBOARD_LOGIN_HTML = """
