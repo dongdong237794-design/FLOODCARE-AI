@@ -257,13 +257,11 @@ def callback():
 def handle_follow(event):
     user_id = event.source.user_id
     try:
-        line_bot_api.reply_message(
-            event.reply_token,
-            [
-                get_greeting_message("คุณ"),
-                build_register_form_flex("คุณ"),
-            ]
-        )
+        already_registered = bool(sheets_mgr.get_user_record(user_id))
+        messages = [get_greeting_message("คุณ")]
+        if not already_registered:
+            messages.append(build_register_form_flex("คุณ"))
+        line_bot_api.reply_message(event.reply_token, messages)
     except Exception as e:
         Logger.error("Follow", f"Welcome message failed: {e}")
 
@@ -470,13 +468,37 @@ def handle_image_message(event):
 # AUTOMATIC WEB FORM TRIGGERS (LIFF)
 # =============================================================================
 
+def _require_registered(event, user_id) -> bool:
+    """
+    Checks the 'users' sheet for this LINE user_id before letting them use
+    SOS / ขอความช่วยเหลือ. If they haven't registered yet, sends the
+    registration form instead and returns False so the caller stops there.
+    """
+    user_record = sheets_mgr.get_user_record(user_id)
+    if user_record:
+        return True
+
+    line_bot_api.reply_message(
+        event.reply_token,
+        [
+            TextSendMessage(text="กรุณากรอกข้อมูลส่วนตัวเพื่อลงทะเบียนก่อนใช้งานฟีเจอร์นี้ครับ 🙏\nกรอกครั้งเดียว ใช้เวลาไม่ถึง 1 นาที"),
+            build_register_form_flex("คุณ"),
+        ]
+    )
+    return False
+
+
 def _start_sos_flow(event, user_id):
+    if not _require_registered(event, user_id):
+        return
     if not SOS_LIFF_URL:
         Logger.info("SOS", "SOS_LIFF_URL not configured")
     line_bot_api.reply_message(event.reply_token, build_sos_form_flex("คุณ"))
 
 
 def _start_needs_flow(event, user_id):
+    if not _require_registered(event, user_id):
+        return
     if not NEED_LIFF_URL:
         Logger.info("Needs", "NEED_LIFF_URL not configured")
     line_bot_api.reply_message(event.reply_token, build_need_form_flex("คุณ"))
@@ -990,9 +1012,27 @@ def api_dashboard_update_sos_status(case_id):
         return jsonify({"error": "invalid status"}), 400
 
     responder_name = data.get("responder_name", "-") or "-"
-    success = sheets_mgr.update_sos_status(case_id, new_status, responder_name)
-    if not success:
+    case_record = sheets_mgr.update_sos_status(case_id, new_status, responder_name)
+    if not case_record:
         return jsonify({"success": False, "error": "case_not_found_or_sheet_error"}), 404
+
+    # Notify the reporting user on LINE so they know someone is on the way.
+    reporter_id = case_record.get("user_id")
+    if reporter_id and reporter_id != "unknown":
+        if new_status == "IN_PROGRESS":
+            notify_text = (
+                f"📣 อัปเดตเคส {case_id}\n\n"
+                f"ทีมกู้ภัยได้รับเรื่องและกำลังเดินทางไปช่วยเหลือคุณแล้วครับ 🚤\n"
+                f"กรุณาอยู่ในที่ปลอดภัยและรอการติดต่อจากเจ้าหน้าที่"
+            )
+            _push_save_confirmation(reporter_id, notify_text)
+        elif new_status == "CLOSED":
+            notify_text = (
+                f"✅ เคส {case_id} เสร็จสิ้นแล้ว\n\n"
+                f"ทีมงานได้ปิดเคสของคุณเรียบร้อยแล้วครับ หากยังต้องการความช่วยเหลือเพิ่มเติม "
+                f"พิมพ์ 'sos' เพื่อแจ้งเหตุใหม่ได้ทันทีครับ"
+            )
+            _push_save_confirmation(reporter_id, notify_text)
 
     return jsonify({"success": True, "case_id": case_id, "status": new_status})
 
@@ -1222,6 +1262,9 @@ def api_need_submit():
 
         verified_uid = g.get("verified_user_id")
         user_id = verified_uid or data.get("user_id", "unknown")
+
+        if not sheets_mgr.get_user_record(user_id):
+            return jsonify({"success": False, "error": "กรุณาลงทะเบียนข้อมูลส่วนตัวก่อนขอความช่วยเหลือ", "need_register": True}), 403
 
         need_id = generate_need_id()
         timestamp = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
