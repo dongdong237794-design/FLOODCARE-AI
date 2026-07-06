@@ -869,11 +869,9 @@ class SheetsManager:
                          "province", "district", "sub_district", "gps_lat", "gps_lon",
                          "member_count", "emergency_contact", "sms_enabled",
                          "consent_pdpa", "register_date", "status"],
-                "sos_requests": ["case_id", "household_id", "user_id", "timestamp", "latitude", "longitude",
-                                "water_level_status", "victim_count", "vulnerable_groups",
-                                "group_types", "urgency_level", "details", "photo_url",
-                                "priority", "status", "responder_name", "responder_notes",
-                                "accepted_at", "completed_at"],
+                "sos_requests": ["request_id", "household_id", "user_id", "timestamp", "latitude", "longitude",
+                                "people_count", "children", "elderly", "bedridden", "pets",
+                                "water_level", "note", "priority", "status"],
                 "user_needs": ["need_id", "timestamp", "user_id", "latitude", "longitude",
                               "categories", "details", "urgency", "status",
                               "halal_required", "volunteer_name", "delivered_at"],
@@ -941,9 +939,46 @@ class SheetsManager:
             ws = sheet.worksheet(worksheet_name)
             if rows:
                 ws.append_rows(rows, value_input_option='RAW')
+                cache.sheets.delete(f"sheets:{worksheet_name}")
             return True
         except Exception as e:
             Logger.error("Sheets", f"Batch append error: {e}")
+            return False
+
+    def append_row_by_headers(self, worksheet_name: str, row_dict: dict) -> bool:
+        """
+        Appends a row built to match the sheet's ACTUAL header row (read fresh
+        at write time) instead of a hardcoded column-position list.
+
+        This is what keeps data landing in the right columns even if the
+        live Google Sheet was created before a column was added/reordered in
+        code (e.g. 'household_id') — a value is only ever written under the
+        header it belongs to, by name, so nothing downstream ever shifts.
+        Any header the sheet doesn't have yet is simply left blank for that
+        row (instead of corrupting every column after it); add the column
+        header in the sheet whenever you want that field populated.
+        """
+        client = self.get_client()
+        if not client:
+            return False
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet(worksheet_name)
+            headers = ws.row_values(1)
+            if not headers:
+                Logger.error("Sheets", f"'{worksheet_name}' has no header row — cannot append by header name")
+                return False
+
+            missing = [k for k in row_dict.keys() if k not in headers]
+            if missing:
+                Logger.info("Sheets", f"'{worksheet_name}' is missing columns {missing} — those values were not saved. Add these headers to the sheet to start storing them.")
+
+            row = [row_dict.get(h, "") for h in headers]
+            ws.append_rows([row], value_input_option='RAW')
+            cache.sheets.delete(f"sheets:{worksheet_name}")
+            return True
+        except Exception as e:
+            Logger.error("Sheets", f"append_row_by_headers error: {e}")
             return False
     
     def get_all_records(self, worksheet_name: str) -> list:
@@ -1053,9 +1088,9 @@ class SheetsManager:
 
     def update_sos_status(self, case_id: str, new_status: str, responder_name: str = "-") -> bool:
         """
-        Updates an sos_requests row's status by case_id (e.g. OPEN -> IN_PROGRESS -> CLOSED),
+        Updates an sos_requests row's status by request_id (e.g. OPEN -> IN_PROGRESS -> CLOSED),
         used by the dashboard's "รับเคส" / "ปิดเคส" actions. Also stamps accepted_at /
-        completed_at so responders can see how long a case took to resolve.
+        completed_at if those columns exist, so responders can see how long a case took.
         """
         client = self.get_client()
         if not client:
@@ -1066,7 +1101,7 @@ class SheetsManager:
             records = ws.get_all_records()
             row_number = None
             for idx, rec in enumerate(records, start=2):
-                if str(rec.get("case_id", "")) == case_id:
+                if str(rec.get("request_id", "")) == case_id:
                     row_number = idx
                     break
             if not row_number:
@@ -2002,12 +2037,22 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                 except Exception:
                     pass
 
-            card = BoxComponent(
+            # Pick a themed illustration to match the station's context —
+            # bridge / city / village houses — same visual language as the
+            # reference template (small inline thumbnail, not a full hero).
+            name_l = st['stationName']
+            if "สะพาน" in name_l:
+                station_img = "water_bridge.jpg"
+            elif "เมือง" in name_l or "อำเภอเมือง" in name_l:
+                station_img = "water_city.jpg"
+            else:
+                station_img = "water_houses.jpg"
+            thumb_url = hero_image_url(station_img)
+
+            card_inner = BoxComponent(
                 layout="vertical",
+                flex=1,
                 spacing="sm",
-                background_color="#F9FAFB",
-                corner_radius="lg",
-                padding_all="md",
                 contents=[
                     # Row 1 — Station name + distance, status pill aligned right
                     BoxComponent(
@@ -2056,6 +2101,35 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                         ]
                     ),
                 ]
+            )
+
+            card_contents = [card_inner]
+            if thumb_url:
+                card_contents = [
+                    BoxComponent(
+                        layout="horizontal",
+                        spacing="md",
+                        contents=[
+                            card_inner,
+                            ImageComponent(
+                                url=thumb_url,
+                                size="72px",
+                                flex=0,
+                                aspect_ratio="1:1",
+                                aspect_mode="cover",
+                                gravity="center",
+                            ),
+                        ]
+                    )
+                ]
+
+            card = BoxComponent(
+                layout="vertical",
+                spacing="sm",
+                background_color="#F9FAFB",
+                corner_radius="lg",
+                padding_all="md",
+                contents=card_contents
             )
             stations_box.contents.append(card)
 
@@ -2193,7 +2267,18 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
             )
             shelters_box.contents.append(card)
 
+    hero = None
+    hero_url = hero_image_url("shelter_banner.jpg")
+    if hero_url:
+        hero = ImageComponent(
+            url=hero_url,
+            size="full",
+            aspect_ratio="20:13",
+            aspect_mode="cover",
+        )
+
     bubble = BubbleContainer(
+        hero=hero,
         body=BoxComponent(
             layout="vertical",
             contents=[
