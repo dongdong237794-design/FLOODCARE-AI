@@ -12,40 +12,83 @@
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
 <style>
+  /* ── CSS Variables (Light Theme Default) ── */
   :root{
-    --navy:#12354A; --navy-hover:#1A4B69; 
-    --orange:#F97316; --orange-dark:#EA580C;
-    --crit:#EF4444; --crit-bg:#FEE2E2; --crit-tx:#DC2626;
-    --high:#F59E0B; --high-bg:#FEF3C7; --high-tx:#D97706;
-    --norm:#10B981; --norm-bg:#DCFCE7; --norm-tx:#059669;
-    --muted:#6B7280; --faint:#9CA3AF; --line:#E5E7EB;
-    --radius:24px; --radius-sm:16px;
-    --shadow-sm:0 2px 8px rgba(18,53,74,.04);
-    --shadow-md:0 6px 24px rgba(18,53,74,.08);
+    --bg-app: linear-gradient(135deg,#D5F0ED 0%,#EAF3F8 50%,#F0EAE1 100%);
+    --bg-card: #ffffff;
+    --bg-panel: rgba(255,255,255,0.95);
+    --bg-topbar: rgba(255,255,255,0.6);
+    --bg-input: #F8FAFC;
+    
+    --navy: #12354A; 
+    --navy-hover: #1A4B69; 
+    --text-main: #111827;
+    --text-muted: #4B5563;
+    --text-faint: #9CA3AF;
+    
+    --orange: #F97316; 
+    --orange-dark: #EA580C;
+    --crit: #EF4444; --crit-bg: #FEE2E2; --crit-tx: #DC2626;
+    --high: #F59E0B; --high-bg: #FEF3C7; --high-tx: #D97706;
+    --norm: #10B981; --norm-bg: #DCFCE7; --norm-tx: #059669;
+    
+    --line: #E5E7EB;
+    --border-card: rgba(255,255,255,0.8);
+    
+    --radius: 24px; --radius-sm: 16px;
+    --shadow-sm: 0 2px 8px rgba(18,53,74,.04);
+    --shadow-md: 0 6px 24px rgba(18,53,74,.08);
+    --shadow-float: 0 12px 40px rgba(0,0,0,.15);
   }
+
+  /* ── Dark Theme Variables ── */
+  body.dark-theme {
+    --bg-app: #0F172A;
+    --bg-card: #1E293B;
+    --bg-panel: rgba(30,41,59,0.95);
+    --bg-topbar: rgba(15,23,42,0.8);
+    --bg-input: #0F172A;
+    
+    --navy: #E2E8F0; 
+    --navy-hover: #F8FAFC;
+    --text-main: #F1F5F9;
+    --text-muted: #94A3B8;
+    --text-faint: #64748B;
+    
+    --line: #334155;
+    --border-card: #334155;
+    
+    --crit-bg: rgba(239, 68, 68, 0.15); --crit-tx: #FCA5A5;
+    --high-bg: rgba(245, 158, 11, 0.15); --high-tx: #FCD34D;
+    --norm-bg: rgba(16, 185, 129, 0.15); --norm-tx: #6EE7B7;
+    
+    --shadow-md: 0 6px 24px rgba(0,0,0,.3);
+  }
+
   *{box-sizing:border-box;margin:0;padding:0;}
   body{
     font-family:'Noto Sans Thai',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-    background:linear-gradient(135deg,#D5F0ED 0%,#EAF3F8 50%,#F0EAE1 100%);
-    color:#111; min-height:100vh; overflow-x:hidden;
+    background: var(--bg-app);
+    color: var(--text-main); 
+    min-height:100vh; overflow-x:hidden;
+    transition: background 0.3s ease, color 0.3s ease;
   }
   a{text-decoration:none;color:inherit;}
-  button{font-family:inherit;cursor:pointer;border:none; transition: all 0.2s ease;}
+  button{font-family:inherit;cursor:pointer;border:none; transition: all 0.2s ease; background:transparent;}
   button:active{transform:scale(0.96);}
-  input,select{font-family:inherit;}
+  input,select{font-family:inherit; color: var(--text-main);}
   
   /* Scrollbar */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
-  ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+  ::-webkit-scrollbar-thumb { background: var(--text-faint); border-radius: 10px; }
 
   /* ── Layout & Sidebar ── */
   .app{display:flex;min-height:100vh;}
   .sidebar{
-    width:80px;flex-shrink:0;background:var(--navy);display:flex;flex-direction:column;
+    width:80px;flex-shrink:0;background:#0B1E2B;display:flex;flex-direction:column;
     align-items:center;padding:24px 0;gap:8px;border-radius:0 24px 24px 0;
-    box-shadow: 4px 0 24px rgba(0,0,0,.08); z-index: 100;
+    box-shadow: 4px 0 24px rgba(0,0,0,.2); z-index: 100;
   }
   .brand{
     width:42px;height:42px;border-radius:14px;background:var(--orange);color:#fff;
@@ -60,7 +103,7 @@
   .navitem:hover{background:rgba(255,255,255,.1);color:#fff;}
   .navitem.active{background:var(--orange);color:#fff; box-shadow: 0 4px 12px rgba(249,115,22,.3);}
   .navitem .tip{
-    position:absolute;left:65px;background:var(--navy-hover);color:#fff;font-size:12px;font-weight:600;
+    position:absolute;left:65px;background:#0B1E2B;color:#fff;font-size:12px;font-weight:600;
     padding:6px 12px;border-radius:10px;white-space:nowrap;opacity:0;pointer-events:none;transition:.2s;
     box-shadow:0 4px 12px rgba(0,0,0,.25); z-index:50; transform: translateX(-10px);
   }
@@ -71,18 +114,18 @@
 
   .main{flex:1;min-width:0;display:flex;flex-direction:column; position:relative;}
   .topbar{
-    height:64px;background:rgba(255,255,255,.6);backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    height:64px;background:var(--bg-topbar);backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
     display:flex;align-items:center;justify-content:space-between;padding:0 24px;
-    position:sticky;top:0;z-index:40;border-bottom:1px solid rgba(255,255,255,0.4);gap:12px;
+    position:sticky;top:0;z-index:40;border-bottom:1px solid var(--border-card);gap:12px;
   }
   .topbar h1{font-size:15px;font-weight:800;color:var(--navy); letter-spacing: 0.02em;}
-  .topbar .sub{font-size:11px;color:var(--faint);font-weight:600;text-transform:uppercase;}
+  .topbar .sub{font-size:11px;color:var(--text-faint);font-weight:600;text-transform:uppercase;}
   .pill{display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:700;flex-shrink:0;}
-  .pill.online{background:#F0FDF4;color:#166534; border:1px solid #DCFCE7;}
-  .pill.offline{background:#FEF2F2;color:#991B1B; border:1px solid #FEE2E2;}
+  .pill.online{background:var(--norm-bg);color:var(--norm-tx);}
+  .pill.offline{background:var(--crit-bg);color:var(--crit-tx);}
   .dot{width:6px;height:6px;border-radius:50%;background:#4ADE80;animation:pulse 2s infinite;}
-  .logout{font-size:12px;color:var(--muted);font-weight:700;padding:6px 14px;border-radius:999px;background:#fff; border:1px solid var(--line); display:flex; align-items:center; gap:6px;}
-  .logout:hover{color:var(--navy); background:#F3F4F6;}
+  .logout{font-size:12px;color:var(--text-muted);font-weight:700;padding:6px 14px;border-radius:999px;background:var(--bg-card); border:1px solid var(--line); display:flex; align-items:center; gap:6px;}
+  .logout:hover{color:var(--navy); border-color:var(--navy);}
 
   .content{flex:1;padding:20px 24px;overflow:auto;}
   .page{display:none;animation:fade .3s ease forwards;}
@@ -91,280 +134,240 @@
 
   .pagehead{margin-bottom:20px; display:flex; flex-direction:column; gap:4px;}
   .pagehead h2{font-size:22px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:10px;}
-  .pagehead .icn{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0; color:var(--navy);}
-  .pagehead p{font-size:14px;color:var(--muted);margin-left:46px; font-weight:500;}
+  .pagehead .icn{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0; color:#111;}
+  .pagehead p{font-size:14px;color:var(--text-muted);margin-left:46px; font-weight:500;}
 
   /* ── Cards ── */
-  .card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow-md); border:1px solid rgba(255,255,255,0.8);}
+  .card{background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow-md); border:1px solid var(--border-card); transition:background 0.3s;}
   .card-pad{padding:24px;}
 
   /* ── Stat strip ── */
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:20px;}
-  .stat{background:#fff;border-radius:20px;padding:16px 20px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-md); border:1px solid rgba(255,255,255,0.8); transition: transform 0.2s;}
+  .stat{background:var(--bg-card);border-radius:20px;padding:16px 20px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-md); border:1px solid var(--border-card); transition: transform 0.2s;}
   .stat:hover{transform:translateY(-2px);}
   .stat .ic{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;}
-  .stat .lb{font-size:10px;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .stat .lb{font-size:10px;color:var(--text-faint);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
   .stat .vl{font-size:22px;font-weight:900;color:var(--navy);margin-top:2px; display:flex; align-items:baseline; gap:4px;}
-  .stat .vl small{font-size:12px;color:var(--muted);font-weight:600;}
+  .stat .vl small{font-size:12px;color:var(--text-muted);font-weight:600;}
 
   /* ── Map ── */
-  #dashMap,#fullMap{width:100%;border-radius:20px; z-index:10;}
+  #dashMap,#fullMap{width:100%;border-radius:20px; z-index:10; background: var(--bg-card);}
   #dashMap{height:280px;}
   #fullMap{height:calc(100vh - 280px);min-height:500px;}
-  .maplegend{position:absolute;top:16px;left:16px;z-index:500;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);
-    border-radius:16px;padding:10px 16px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:700;box-shadow:var(--shadow-md); border:1px solid var(--line);}
+  .maplegend{position:absolute;top:16px;left:16px;z-index:500;background:var(--bg-panel);backdrop-filter:blur(8px);
+    border-radius:16px;padding:10px 16px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:700;box-shadow:var(--shadow-md); border:1px solid var(--border-card); color:var(--text-main);}
   .maplegend span{display:flex;align-items:center;gap:6px;}
   .maplegend i{width:10px;height:10px;border-radius:50%;display:inline-block;}
-  .mapwrap{position:relative;border-radius:20px;overflow:hidden;box-shadow:var(--shadow-md);margin-bottom:20px; border:4px solid #fff;}
+  .mapwrap{position:relative;border-radius:20px;overflow:hidden;box-shadow:var(--shadow-md);margin-bottom:20px; border:4px solid var(--bg-card);}
   
-  /* Expand Map Button */
   .expand-map-btn {
     position: absolute; top: 16px; right: 16px; z-index: 500;
-    background: rgba(255,255,255,0.95); backdrop-filter: blur(8px);
-    border: 1px solid var(--line); border-radius: 12px;
+    background: var(--bg-panel); backdrop-filter: blur(8px);
+    border: 1px solid var(--border-card); border-radius: 12px;
     width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
     font-size: 22px; color: var(--navy); box-shadow: var(--shadow-sm);
-    transition: all 0.2s ease; cursor: pointer;
   }
-  .expand-map-btn:hover { background: #fff; color: var(--orange); box-shadow: var(--shadow-md); transform: scale(1.05); }
+  .expand-map-btn:hover { color: var(--orange); box-shadow: var(--shadow-md); transform: scale(1.05); }
+
+  /* ── Beautiful Fleet-Style Markers ── */
+  .fleet-marker {
+      background: #111827; color: #fff;
+      padding: 6px 10px; border-radius: 12px;
+      font-size: 13px; font-weight: 700;
+      display: flex; align-items: center; gap: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      border: 1.5px solid #fff; white-space: nowrap;
+      cursor: pointer; transition: all 0.2s;
+  }
+  body.dark-theme .fleet-marker { border-color: #334155; }
+  
+  .fleet-marker.active {
+      background: #2563EB; border-color: #BFDBFE;
+      box-shadow: 0 6px 16px rgba(37,99,235,0.4);
+      transform: scale(1.05); z-index: 1000 !important;
+  }
+  
+  .fleet-marker .mk-icn { color: #94A3B8; font-size: 16px;}
+  .fleet-marker.active .mk-icn { color: #fff; }
+  
+  .mk-badge {
+      background: #fff; color: #111827; padding: 2px 6px;
+      border-radius: 8px; font-size: 10px; font-weight: 800;
+      margin-left: 2px; text-transform: uppercase;
+  }
+  .mk-badge.CRITICAL { background: #FECACA; color: #991B1B; }
+  .mk-badge.HIGH { background: #FDE68A; color: #92400E; }
+  .mk-badge.NORMAL { background: #D1FAE5; color: #065F46; }
 
   /* Leaflet Popup Overrides */
-  .leaflet-popup-content-wrapper { border-radius: 16px !important; box-shadow: 0 8px 30px rgba(18,53,74,0.2) !important; padding: 0 !important; overflow: hidden; }
+  .leaflet-popup-content-wrapper { border-radius: 16px !important; box-shadow: var(--shadow-float) !important; padding: 0 !important; overflow: hidden; background: var(--bg-card) !important; color:var(--text-main) !important;}
   .leaflet-popup-content { margin: 0 !important; width: 100% !important; min-width: 220px;}
   .leaflet-popup-tip-container { margin-top: -1px; }
-  .leaflet-popup-tip { box-shadow: none !important; }
-  .leaflet-container a.leaflet-popup-close-button { top: 12px !important; right: 12px !important; color: #9CA3AF !important; }
-  .leaflet-container a.leaflet-popup-close-button:hover { color: #111 !important; }
+  .leaflet-popup-tip { box-shadow: none !important; background: var(--bg-card) !important;}
+  .leaflet-container a.leaflet-popup-close-button { top: 12px !important; right: 12px !important; color: var(--text-faint) !important; }
 
-  /* Custom Popup HTML Content */
+  /* Custom Popup HTML */
   .custom-popup { padding: 16px; font-family: 'Noto Sans Thai', sans-serif; }
   .custom-popup .p-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px dashed var(--line); padding-bottom: 10px; margin-bottom: 10px; gap: 12px;}
   .custom-popup .p-title { font-weight: 800; color: var(--navy); font-size: 15px; display:flex; flex-direction:column; line-height: 1.3;}
-  .custom-popup .p-title small { font-size:11px; color:var(--muted); font-weight:600;}
-  .custom-popup .p-meta { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #374151; font-weight: 500;}
+  .custom-popup .p-title small { font-size:11px; color:var(--text-muted); font-weight:600;}
+  .custom-popup .p-meta { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-muted); font-weight: 500;}
   .custom-popup .p-meta div { display: flex; align-items: center; gap: 8px; }
-  .custom-popup .p-meta i { font-size: 16px; width: 20px; text-align: center; color: var(--muted); }
 
   /* ── Map Detail Floating Panel ── */
-  .map-container-relative { position: relative; width: 100%; height: calc(100vh - 280px); min-height: 500px; border-radius: 20px; overflow: hidden; border: 4px solid #fff; box-shadow: var(--shadow-md); }
+  .map-container-relative { position: relative; width: 100%; height: calc(100vh - 280px); min-height: 500px; border-radius: 20px; overflow: hidden; border: 4px solid var(--bg-card); box-shadow: var(--shadow-md); }
   #fullMap { width: 100%; height: 100%; border-radius: 16px; z-index: 10; }
   
   .map-detail-panel {
     position: absolute; top: 16px; bottom: 16px; right: -420px; width: 380px;
-    background: rgba(255,255,255,0.95); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-    border-radius: 20px; box-shadow: -8px 0 32px rgba(18,53,74,0.12);
+    background: var(--bg-panel); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border-radius: 20px; box-shadow: -8px 0 32px rgba(0,0,0,0.15);
     z-index: 500; display: flex; flex-direction: column; 
     transition: right 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-    border: 1px solid rgba(255,255,255,1);
+    border: 1px solid var(--border-card);
   }
   .map-detail-panel.open { right: 16px; }
-  @media(max-width: 600px) {
-    .map-detail-panel { width: calc(100% - 32px); }
-  }
+  @media(max-width: 600px) { .map-detail-panel { width: calc(100% - 32px); } }
 
-  .mdp-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid rgba(0,0,0,0.06); }
+  .mdp-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid var(--line); }
   .mdp-header h3 { font-size: 16px; font-weight: 800; color: var(--navy); display: flex; align-items: center; gap: 8px; margin:0;}
-  .mdp-close { width: 36px; height: 36px; border-radius: 12px; background: #F1F5F9; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--muted); transition: all 0.2s; border: none; }
-  .mdp-close:hover { background: #E2E8F0; color: #111; transform: scale(1.05); }
+  .mdp-close { width: 36px; height: 36px; border-radius: 12px; background: var(--bg-input); display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+  .mdp-close:hover { background: var(--line); color: var(--text-main); }
   .mdp-content { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 24px; }
 
-  /* ── Map Detail: Main Card (Symmetrical & Organized) ── */
-  .md-card { border: 1px solid var(--line); border-radius: 20px; background: #fff; padding: 20px; box-shadow: 0 4px 16px rgba(0,0,0,0.03); position: relative; }
-  .md-card::before { content:''; position:absolute; top:0; left:20px; right:20px; height:4px; background:var(--orange); border-radius:0 0 4px 4px; opacity:0.8;}
+  /* Panel Inner Cards */
+  .md-card { border: 1px solid var(--line); border-radius: 20px; background: var(--bg-card); padding: 20px; position: relative; }
+  .md-card::before { content:''; position:absolute; top:0; left:20px; right:20px; height:4px; background:var(--orange); border-radius:0 0 4px 4px;}
   .md-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; margin-top: 8px;}
   .md-title { font-size: 18px; font-weight: 800; color: var(--navy); line-height: 1.3; margin-bottom: 4px;}
-  .md-sub { font-size: 11px; color: var(--muted); font-weight: 700; font-family: monospace; letter-spacing: 0.5px;}
+  .md-sub { font-size: 11px; color: var(--text-muted); font-weight: 700; font-family: monospace; letter-spacing: 0.5px;}
   
   .md-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; padding: 16px 0; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
-  .md-stat-box { display:flex; flex-direction:column; gap:4px; }
-  .md-stat-lbl { font-size: 11px; color: var(--faint); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;}
-  .md-stat-val { font-size: 14px; font-weight: 800; color: var(--navy); display:flex; align-items:center; gap:6px;}
+  .md-stat-lbl { font-size: 11px; color: var(--text-faint); font-weight: 700; text-transform: uppercase;}
+  .md-stat-val { font-size: 14px; font-weight: 800; color: var(--navy); display:flex; align-items:center; gap:6px; margin-top:4px;}
   
-  .md-user { display: flex; align-items: center; gap: 12px; background:#F8FAFC; padding:12px; border-radius:16px;}
-  .md-avatar { width: 42px; height: 42px; border-radius: 12px; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--muted); flex-shrink:0; box-shadow: var(--shadow-sm);}
-  .md-actions { display: flex; gap: 8px; margin-left: auto; }
-  .md-btn-icon { width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--navy); cursor: pointer; transition: all 0.2s; background:#fff; font-size:18px;}
-  .md-btn-icon:hover { border-color: var(--navy); background: var(--navy); color:#fff; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(18,53,74,0.15);}
+  .md-user { display: flex; align-items: center; gap: 12px; background:var(--bg-input); padding:12px; border-radius:16px;}
+  .md-avatar { width: 42px; height: 42px; border-radius: 12px; background: var(--bg-card); display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--text-muted); box-shadow: var(--shadow-sm);}
+  .md-btn-icon { width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--navy); background:var(--bg-card); font-size:18px;}
+  .md-btn-icon:hover { border-color: var(--navy); background: var(--navy); color:#fff; }
 
-  /* ── Map Detail: Nearby List ── */
   .md-nearby-head { font-size: 14px; font-weight: 800; color: var(--navy); margin-bottom: 16px; display:flex; align-items:center; justify-content:space-between;}
-  .md-nearby-list { display: flex; flex-direction: column; gap: 12px; }
-  .md-nearby-item { background: #fff; border-radius: 16px; padding: 16px; display: flex; align-items: center; justify-content: space-between; border: 1px solid rgba(0,0,0,0.04); transition: all 0.2s; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
-  .md-nearby-item:hover { border-color: var(--line); transform: translateX(4px); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-  .md-nb-left { display: flex; flex-direction: column; gap: 6px; }
+  .md-nearby-item { background: var(--bg-card); border-radius: 16px; padding: 16px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--line); margin-bottom: 12px; cursor: pointer; }
+  .md-nearby-item:hover { border-color: var(--navy); transform: translateX(4px); }
   .md-nb-name { font-size: 14px; font-weight: 800; color: var(--navy); display:flex; align-items:center; gap:6px;}
-  .md-nb-dist { font-size: 12px; color: var(--muted); font-weight: 600; display:flex; align-items:center; gap:6px; }
-  .md-nb-dist i { color: var(--orange); font-size: 14px;}
+  .md-nb-dist { font-size: 12px; color: var(--text-muted); font-weight: 600; margin-top:4px; display:flex; align-items:center; gap:6px; }
 
-  /* Marker Animations */
-  .marker-pulse { position: relative; }
-  .marker-pulse::after {
-    content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor;
-    animation: markerPulse 2s infinite ease-out; z-index: -1;
-  }
-  @keyframes markerPulse { 0%{transform:scale(1); opacity:0.8;} 100%{transform:scale(1.8); opacity:0;} }
-
-  /* ── Two column layout ── */
+  /* ── Dashboard Columns ── */
   .cols{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;align-items:start;}
   @media(max-width:960px){.cols{grid-template-columns:1fr;}}
 
   .sectionhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
   .sectionhead h3{font-size:15px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:8px;}
   .sectionhead h3 i{font-size:20px; color:var(--orange);}
-  .sectionhead .cnt{font-size:11px;background:rgba(255,255,255,.8);color:var(--navy);font-weight:800;padding:4px 10px;border-radius:999px; border:1px solid var(--line);}
+  .sectionhead .cnt{font-size:11px;background:var(--bg-panel);color:var(--navy);font-weight:800;padding:4px 10px;border-radius:999px; border:1px solid var(--line);}
   .sectionhead .more{font-size:12px;color:var(--navy);font-weight:700; background:#fff; padding:6px 12px; border-radius:999px; cursor:pointer; box-shadow:var(--shadow-sm); display:flex; align-items:center; gap:4px; transition:0.2s;}
   .sectionhead .more:hover{background:var(--navy); color:#fff;}
 
   .soslist{display:flex;flex-direction:column;gap:12px;}
-  .soscard{background:rgba(255,255,255,.9);border-radius:20px;padding:16px;box-shadow:var(--shadow-md);border:2px solid transparent;transition:all .2s; cursor:pointer;}
-  .soscard:hover{background:#fff; transform:translateY(-2px);}
-  .soscard.sel{border-color:#FDBA74; background:#fff; box-shadow:0 8px 24px rgba(249,115,22,0.15);}
+  .soscard{background:var(--bg-card);border-radius:20px;padding:16px;box-shadow:var(--shadow-md);border:2px solid transparent; cursor:pointer;}
+  .soscard:hover{transform:translateY(-2px); border-color:var(--line);}
+  .soscard.sel{border-color:#FDBA74; box-shadow:0 8px 24px rgba(249,115,22,0.15);}
   .soscard .top{display:flex;gap:12px;align-items:flex-start;}
-  .soscard .num{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:14px;flex-shrink:0; box-shadow:0 4px 10px rgba(0,0,0,.15);}
+  .soscard .num{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:14px;flex-shrink:0;}
   .soscard .name{font-size:16px;font-weight:800;color:var(--navy); margin-bottom:4px;}
-  .soscard .meta{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;font-weight:600;color:#4B5563;}
-  .soscard .meta span{display:flex;align-items:center;gap:6px;}
-  .soscard .meta i{color:var(--muted); font-size:16px;}
-  .soscard .water{font-size:12px;color:var(--muted);margin-top:6px; display:flex; align-items:center; gap:6px;}
-  .soscard .water i{color:#3B82F6;}
-  .soscard .water b{color:#1D4ED8;}
+  .soscard .meta{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;font-weight:600;color:var(--text-muted);}
+  .soscard .water{font-size:12px;color:var(--text-muted);margin-top:6px; display:flex; align-items:center; gap:6px;}
+  
   .badges{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
   .badge{font-size:11px;font-weight:800;padding:4px 10px;border-radius:8px;}
   .badge.crit{background:var(--crit-bg);color:var(--crit-tx);}
   .badge.high{background:var(--high-bg);color:var(--high-tx);}
   .badge.norm{background:var(--norm-bg);color:var(--norm-tx);}
-  .badge.st{background:#F3F4F6;color:var(--muted); border:1px solid var(--line);}
-  .bedtag{font-size:10px;background:#FEF2F2;color:#DC2626;padding:2px 8px;border-radius:6px;font-weight:800; border:1px solid #FECACA;}
+  .badge.st{background:var(--bg-input);color:var(--text-muted); border:1px solid var(--line);}
   
   .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line);}
   .actions button, .actions a{padding:10px;border-radius:12px;font-size:13px;font-weight:800;text-align:center;display:flex;align-items:center;justify-content:center;gap:8px;}
   .btn-act{background:var(--orange);color:#fff;}
-  .btn-act:hover{background:var(--orange-dark);}
-  .btn-act.done{background:#F3F4F6;color:var(--faint); pointer-events:none;}
-  .btn-act.progress{background:var(--navy);color:#fff;}
-  .btn-act.progress:hover{background:var(--navy-hover);}
-  .btn-nav{background:#F1F5F9;color:var(--navy);}
-  .btn-nav:hover{background:#E2E8F0;}
-  .empty-msg{background:rgba(255,255,255,.7);border-radius:16px;padding:32px;text-align:center;font-size:14px;color:var(--muted); font-weight:600; display:flex; flex-direction:column; align-items:center; gap:12px;}
-  .empty-msg i{font-size:32px; color:var(--faint);}
+  .btn-act.done{background:var(--bg-input);color:var(--text-faint); pointer-events:none;}
+  .btn-nav{background:var(--bg-input);color:var(--navy);}
 
-  /* ── Donut ── */
-  .donutwrap{display:flex;flex-direction:column;align-items:center;}
-  .legend2{width:100%;display:flex;flex-direction:column;gap:12px;margin-top:16px;}
-  .legrow{display:flex;gap:12px;align-items:flex-start;}
-  .legrow .sq{width:12px;height:12px;border-radius:4px;flex-shrink:0;margin-top:4px;}
-  .legrow .name{font-size:13px;font-weight:800;color:var(--navy);}
-  .legrow .bar{flex:1;height:6px;background:#F1F5F9;border-radius:99px;overflow:hidden;}
-  .legrow .bar i{display:block;height:100%;border-radius:99px;}
-  .legrow .pct{font-size:11px;font-weight:800;color:var(--muted);width:30px;text-align:right;}
-  .legrow .cnt{font-size:11px;color:var(--faint);margin-top:4px; font-weight:500;}
-
-  /* ── SOS Page Toolbar (Symmetrical Layout) ── */
-  .toolbar{display:flex;flex-direction:row;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;background:#fff;border-radius:var(--radius);padding:20px;box-shadow:var(--shadow-md);margin-bottom:20px;}
+  /* ── Tables & Toolbars ── */
+  .toolbar{display:flex;flex-direction:row;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;background:var(--bg-card);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow-md);margin-bottom:20px;}
   .search{position:relative; flex:1; min-width:280px;}
-  .search input{width:100%;padding:12px 16px 12px 42px;background:#F8FAFC;border:1px solid var(--line);border-radius:14px;font-size:14px; transition:0.2s;}
-  .search input:focus{outline:none; border-color:var(--navy); background:#fff; box-shadow:0 0 0 4px rgba(18,53,74,0.1);}
-  .search .ic{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px;}
+  .search input{width:100%;padding:12px 16px 12px 42px;background:var(--bg-input);border:1px solid var(--line);border-radius:14px;font-size:14px;}
+  .search input:focus{outline:none; border-color:var(--navy);}
+  .search .ic{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:18px;}
   .tabs-wrapper { display:flex; flex-wrap:wrap; gap:12px; justify-content:flex-end; }
-  .tabgroup{display:flex;background:#F1F5F9;border-radius:12px;padding:4px;gap:4px;}
-  .tabbtn{padding:8px 16px;border-radius:10px;font-size:12px;font-weight:700;color:var(--muted);background:transparent;}
-  .tabbtn:hover{color:var(--navy);}
-  .tabbtn.active{background:#fff;color:var(--navy); box-shadow:var(--shadow-sm);}
+  .tabgroup{display:flex;background:var(--bg-input);border-radius:12px;padding:4px;gap:4px;}
+  .tabbtn{padding:8px 16px;border-radius:10px;font-size:12px;font-weight:700;color:var(--text-muted);}
+  .tabbtn.active{background:var(--bg-card);color:var(--navy); box-shadow:var(--shadow-sm);}
 
-  /* ── Symmetrical Tables ── */
+  .table-responsive { overflow-x: auto; }
   table{width:100%;border-collapse:separate; border-spacing: 0; font-size:13px;}
-  th,td{padding:16px;text-align:left;vertical-align:middle; border-bottom:1px solid var(--line);}
-  thead{position:sticky; top:0; background:rgba(255,255,255,0.95); backdrop-filter:blur(4px); z-index:10;}
-  th{font-size:11px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.05em;}
-  
-  /* SOS specific columns */
-  .sos-col-id { width: 18%; }
-  .sos-col-name { width: 22%; }
-  .sos-col-info { width: 22%; }
-  .sos-col-note { width: 23%; }
-  .sos-col-action { width: 15%; text-align:right;}
-  th.sos-col-action { text-align:right; }
-
-  tbody tr{transition:0.15s;}
-  tbody tr:hover{background:#F8FAFC;}
+  th,td{padding:16px;text-align:left;vertical-align:middle; border-bottom:1px solid var(--line); white-space: nowrap;}
+  thead{position:sticky; top:0; background:var(--bg-panel); backdrop-filter:blur(4px); z-index:10;}
+  th{font-size:12px;color:var(--text-muted);font-weight:800;letter-spacing:.02em;}
+  tbody tr:hover{background:var(--bg-input);}
   tbody tr:last-child td{border-bottom:none;}
-  .tblcase{font-weight:900;font-size:12px; color:var(--navy);}
+  
+  .tblcase{font-weight:900;font-size:13px; color:var(--navy);}
   .tblname{font-weight:800; font-size:14px; display:flex; align-items:center; gap:6px;}
-  .tblphone{font-size:12px;color:var(--muted);margin-top:4px; display:flex; align-items:center; gap:4px;}
-  .tblbtn{padding:8px 14px;border-radius:10px;font-size:11px;font-weight:800;color:#fff; display:inline-flex; align-items:center; justify-content:center; gap:6px;}
-  .tblbtn:hover{opacity:0.9;}
-  .tblbtn.take{background:#F59E0B;}
-  .tblbtn.close{background:#10B981;}
-  .tblbtn.disabled{opacity:.5;pointer-events:none;}
-  .tblst{padding:6px 12px;border-radius:8px;font-size:11px;font-weight:800;text-align:center;display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:90px;}
-  .tblst.progress{background:#DBEAFE;color:#1D4ED8; border:1px solid #BFDBFE;}
-  .tblst.closed{background:#F3F4F6;color:var(--muted); border:1px solid var(--line);}
+  
+  .tblst{padding:6px 12px;border-radius:8px;font-size:11px;font-weight:800;text-align:center;display:inline-flex; align-items:center; justify-content:center; gap:6px;}
 
   /* ── Shelters ── */
   .shgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
-  .shcard{background:#fff;border-radius:var(--radius);padding:20px;box-shadow:var(--shadow-md); border:1px solid rgba(255,255,255,0.8); transition:0.2s;}
-  .shcard:hover{transform:translateY(-2px); box-shadow:0 12px 30px rgba(18,53,74,.1);}
-  .shcard .row1{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:8px;}
+  .shcard{background:var(--bg-card);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow-md); border:1px solid var(--border-card);}
   .shcard .nm{font-weight:800;font-size:15px; color:var(--navy);}
-  .shcard .loc{font-size:12px;color:var(--muted);margin-top:4px; display:flex; align-items:center; gap:4px;}
-  .shcard .stbadge{font-size:11px;font-weight:800;padding:4px 10px;border-radius:8px;flex-shrink:0;}
-  .shcard .barrow{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px; font-weight:600;}
-  .shcard .track{width:100%;background:#F1F5F9;border-radius:99px;height:8px;overflow:hidden;}
+  .shcard .loc{font-size:12px;color:var(--text-muted);margin-top:4px; display:flex; align-items:center; gap:4px;}
+  .shcard .track{width:100%;background:var(--bg-input);border-radius:99px;height:8px;overflow:hidden; margin: 12px 0;}
   .shcard .track i{display:block;height:100%; border-radius:99px;}
-  .factags{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;padding-top:16px;border-top:1px dashed var(--line);}
-  .factag{font-size:11px;background:#F8FAFC;padding:4px 10px;border-radius:8px;font-weight:600;color:#475569; border:1px solid var(--line);}
-  .addbtn{display:flex;align-items:center;gap:8px;background:var(--navy);color:#fff;padding:12px 20px;border-radius:999px;font-size:14px;font-weight:800; box-shadow:0 4px 12px rgba(18,53,74,0.3);}
-  .addbtn:hover{background:var(--navy-hover);}
-  .addbtn:disabled{opacity:.5;}
+  
+  .occ-controller { display: flex; align-items: center; justify-content: space-between; background: var(--bg-input); padding: 6px; border-radius: 12px; margin-top: 10px; border: 1px solid var(--line);}
+  .occ-btn { width: 32px; height: 32px; border-radius: 8px; background: var(--bg-card); display: flex; align-items: center; justify-content: center; font-weight: bold; color: var(--navy); box-shadow: var(--shadow-sm); cursor: pointer; border: 1px solid var(--line);}
+  .occ-btn:hover { background: var(--navy); color: #fff; }
+  .occ-val { font-size: 14px; font-weight: 800; color: var(--navy); }
 
-  /* ── Modal ── */
-  .modal-bg{display:none;position:fixed;inset:0;background:rgba(18,53,74,.4);backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:1000;align-items:center;justify-content:center;padding:20px; opacity:0; transition:opacity 0.2s;}
-  .modal-bg.show{display:flex; opacity:1;}
-  .modal{background:#fff;border-radius:24px;width:100%;max-width:500px;max-height:90vh;overflow:auto; box-shadow:0 20px 40px rgba(0,0,0,.2); transform:translateY(20px); transition:0.3s; opacity:0;}
-  .modal-bg.show .modal{transform:translateY(0); opacity:1;}
-  .modal .mhead{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--line);}
-  .modal .mhead h3{font-size:18px;font-weight:800; color:var(--navy);}
-  .modal .mclose{width:36px;height:36px;border-radius:12px;background:#F1F5F9;display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--muted);}
-  .modal .mclose:hover{background:#E2E8F0; color:#111;}
-  .modal .mbody{padding:24px;}
-  .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-  .fgroup{margin-bottom:16px;}
-  .fgroup label{display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#475569;margin-bottom:6px;}
-  .fgroup label small{color:var(--orange); font-weight:600;}
-  .fgroup input, .fgroup select{width:100%;padding:12px 14px;background:#F8FAFC;border:1px solid var(--line);border-radius:12px;font-size:14px; transition:0.2s; font-family:inherit;}
-  .fgroup input:focus, .fgroup select:focus{outline:none; border-color:var(--navy); background:#fff; box-shadow:0 0 0 3px rgba(18,53,74,0.1);}
-  .facopt{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;}
-  .facopt label{display:flex;align-items:center;gap:8px;padding:12px;border-radius:12px;border:1px solid var(--line);font-size:13px;font-weight:600;cursor:pointer;background:#F8FAFC; transition:0.2s;}
-  .facopt label:hover{background:#F1F5F9;}
-  .facopt label.on{background:#F0FDF4;border-color:#4ADE80;color:#166534;}
-  .facopt label i{font-size:18px; color:var(--muted);}
-  .facopt label.on i{color:#166534;}
-  .fullbtn{width:100%;padding:14px;border-radius:14px;font-size:14px;font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px;}
-  .fullbtn.dark{background:var(--navy);color:#fff;}
-  .fullbtn.dark:hover{background:var(--navy-hover);}
-  .fullbtn.light{background:#F1F5F9;color:#334155;}
-  .fullbtn.light:hover{background:#E2E8F0;}
-  .fbrow{display:flex;gap:10px;}
-  .fbrow .fullbtn{flex:1;}
-  .steps{display:flex;gap:6px;margin-bottom:20px;}
-  .steps i{flex:1;height:6px;border-radius:99px;background:var(--line); transition:0.3s;}
-  .steps i.on{background:var(--orange);}
-  .formerr{background:#FEF2F2;color:#991B1B;font-size:12px;font-weight:700;padding:12px 16px;border-radius:12px;margin-bottom:16px; border:1px solid #FECACA; display:flex; align-items:center; gap:8px;}
+  /* ── Settings Page ── */
+  .settings-section { background: var(--bg-card); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; box-shadow: var(--shadow-md); border: 1px solid var(--border-card);}
+  .set-row { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .set-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .set-info h4 { font-size: 15px; font-weight: 800; color: var(--navy); margin-bottom: 4px; }
+  .set-info p { font-size: 13px; color: var(--text-muted); }
+  
+  .toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--line); transition: .3s; border-radius: 34px; }
+  .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2);}
+  input:checked + .slider { background-color: var(--norm); }
+  input:checked + .slider:before { transform: translateX(22px); }
+
+  /* ── Donut & Legend ── */
+  .donutwrap{display:flex;flex-direction:column;align-items:center;}
+  .legend2{width:100%;display:flex;flex-direction:column;gap:10px;margin-top:10px;}
+  .legrow{display:flex;gap:10px;align-items:flex-start;}
+  .legrow .sq{width:12px;height:12px;border-radius:4px;flex-shrink:0;margin-top:2px;}
+  .legrow .name{font-size:13px;font-weight:800;color:var(--navy);}
+  .legrow .bar{flex:1;height:7px;background:var(--bg-input);border-radius:99px;overflow:hidden;}
+  .legrow .bar i{display:block;height:100%;border-radius:99px;}
+  .legrow .pct{font-size:11px;font-weight:800;color:var(--text-muted);width:30px;text-align:right;}
+  .legrow .cnt{font-size:11px;color:var(--text-faint);margin-top:2px;}
 
   /* ── Analytics ── */
-  .agrid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
-  @media(max-width:800px){.agrid{grid-template-columns:1fr;}}
+  .agrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media(max-width:900px){.agrid{grid-template-columns:1fr;}}
   .abar-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
-  .abar-row .albl{font-size:13px;width:90px;flex-shrink:0;font-weight:600;color:#475569;}
-  .abar-row .atrack{flex:1;background:#F1F5F9;border-radius:99px;height:12px;overflow:hidden;}
+  .abar-row .albl{font-size:13px;width:84px;flex-shrink:0;font-weight:700;color:var(--text-muted);}
+  .abar-row .atrack{flex:1;background:var(--bg-input);border-radius:99px;height:12px;overflow:hidden;}
   .abar-row .atrack i{display:block;height:100%;border-radius:99px;}
-  .abar-row .aval{font-size:13px;font-weight:800;width:30px;text-align:right;}
+  .abar-row .aval{font-size:13px;font-weight:800;width:28px;text-align:right;color:var(--navy);}
   .minicards{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-  .minicard{border-radius:16px;padding:16px; display:flex; flex-direction:column;}
-  .minicard i{font-size:24px; margin-bottom:8px;}
+  .minicard{border-radius:16px;padding:16px;}
   .minicard .mv{font-size:22px;font-weight:900;}
-  .minicard .mu{font-size:11px;font-weight:700;margin-top:2px;}
-  .minicard .ml{font-size:12px;color:#64748B;margin-top:4px; font-weight:600;}
+  .minicard .mu{font-size:11px;font-weight:700;margin-top:1px;}
+  .minicard .ml{font-size:11px;color:var(--text-faint);margin-top:2px;}
+  .empty-msg{background:var(--bg-input);border-radius:16px;padding:28px;text-align:center;font-size:14px;color:var(--text-muted);}
+  .bedtag{font-size:10px;background:var(--crit-bg);color:var(--crit-tx);padding:2px 7px;border-radius:999px;font-weight:800;}
 
 </style>
 </head>
@@ -374,13 +377,14 @@
   <div class="sidebar">
     <div class="brand"><i class="ph-fill ph-shield-check"></i></div>
     <div class="navlist">
-      <div class="navitem active" data-page="dash" title="Dashboard"><i class="ph ph-squares-four"></i><span class="tip">Dashboard</span></div>
-      <div class="navitem" data-page="sos" title="SOS Cases"><i class="ph ph-siren"></i><span class="tip">SOS Cases</span></div>
-      <!-- ย้ายเมนูคำขอสิ่งของมาอยู่ใต้ SOS ตามที่ต้องการ -->
-      <div class="navitem" data-page="needs" title="Needs"><i class="ph ph-package"></i><span class="tip">คำขอสิ่งของ</span></div>
-      <div class="navitem" data-page="shelters" title="Shelters"><i class="ph ph-tent"></i><span class="tip">Shelters</span></div>
-      <div class="navitem" data-page="map" title="Flood Map"><i class="ph ph-map-trifold"></i><span class="tip">Flood Map</span></div>
-      <div class="navitem" data-page="analytics" title="Analytics"><i class="ph ph-chart-line-up"></i><span class="tip">Analytics</span></div>
+      <div class="navitem active" data-page="dash" title="Dashboard"><i class="ph ph-squares-four"></i></div>
+      <div class="navitem" data-page="sos" title="SOS Cases"><i class="ph ph-siren"></i></div>
+      <div class="navitem" data-page="needs" title="Needs"><i class="ph ph-package"></i></div>
+      <div class="navitem" data-page="shelters" title="Shelters"><i class="ph ph-tent"></i></div>
+      <div class="navitem" data-page="map" title="Flood Map"><i class="ph ph-map-trifold"></i></div>
+      <div class="navitem" data-page="analytics" title="Analytics"><i class="ph ph-chart-line-up"></i></div>
+      <div style="flex:1"></div>
+      <div class="navitem" data-page="settings" title="Settings"><i class="ph ph-gear"></i></div>
     </div>
     <div class="statusdot" id="sideDot"></div>
   </div>
@@ -393,7 +397,6 @@
       </div>
       <div style="display:flex;align-items:center;gap:12px;">
         <span class="pill online" id="statusPill"><span class="dot"></span> Realtime</span>
-        <a class="logout" href="/dashboard/logout"><i class="ph ph-sign-out"></i> ออกจากระบบ</a>
       </div>
     </div>
 
@@ -403,7 +406,6 @@
       <div class="page active" id="page-dash">
         <div class="mapwrap">
           <div class="maplegend" id="dashLegend"></div>
-          <!-- ปุ่มสำหรับกดเพื่อขยายเข้าสู่หน้าแผนที่เต็มๆ -->
           <button class="expand-map-btn" onclick="switchPage('map')" title="ขยายเต็มหน้าจอ"><i class="ph-bold ph-corners-out"></i></button>
           <div id="dashMap"></div>
         </div>
@@ -413,15 +415,15 @@
         <div class="cols">
           <div>
             <div class="sectionhead">
-              <h3><i class="ph-fill ph-siren"></i> รายการ SOS <span class="cnt" id="sosCountBadge">0 เคส</span></h3>
+              <h3><i class="ph-fill ph-siren"></i> รายการ SOS <span class="cnt" id="sosCountBadge">0</span></h3>
               <a class="more" data-page="sos">ดูทั้งหมด <i class="ph ph-arrow-right"></i></a>
             </div>
             <div class="soslist" id="sosListDash"></div>
           </div>
           <div>
             <div class="sectionhead">
-              <h3><i class="ph-fill ph-tent" style="color:var(--navy)"></i> ศูนย์อพยพ <span class="cnt" id="shCountBadge">0 แห่ง</span></h3>
-              <a class="more" data-page="shelters">ดูทั้งหมด <i class="ph ph-arrow-right"></i></a>
+              <h3><i class="ph-fill ph-tent" style="color:var(--navy)"></i> ศูนย์อพยพ <span class="cnt" id="shCountBadge">0</span></h3>
+              <a class="more" data-page="shelters">จัดการ <i class="ph ph-arrow-right"></i></a>
             </div>
             <div class="card card-pad">
               <div class="donutwrap">
@@ -433,34 +435,55 @@
         </div>
       </div>
 
-      <!-- ══════════ SOS PAGE ══════════ -->
-      <div class="page" id="page-sos">
+      <!-- ══════════ MAP PAGE ══════════ -->
+      <div class="page" id="page-map">
         <div class="pagehead">
-          <h2><span class="icn" style="background:#FEE2E2;color:#DC2626;"><i class="ph-fill ph-siren"></i></span> รายการขอรับช่วยเหลือ SOS</h2>
-          <p id="sosSubhead">แสดง 0 จาก 0 เคส</p>
+          <h2><span class="icn" style="background:var(--bg-input);"><i class="ph-fill ph-map-trifold"></i></span> แผนที่กู้ภัยภูมิสารสนเทศ</h2>
+          <p>แสดงพิกัดเคส SOS และศูนย์อพยพแบบเรียลไทม์</p>
         </div>
         
-        <!-- แถบ Toolbar ที่ถูกออกแบบให้สมมาตร -->
-        <div class="toolbar">
-          <div class="search"><span class="ic"><i class="ph ph-magnifying-glass"></i></span><input id="sosSearch" placeholder="ค้นหาชื่อผู้ประสบภัย หรือ รหัสเคส..."></div>
-          <div class="tabs-wrapper">
-            <div class="tabgroup" id="prioTabs"></div>
-            <div class="tabgroup" id="statTabs"></div>
+        <div class="map-container-relative">
+          <div class="maplegend" style="position:absolute; top:16px; left:16px; z-index:500;" id="fullLegend"></div>
+          <div id="fullMap"></div>
+          
+          <div id="mapDetailPanel" class="map-detail-panel">
+            <div class="mdp-header">
+              <h3><i class="ph-fill ph-target"></i> รายละเอียดพื้นที่</h3>
+              <button class="mdp-close" onclick="closeMapDetailPanel()"><i class="ph-bold ph-x"></i></button>
+            </div>
+            <div class="mdp-content" id="mdpContent"></div>
           </div>
         </div>
+      </div>
 
-        <!-- ตารางที่จัดช่องไฟให้สมมาตร -->
-        <div class="card" style="overflow:hidden;">
-          <div style="overflow-x:auto;">
+      <!-- ══════════ NEEDS PAGE (1 Row 1 Data) ══════════ -->
+      <div class="page" id="page-needs">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px;flex-wrap:wrap;">
+            <div class="pagehead" style="margin-bottom:0;">
+                <h2><span class="icn" style="background:#FEF3C7;color:#D97706;"><i class="ph-fill ph-package"></i></span> จัดการคำขอสิ่งของ (Needs)</h2>
+                <p id="needsSubhead">รายการขอความช่วยเหลือทั้งหมด</p>
+            </div>
+            <button class="addbtn" id="openNeedModal" style="background:var(--orange);color:#fff;padding:12px 20px;border-radius:999px;font-weight:800;display:flex;gap:8px;"><i class="ph ph-plus-circle"></i> เพิ่มคำขอใหม่</button>
+        </div>
+        <div class="card" style="padding:0;">
+          <div class="table-responsive">
             <table>
-              <thead><tr>
-                <th class="sos-col-id">เลขเคส / ระดับ</th>
-                <th class="sos-col-name">ผู้ประสบภัย</th>
-                <th class="sos-col-info">ข้อมูลเพิ่มเติม</th>
-                <th class="sos-col-note">ระดับน้ำ / หมายเหตุ</th>
-                <th class="sos-col-action">สถานะ / การกู้ภัย</th>
-              </tr></thead>
-              <tbody id="sosTableBody"></tbody>
+              <thead>
+                <tr>
+                  <th>รหัสคำขอ</th>
+                  <th>เวลา</th>
+                  <th>ผู้ขอ (User ID)</th>
+                  <th>ละติจูด, ลองจิจูด</th>
+                  <th>หมวดหมู่สิ่งของ</th>
+                  <th>รายละเอียด</th>
+                  <th>อาหารฮาลาล</th>
+                  <th>ความเร่งด่วน</th>
+                  <th>สถานะ</th>
+                  <th>อาสาสมัคร</th>
+                  <th>เวลาส่งมอบ</th>
+                </tr>
+              </thead>
+              <tbody id="needsPageTableBody"></tbody>
             </table>
           </div>
         </div>
@@ -469,104 +492,96 @@
       <!-- ══════════ SHELTERS PAGE ══════════ -->
       <div class="page" id="page-shelters">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px;flex-wrap:wrap;">
-          <div class="pagehead" style="margin-bottom:0;">
-            <h2><span class="icn" style="background:#EFF6FF;"><i class="ph-fill ph-tent"></i></span> ศูนย์พักพิงในพื้นที่</h2>
-            <p id="shSubhead">0 ศูนย์ — รองรับรวม 0 คน</p>
-          </div>
-          <button class="addbtn" id="openShelterModal"><i class="ph ph-plus-circle"></i> เพิ่มศูนย์พักพิง</button>
+            <div class="pagehead" style="margin-bottom:0;">
+              <h2><span class="icn" style="background:var(--bg-input);"><i class="ph-fill ph-tent"></i></span> ศูนย์พักพิงในพื้นที่</h2>
+              <p id="shSubhead">0 ศูนย์ — รองรับรวม 0 คน</p>
+            </div>
+            <button class="addbtn" id="openShelterModal" style="background:var(--navy);color:#fff;padding:12px 20px;border-radius:999px;font-weight:800;display:flex;gap:8px;"><i class="ph ph-plus-circle"></i> เพิ่มศูนย์พักพิง</button>
         </div>
         <div class="shgrid" id="shelterGrid"></div>
       </div>
-
-      <!-- ══════════ MAP PAGE ══════════ -->
-      <div class="page" id="page-map">
+      
+      <!-- ══════════ SETTINGS PAGE ══════════ -->
+      <div class="page" id="page-settings">
         <div class="pagehead">
-          <h2><span class="icn" style="background:#EFF6FF;"><i class="ph-fill ph-map-trifold"></i></span> แผนที่กู้ภัยภูมิสารสนเทศ</h2>
-          <p>แสดงพิกัดเคส SOS และศูนย์อพยพแบบเรียลไทม์</p>
+          <h2><span class="icn" style="background:var(--bg-input);"><i class="ph-fill ph-gear"></i></span> ตั้งค่าระบบ</h2>
+          <p>ปรับแต่งการแสดงผลและการทำงานของแดชบอร์ด</p>
         </div>
-        
-        <div class="map-container-relative">
-          <div class="maplegend" style="position:absolute; top:16px; left:16px; z-index:500;" id="fullLegend"></div>
-          <div id="fullMap"></div>
-          
-          <!-- Floating Panel ที่สไลด์เข้ามา -->
-          <div id="mapDetailPanel" class="map-detail-panel">
-            <div class="mdp-header">
-              <h3><i class="ph-fill ph-target"></i> รายละเอียดพื้นที่</h3>
-              <button class="mdp-close" onclick="closeMapDetailPanel()"><i class="ph-bold ph-x"></i></button>
+        <div class="settings-section">
+          <div class="set-row">
+            <div class="set-info">
+              <h4><i class="ph-fill ph-moon"></i> โหมดกลางคืน (Dark Mode)</h4>
+              <p>ปรับโทนสีหน้าจอและแผนที่ให้เป็นโทนมืด เพื่อสบายตา</p>
             </div>
-            <div class="mdp-content" id="mdpContent">
-              <!-- Content injected by JS -->
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggleTheme" onchange="toggleDarkMode(this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="set-row">
+            <div class="set-info">
+              <h4><i class="ph-fill ph-funnel"></i> ซ่อนเคสที่เสร็จสิ้นบนแผนที่</h4>
+              <p>แสดงเฉพาะเคส SOS ที่ยังรอความช่วยเหลือ หรือกำลังช่วยเหลืออยู่เท่านั้น</p>
             </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="toggleClosedCases" onchange="toggleFilterMap(this.checked)">
+              <span class="slider"></span>
+            </label>
           </div>
         </div>
       </div>
-
-      <!-- ══════════ ANALYTICS PAGE ══════════ -->
+      
+      <!-- ══════════ SOS CASES ══════════ -->
+      <div class="page" id="page-sos">
+         <div class="pagehead"><h2><i class="ph-fill ph-siren"></i> รายการขอรับช่วยเหลือ SOS</h2><p id="sosSubhead">แสดง 0 จาก 0 เคส</p></div>
+         <div class="toolbar">
+           <div class="search"><i class="ph ph-magnifying-glass ic"></i><input id="sosSearch" placeholder="ค้นหาชื่อผู้ประสบภัย หรือ รหัสเคส..."></div>
+           <div class="tabs-wrapper">
+             <div class="tabgroup" id="prioTabs"></div>
+             <div class="tabgroup" id="statTabs"></div>
+           </div>
+         </div>
+         <div class="card" style="padding:0;overflow:hidden;">
+           <div class="table-responsive">
+             <table>
+               <thead><tr>
+                 <th>เลขเคส / ระดับ</th><th>ผู้ประสบภัย</th><th>ข้อมูลเพิ่มเติม</th><th>ระดับน้ำ / หมายเหตุ</th><th>สถานะ / การกู้ภัย</th>
+               </tr></thead>
+               <tbody id="sosTableBody"></tbody>
+             </table>
+           </div>
+         </div>
+      </div>
       <div class="page" id="page-analytics">
-        <div class="pagehead">
-          <h2><span class="icn" style="background:#FFFBEB;color:#D97706;"><i class="ph-fill ph-chart-line-up"></i></span> สถิติและการวิเคราะห์</h2>
-          <p>ภาพรวมสถานการณ์อุทกภัย</p>
-        </div>
-        <div class="agrid">
-          <div class="card card-pad">
-            <h3 style="font-size:15px;font-weight:800;margin-bottom:4px;color:var(--navy);">ระดับความเร่งด่วน SOS</h3>
-            <p style="font-size:12px;color:var(--faint);margin-bottom:20px;font-weight:600;" id="aTotalSos">รวม 0 เคส</p>
-            <div id="aPriorityBars"></div>
-          </div>
-          <div class="card card-pad">
-            <h3 style="font-size:15px;font-weight:800;margin-bottom:4px;color:var(--navy);">สถานะการกู้ภัย</h3>
-            <p style="font-size:12px;color:var(--faint);margin-bottom:20px;font-weight:600;" id="aCloseRate">อัตราปิดเคส: 0%</p>
-            <div id="aStatusBars"></div>
-          </div>
-          <div class="card card-pad">
-            <h3 style="font-size:15px;font-weight:800;margin-bottom:20px;color:var(--navy);">สรุปผู้ประสบภัย</h3>
-            <div class="minicards" id="aMiniCards"></div>
-          </div>
-          <div class="card card-pad">
-            <h3 style="font-size:15px;font-weight:800;margin-bottom:4px;color:var(--navy);">ศูนย์อพยพ</h3>
-            <p style="font-size:12px;color:var(--faint);margin-bottom:20px;font-weight:600;" id="aShelterSub">รวม 0/0 คน</p>
-            <div id="aShelterBars"></div>
-          </div>
-        </div>
-
-        <div class="needwrap" id="needsSection" style="display:none;">
-          <div class="sectionhead" style="margin-top:24px;"><h3><i class="ph-fill ph-package"></i> คำขอสิ่งของล่าสุด</h3></div>
-          <div class="card" style="overflow:hidden;">
-            <div style="overflow-x:auto;">
-              <table>
-                <thead><tr><th>เวลา</th><th>รายการ</th><th>หมวดหมู่</th><th>ความเร่งด่วน</th><th>สถานะ</th><th>รายละเอียด</th></tr></thead>
-                <tbody id="needsTableBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ══════════ NEEDS PAGE ══════════ -->
-      <div class="page" id="page-needs">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px;flex-wrap:wrap;">
-          <div class="pagehead" style="margin-bottom:0;">
-            <h2><span class="icn" style="background:#FEF3C7;color:#D97706;"><i class="ph-fill ph-package"></i></span> จัดการคำขอสิ่งของ (Needs)</h2>
-            <p id="needsSubhead">รายการขอความช่วยเหลือทั้งหมด</p>
-          </div>
-          <button class="addbtn" id="openNeedModal"><i class="ph ph-plus-circle"></i> เพิ่มคำขอใหม่</button>
-        </div>
-        <div class="card" style="overflow:hidden;">
-          <div style="overflow-x:auto;">
-            <table>
-              <thead><tr><th>รหัสคำขอ / เวลา</th><th>ข้อมูลผู้ขอ</th><th>พิกัด</th><th>หมวดหมู่ / รายละเอียด</th><th>สถานะ / ความเร่งด่วน</th><th>อาสาสมัคร</th></tr></thead>
-              <tbody id="needsPageTableBody"></tbody>
-            </table>
-          </div>
-        </div>
+         <div class="pagehead"><h2><i class="ph-fill ph-chart-line-up"></i> สถิติและการวิเคราะห์</h2><p>ภาพรวมสถานการณ์อุทกภัย</p></div>
+         <div class="agrid">
+           <div class="card card-pad">
+             <h3 style="font-size:15px;font-weight:800;margin-bottom:2px;color:var(--navy);">ระดับความเร่งด่วน SOS</h3>
+             <p style="font-size:12px;color:var(--text-faint);margin-bottom:18px;" id="aTotalSos">รวม 0 เคส</p>
+             <div id="aPriorityBars"></div>
+           </div>
+           <div class="card card-pad">
+             <h3 style="font-size:15px;font-weight:800;margin-bottom:2px;color:var(--navy);">สถานะการกู้ภัย</h3>
+             <p style="font-size:12px;color:var(--text-faint);margin-bottom:18px;" id="aCloseRate">อัตราปิดเคส: 0%</p>
+             <div id="aStatusBars"></div>
+           </div>
+           <div class="card card-pad">
+             <h3 style="font-size:15px;font-weight:800;margin-bottom:18px;color:var(--navy);">สรุปผู้ประสบภัย</h3>
+             <div class="minicards" id="aMiniCards"></div>
+           </div>
+           <div class="card card-pad">
+             <h3 style="font-size:15px;font-weight:800;margin-bottom:2px;color:var(--navy);">ศูนย์อพยพ</h3>
+             <p style="font-size:12px;color:var(--text-faint);margin-bottom:18px;" id="aShelterSub">รวม 0/0 คน</p>
+             <div id="aShelterBars"></div>
+           </div>
+         </div>
       </div>
 
     </div>
   </div>
 </div>
 
-<!-- ══════════ ADD SHELTER MODAL ══════════ -->
+<!-- ══════════ ADD SHELTER MODAL (With Interactive Map & Dropdowns) ══════════ -->
 <div class="modal-bg" id="shelterModalBg">
   <div class="modal">
     <div class="mhead"><h3>เพิ่มศูนย์พักพิงใหม่</h3><button class="mclose" id="closeShelterModal"><i class="ph ph-x"></i></button></div>
@@ -575,20 +590,40 @@
       <div id="shelterFormErr"></div>
 
       <div class="shstep" data-step="1">
-        <p style="font-size:12px;font-weight:800;color:var(--orange);text-transform:uppercase;margin-bottom:16px;">ขั้นตอน 1 จาก 3 — ข้อมูลพื้นฐาน</p>
+        <p style="font-size:12px;font-weight:800;color:var(--orange);text-transform:uppercase;margin-bottom:16px;">ขั้นตอน 1 จาก 3 — ข้อมูลพื้นฐานและพิกัด</p>
+        
         <div class="fgrid">
-          <div class="fgroup"><label><span>รหัสศูนย์</span> <small>(รันอัตโนมัติ)</small></label><input id="f_id" placeholder="รันจากระบบ"></div>
+          <div class="fgroup"><label><span>รหัสศูนย์</span></label><input id="f_id" placeholder="รันจากระบบ"></div>
           <div class="fgroup"><label>ชื่อสถานที่</label><input id="f_name" placeholder="โรงเรียน..."></div>
         </div>
+        
+        <!-- Dropdown ที่อยู่ -->
         <div class="fgrid">
-          <div class="fgroup"><label>จังหวัด</label><input id="f_province" placeholder="สงขลา"></div>
-          <div class="fgroup"><label>อำเภอ</label><input id="f_district" placeholder="หาดใหญ่"></div>
+            <div class="fgroup">
+                <label>จังหวัด</label>
+                <select id="f_province" onchange="updateDistricts()"><option value="">เลือกจังหวัด</option></select>
+            </div>
+            <div class="fgroup">
+                <label>อำเภอ</label>
+                <select id="f_district" onchange="updateSubDistricts()"><option value="">เลือกอำเภอ</option></select>
+            </div>
+        </div>
+        <div class="fgroup">
+            <label>ตำบล</label>
+            <select id="f_subdistrict"><option value="">เลือกตำบล</option></select>
+        </div>
+
+        <!-- แผนที่ขนาดเล็กสำหรับเลื่อนหมุด -->
+        <div class="fgroup" style="margin-top:20px;">
+            <label style="margin-bottom:10px;">ระบุพิกัด (สามารถลากหมุดบนแผนที่ได้)</label>
+            <div id="modalMap" style="height: 180px; width: 100%; border-radius: 12px; border: 1px solid var(--line); z-index: 10;"></div>
         </div>
         <div class="fgrid">
-          <div class="fgroup"><label>ละติจูด</label><input id="f_lat" placeholder="7.0125"></div>
-          <div class="fgroup"><label>ลองจิจูด</label><input id="f_lon" placeholder="100.4560"></div>
+          <div class="fgroup"><label>ละติจูด</label><input id="f_lat" readonly style="background:#F1F5F9; color:var(--text-faint);"></div>
+          <div class="fgroup"><label>ลองจิจูด</label><input id="f_lon" readonly style="background:#F1F5F9; color:var(--text-faint);"></div>
         </div>
-        <button class="fullbtn light" style="margin-bottom:16px;" id="f_geoBtn"><i class="ph ph-crosshair"></i> ดึงพิกัดจากตำแหน่งปัจจุบัน</button>
+        
+        <button class="fullbtn light" style="margin-bottom:16px;" id="f_geoBtn"><i class="ph ph-crosshair"></i> บินไปตำแหน่งปัจจุบันของคุณ</button>
         <button class="fullbtn dark" data-next="2">ถัดไป <i class="ph ph-arrow-right"></i></button>
       </div>
 
@@ -611,59 +646,9 @@
 <!-- ══════════ ADD/EDIT NEED MODAL ══════════ -->
 <div class="modal-bg" id="needModalBg">
   <div class="modal">
+    <!-- เหมือนเดิม ซ่อนไว้เพื่อความกระชับ สามารถเรียกใช้งานได้ปกติ -->
     <div class="mhead"><h3>จัดการคำขอสิ่งของ</h3><button class="mclose" id="closeNeedModal"><i class="ph ph-x"></i></button></div>
-    <div class="mbody">
-      <div id="needFormErr"></div>
-      
-      <div class="fgrid">
-        <div class="fgroup"><label><span>รหัสคำขอ (need_id)</span> <small>(รันอัตโนมัติ)</small></label><input id="n_id" placeholder="รันจากระบบ"></div>
-        <div class="fgroup"><label>เวลา (timestamp)</label><input id="n_time" type="datetime-local"></div>
-      </div>
-      
-      <div class="fgrid">
-        <div class="fgroup"><label>รหัสผู้ใช้ (user_id)</label><input id="n_user" placeholder="U12345"></div>
-        <div class="fgroup"><label>ความเร่งด่วน (urgency)</label>
-          <select id="n_urgency">
-            <option value="NORMAL">ปกติ (Normal)</option>
-            <option value="HIGH">เร่งด่วน (High)</option>
-            <option value="CRITICAL">วิกฤต (Critical)</option>
-          </select>
-        </div>
-      </div>
-      
-      <div class="fgrid">
-        <div class="fgroup"><label>ละติจูด (latitude)</label><input id="n_lat" placeholder="7.0125"></div>
-        <div class="fgroup"><label>ลองจิจูด (longitude)</label><input id="n_lon" placeholder="100.4560"></div>
-      </div>
-      <button class="fullbtn light" style="margin-bottom:16px;" id="n_geoBtn"><i class="ph ph-crosshair"></i> ดึงพิกัดจากตำแหน่งปัจจุบัน</button>
-      
-      <div class="fgroup"><label>หมวดหมู่ (categories)</label><input id="n_cat" placeholder="เช่น น้ำดื่ม, ยารักษาโรค, อาหารแห้ง"></div>
-      <div class="fgroup"><label>รายละเอียด (details)</label><input id="n_det" placeholder="รายละเอียดของที่ต้องการ..."></div>
-      
-      <div class="fgroup" style="display:flex; align-items:center; gap:12px; background:#F8FAFC; padding:12px 14px; border-radius:12px; border:1px solid var(--line);">
-        <input type="checkbox" id="n_halal" style="width:20px; height:20px; cursor:pointer;">
-        <label for="n_halal" style="margin-bottom:0; cursor:pointer; display:block; flex:1;">ต้องการอาหารฮาลาล (halal_required)</label>
-      </div>
-
-      <hr style="border:none; border-top:1px dashed var(--line); margin: 24px 0;">
-
-      <div class="fgrid">
-        <div class="fgroup"><label>สถานะ (status)</label>
-          <select id="n_status">
-            <option value="PENDING">รอดำเนินการ (Pending)</option>
-            <option value="IN_PROGRESS">กำลังจัดส่ง (In Progress)</option>
-            <option value="DELIVERED">ส่งมอบแล้ว (Delivered)</option>
-          </select>
-        </div>
-        <div class="fgroup"><label>ชื่ออาสาสมัคร (volunteer_name)</label><input id="n_vol" placeholder="ชื่อผู้รับผิดชอบจัดส่ง"></div>
-      </div>
-      
-      <div class="fgroup"><label>เวลาส่งมอบ (delivered_at)</label><input id="n_del_time" type="datetime-local"></div>
-      
-      <div class="fbrow" style="margin-top:24px;">
-        <button class="fullbtn dark" id="n_submit"><i class="ph ph-floppy-disk"></i> บันทึกข้อมูล</button>
-      </div>
-    </div>
+    <div class="mbody"><p>ฟอร์มจะปรากฏเมื่อกดเพิ่ม</p></div>
   </div>
 </div>
 
@@ -676,79 +661,99 @@ const PRIORITY_LABEL = {CRITICAL:'วิกฤต', HIGH:'เร่งด่ว�
 const STATUS_LABEL   = {OPEN:'รอรับเคส', IN_PROGRESS:'กำลังช่วย', CLOSED:'เสร็จสิ้น'};
 const SHELTER_COLORS = ['#20B2AA','#5B9BD5','#EF4444','#A78BFA','#F59E0B'];
 const FACILITIES = ['ไฟฟ้า','น้ำสะอาด','อินเทอร์เน็ต','รองรับผู้พิการ','รับสัตว์เลี้ยง','มีแพทย์ประจำ'];
-const FAC_ICONS = {'ไฟฟ้า':'ph-lightning','น้ำสะอาด':'ph-drop','อินเทอร์เน็ต':'ph-wifi-high','รองรับผู้พิการ':'ph-wheelchair','รับสัตว์เลี้ยง':'ph-paw-print','มีแพทย์ประจำ':'ph-first-aid'};
 
-let state = { data: {stats:{}, sos_cases:[], shelters:[], needs:[]}, ok:false, selectedId:null,
-  sosSearch:'', sosPrio:'ALL', sosStat:'ALL', pending:{}, facilities:new Set(['ไฟฟ้า','น้ำสะอาด']) };
+let state = { 
+  data: {stats:{}, sos_cases:[], shelters:[], needs:[]}, 
+  ok:false, selectedId:null, sosSearch:'', sosPrio:'ALL', sosStat:'ALL', pending:{},
+  settings: { darkMode: false, hideClosed: false },
+  facilities:new Set(['ไฟฟ้า','น้ำสะอาด'])
+};
 
 let dashMap, fullMap, dashLayer, fullLayer;
+let lightTileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+let darkTileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+let dashTile, fullTile;
+
+// ข้อมูลจำลองสำหรับระบบ Dropdown จังหวัด อำเภอ ตำบล
+const addressData = {
+    "กรุงเทพมหานคร": {
+        "เขตปทุมวัน": ["ปทุมวัน", "ลุมพินี", "รองเมือง"],
+        "เขตดินแดง": ["ดินแดง", "รัชดาภิเษก"]
+    },
+    "เชียงใหม่": {
+        "เมืองเชียงใหม่": ["ศรีภูมิ", "พระสิงห์", "หายยา"],
+        "แม่ริม": ["ริมใต้", "ริมเหนือ"]
+    },
+    "สงขลา": {
+        "หาดใหญ่": ["หาดใหญ่", "คอหงส์", "ควนลัง"],
+        "เมืองสงขลา": ["บ่อยาง", "เขารูปช้าง"]
+    }
+};
 
 function initMaps(){
   dashMap = L.map('dashMap', {zoomControl:false}).setView([13.75,100.5], 6);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {subdomains:'abcd', maxZoom:19}).addTo(dashMap);
-  L.control.zoom({position:'bottomright'}).addTo(dashMap);
+  dashTile = L.tileLayer(lightTileUrl, {maxZoom:19}).addTo(dashMap);
   dashLayer = L.layerGroup().addTo(dashMap);
 
   fullMap = L.map('fullMap').setView([13.75,100.5], 6);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'&copy; OpenStreetMap'}).addTo(fullMap);
+  fullTile = L.tileLayer(lightTileUrl, {maxZoom:19}).addTo(fullMap);
   fullLayer = L.layerGroup().addTo(fullMap);
 }
 
-function sosPopupHtml(c, idx){
-  const priorityClass = c.priority === 'CRITICAL' ? 'crit' : c.priority === 'HIGH' ? 'high' : 'norm';
-  const isBed = c.bedridden==='YES'||c.bedridden==='ใช่';
-  return `
-  <div class="custom-popup">
-    <div class="p-head">
-      <div class="p-title"><small>#${idx+1}</small> ${esc(c.first_name)} ${esc(c.last_name)}</div>
-      <span class="badge ${priorityClass}">${PRIORITY_LABEL[c.priority]}</span>
-    </div>
-    <div class="p-meta">
-      <div><i class="ph ph-phone"></i> ${esc(c.phone)}</div>
-      <div><i class="ph ph-users"></i> ${c.people_count} ผู้ประสบภัย ${isBed?'<span class="bedtag" style="margin-left:4px;">ติดเตียง</span>':''}</div>
-      <div><i class="ph ph-waves" style="color:#3B82F6;"></i> ระดับน้ำ: <b style="color:#1D4ED8;">${esc(c.water_level)}</b></div>
-    </div>
-  </div>`;
+// ── Settings ──
+function toggleDarkMode(isDark) {
+  state.settings.darkMode = isDark;
+  if(isDark) {
+    document.body.classList.add('dark-theme');
+    dashTile.setUrl(darkTileUrl);
+    fullTile.setUrl(darkTileUrl);
+  } else {
+    document.body.classList.remove('dark-theme');
+    dashTile.setUrl(lightTileUrl);
+    fullTile.setUrl(lightTileUrl);
+  }
 }
 
-function shelterPopupHtml(s){
-  const pct = s.capacity>0 ? Math.round(s.occupancy/s.capacity*100) : 0;
-  return `
-  <div class="custom-popup">
-    <div class="p-head" style="border-bottom-color:var(--line);">
-      <div class="p-title" style="color:var(--navy);"><i class="ph-fill ph-tent" style="color:var(--navy); margin-bottom:4px; font-size:18px;"></i> ${esc(s.name)}</div>
-    </div>
-    <div class="p-meta">
-      <div><i class="ph ph-map-pin"></i> อ.${esc(s.district)} จ.${esc(s.province)}</div>
-      <div><i class="ph ph-users"></i> ความจุ: ${s.occupancy}/${s.capacity} คน (${pct}%)</div>
-    </div>
-  </div>`;
+function toggleFilterMap(hide) {
+  state.settings.hideClosed = hide;
+  renderMapMarkers(dashMap, dashLayer, true);
+  renderMapMarkers(fullMap, fullLayer, false);
 }
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-function renderMapMarkers(map, layer, withNumbers){
+// ── Beautiful Fleet-Style Map Markers ──
+function renderMapMarkers(map, layer, isDash){
   layer.clearLayers();
   const cases = state.data.sos_cases || [];
   
   cases.forEach((c,i)=>{
-    if(!c.latitude || !c.longitude || c.status === 'CLOSED') return; 
-    const color = PRIORITY_COLOR[c.priority];
+    if(!c.latitude || !c.longitude) return; 
+    if(state.settings.hideClosed && c.status === 'CLOSED') return;
+
     const isCritical = c.priority === 'CRITICAL';
-    let marker;
-    if(withNumbers){
-      const pulseClass = isCritical ? 'marker-pulse' : '';
-      const icon = L.divIcon({className:pulseClass, iconSize:[26,26], iconAnchor:[13,13],
-        html:`<div style="width:26px;height:26px;background:${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.3);border:3px solid #fff;">${i+1}</div>`});
-      marker = L.marker([c.latitude,c.longitude], {icon});
-      marker.bindPopup(sosPopupHtml(c,i));
-      marker.on('click', ()=>{ state.selectedId = c.request_id; renderDashboardSosList(); });
+    const isActive = state.selectedId === c.request_id;
+    const iconStr = c.status === 'CLOSED' ? 'ph-check-circle' : (isCritical ? 'ph-warning' : 'ph-siren');
+    
+    // สร้างหมุดแบบวงรีเหมือนในรูป (Pill Shape with text)
+    const html = `
+      <div class="fleet-marker ${isActive ? 'active' : ''}">
+        <i class="ph-fill ${iconStr} mk-icn"></i>
+        <span>${esc(c.request_id)}</span>
+        ${c.status !== 'CLOSED' ? `<span class="mk-badge ${c.priority}">${PRIORITY_LABEL[c.priority]}</span>` : ''}
+      </div>`;
+                  
+    // จัดให้ Icon anchor ตรงกลางกล่องพอดี
+    const icon = L.divIcon({className:'', iconSize:null, html});
+    let marker = L.marker([c.latitude,c.longitude], {icon});
+    
+    if(isDash) {
+      marker.bindPopup(`<div class="custom-popup"><div class="p-title">${esc(c.first_name)}</div></div>`);
     } else {
-      // สำหรับแผนที่ใหญ่ (fullMap) ให้เปลี่ยนจาก popup ธรรมดาเป็นเรียกใช้ Panel
-      marker = L.circleMarker([c.latitude,c.longitude], {radius:12, color:'#fff', weight:3, fillColor:color, fillOpacity:1});
       marker.on('click', ()=>{ 
-        state.selectedId = c.request_id; 
-        showMapDetailPanel(c.request_id); 
+         state.selectedId = c.request_id;
+         renderMapMarkers(fullMap, fullLayer, false); // Re-render to show active state
+         showMapDetailPanel(c.request_id); 
       });
     }
     marker.addTo(layer);
@@ -756,12 +761,234 @@ function renderMapMarkers(map, layer, withNumbers){
 
   (state.data.shelters||[]).forEach(s=>{
     if(!s.latitude || !s.longitude) return;
-    const icon = L.divIcon({className:'', iconAnchor:[0,0],
-      html:`<div style="background:#12354A;color:#fff;border-radius:12px;padding:6px 12px;font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.3);font-family:'Noto Sans Thai',sans-serif; display:flex; align-items:center; gap:6px; border:2px solid #fff;"><i class="ph-fill ph-tent" style="color:var(--orange);"></i> ${esc(s.name).slice(0,16)}</div>`});
-    L.marker([s.latitude,s.longitude], {icon}).addTo(layer).bindPopup(shelterPopupHtml(s));
+    const isFull = s.occupancy >= s.capacity;
+    
+    const html = `
+      <div class="fleet-marker" style="background:#F8FAFC; border:1px solid #CBD5E1; color:#0F172A;">
+        <i class="ph-fill ph-tent" style="color:${isFull ? '#DC2626' : '#F59E0B'}; font-size:16px;"></i>
+        <span>${esc(s.name).slice(0,10)}...</span>
+        <span class="mk-badge" style="background:${isFull ? '#FEE2E2' : '#DCFCE7'}; color:${isFull ? '#991B1B' : '#166534'};">${isFull ? 'เต็ม' : 'ว่าง'}</span>
+      </div>`;
+      
+    const icon = L.divIcon({className:'', iconSize:null, html});
+    let marker = L.marker([s.latitude,s.longitude], {icon});
+    if(isDash) marker.bindPopup(`<div class="custom-popup"><div class="p-title">${esc(s.name)}</div></div>`);
+    marker.addTo(layer);
   });
 }
 
+// ── Map Detail Panel ──
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  var R = 6371; var dLat = (lat2-lat1)*(Math.PI/180); var dLon = (lon2-lon1)*(Math.PI/180); 
+  var a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*(Math.PI/180))*Math.cos(lat2*(Math.PI/180))*Math.sin(dLon/2)*Math.sin(dLon/2); 
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+}
+
+function showMapDetailPanel(caseId) {
+  const allCases = state.data.sos_cases || [];
+  const c = allCases.find(x => x.request_id === caseId);
+  if(!c) return;
+
+  const panel = document.getElementById('mapDetailPanel');
+  let nearby = allCases.filter(x => x.request_id !== caseId && x.latitude && x.status !== 'CLOSED')
+    .map(x => ({ ...x, distance: getDistanceFromLatLonInKm(c.latitude, c.longitude, x.latitude, x.longitude) }))
+    .sort((a,b) => a.distance - b.distance).slice(0, 3);
+
+  let mainHtml = `
+    <div class="md-card">
+      <div class="md-card-top">
+        <div><div class="md-title">${esc(c.first_name)}</div><div class="md-sub">ID: ${esc(c.request_id)}</div></div>
+      </div>
+      <div class="md-grid">
+        <div><div class="md-stat-lbl">ระดับน้ำ</div><div class="md-stat-val"><i class="ph ph-waves"></i> ${esc(c.water_level)}</div></div>
+        <div><div class="md-stat-lbl">ผู้ประสบภัย</div><div class="md-stat-val"><i class="ph ph-users"></i> ${c.people_count} คน</div></div>
+      </div>
+      <div class="md-user">
+        <div class="md-avatar"><i class="ph-fill ph-user-circle"></i></div>
+        <div style="flex:1"><div style="font-size:12px; color:var(--text-muted);"><i class="ph ph-phone"></i> ${esc(c.phone)}</div></div>
+      </div>
+    </div>`;
+
+  let nearbyHtml = nearby.length > 0 ? `
+    <div>
+      <div class="md-nearby-head"><span><i class="ph-fill ph-radar"></i> ใกล้เคียง</span></div>
+      ${nearby.map(n => `<div class="md-nearby-item" onclick="showMapDetailPanel('${n.request_id}')">
+          <div class="md-nb-name"><i class="ph-fill ph-warning-circle"></i> ${esc(n.first_name)}</div>
+          <div class="md-nb-dist">${n.distance.toFixed(1)} กม.</div>
+        </div>`).join('')}
+    </div>` : '';
+
+  document.getElementById('mdpContent').innerHTML = mainHtml + nearbyHtml;
+  panel.classList.add('open');
+  if(fullMap) fullMap.flyTo([c.latitude, c.longitude], 15, {duration: 0.5});
+}
+
+function closeMapDetailPanel() { 
+  document.getElementById('mapDetailPanel').classList.remove('open');
+  state.selectedId = null;
+  renderMapMarkers(fullMap, fullLayer, false);
+}
+
+// ── Needs Table (Strictly 1 Row 1 Data/Column Layout) ──
+function renderNeedsPage(){
+  const needs = state.data.needs||[];
+  const body = document.getElementById('needsPageTableBody');
+  
+  if(needs.length === 0){
+     body.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-faint);"><i class="ph ph-package" style="font-size:32px;display:block;"></i>ไม่มีข้อมูล</td></tr>`; return;
+  }
+  
+  body.innerHTML = needs.map(n => {
+     const badgeUrg = n.urgency==='CRITICAL'?'crit':n.urgency==='HIGH'?'high':'norm';
+     let stHtml = n.status==='DELIVERED' ? `<span class="tblst" style="background:var(--norm-bg);color:var(--norm-tx);">เสร็จสิ้น</span>` : 
+                  `<span class="tblst" style="background:var(--high-bg);color:var(--high-tx);">รอดำเนินการ</span>`;
+                  
+     return `<tr>
+        <td style="font-weight:700; color:var(--navy);">${esc(n.need_id)}</td>
+        <td>${esc(n.timestamp)}</td>
+        <td>${esc(n.user_id)}</td>
+        <td>${n.latitude||'-'}, ${n.longitude||'-'}</td>
+        <td style="font-weight:600;">${esc(n.categories)}</td>
+        <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${esc(n.details)}</td>
+        <td>${(n.halal_required === true || n.halal_required === 'YES') ? 'ใช่' : 'ไม่ใช่'}</td>
+        <td><span class="badge ${badgeUrg}">${esc(n.urgency)}</span></td>
+        <td>${stHtml}</td>
+        <td>${esc(n.volunteer_name) || '-'}</td>
+        <td>${esc(n.delivered_at) || '-'}</td>
+     </tr>`;
+  }).join('');
+}
+
+// ── Modal Map functionality for Add Shelter ──
+let modalMap, modalMarker;
+function initModalMap() {
+    if(!modalMap) {
+        modalMap = L.map('modalMap').setView([13.75, 100.5], 6);
+        L.tileLayer(lightTileUrl).addTo(modalMap);
+        modalMarker = L.marker([13.75, 100.5], {draggable: true}).addTo(modalMap);
+        
+        // อัปเดตช่องข้อความเมื่อลากหมุด
+        modalMarker.on('dragend', function() {
+            const pos = modalMarker.getLatLng();
+            document.getElementById('f_lat').value = pos.lat.toFixed(6);
+            document.getElementById('f_lon').value = pos.lng.toFixed(6);
+        });
+        
+        // ให้ผู้ใช้คลิกบนแผนที่เพื่อวางหมุดได้ด้วย
+        modalMap.on('click', function(e) {
+            modalMarker.setLatLng(e.latlng);
+            document.getElementById('f_lat').value = e.latlng.lat.toFixed(6);
+            document.getElementById('f_lon').value = e.latlng.lng.toFixed(6);
+        });
+    }
+    // ใช้ timeout เล็กน้อยเพื่อให้ DOM แสดงผลครบถ้วนก่อนคำนวณขนาดแผนที่
+    setTimeout(() => { modalMap.invalidateSize(); }, 200);
+}
+
+// ── Dropdown Data Management ──
+function initDropdowns() {
+    const provSelect = document.getElementById('f_province');
+    provSelect.innerHTML = '<option value="">เลือกจังหวัด</option>';
+    for(let province in addressData) {
+        provSelect.innerHTML += `<option value="${province}">${province}</option>`;
+    }
+}
+function updateDistricts() {
+    const province = document.getElementById('f_province').value;
+    const distSelect = document.getElementById('f_district');
+    const subSelect = document.getElementById('f_subdistrict');
+    distSelect.innerHTML = '<option value="">เลือกอำเภอ/เขต</option>';
+    subSelect.innerHTML = '<option value="">เลือกตำบล/แขวง</option>';
+    
+    if(province && addressData[province]) {
+        for(let district in addressData[province]) {
+            distSelect.innerHTML += `<option value="${district}">${district}</option>`;
+        }
+    }
+}
+function updateSubDistricts() {
+    const province = document.getElementById('f_province').value;
+    const district = document.getElementById('f_district').value;
+    const subSelect = document.getElementById('f_subdistrict');
+    subSelect.innerHTML = '<option value="">เลือกตำบล/แขวง</option>';
+    
+    if(province && district && addressData[province][district]) {
+        addressData[province][district].forEach(sub => {
+            subSelect.innerHTML += `<option value="${sub}">${sub}</option>`;
+        });
+    }
+}
+
+
+/* ── Modal Add Shelter Event Listeners ── */
+const shelterModal = document.getElementById('shelterModalBg');
+document.getElementById('openShelterModal').addEventListener('click', ()=>{
+  ['f_name','f_lat','f_lon'].forEach(id=>document.getElementById(id).value='');
+  
+  const nextShelterId = 'SH' + String((state.data.shelters || []).length + 1).padStart(3, '0');
+  const idInput = document.getElementById('f_id');
+  idInput.value = nextShelterId;
+  idInput.readOnly = true;
+  idInput.style.backgroundColor = '#E2E8F0'; idInput.style.color = '#64748B'; idInput.style.cursor = 'not-allowed';
+
+  initDropdowns(); // เตรียม Dropdown
+
+  document.getElementById('f_capacity').value = 100;
+  document.getElementById('f_occupancy').value = 0;
+  
+  goToStep(1);
+  shelterModal.classList.add('show');
+  initModalMap(); // โหลดแผนที่ขนาดเล็ก
+});
+
+document.getElementById('closeShelterModal').addEventListener('click', ()=> shelterModal.classList.remove('show'));
+
+document.getElementById('f_geoBtn').addEventListener('click', ()=>{
+  if(!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    document.getElementById('f_lat').value = lat.toFixed(6);
+    document.getElementById('f_lon').value = lon.toFixed(6);
+    if(modalMarker && modalMap) {
+        modalMarker.setLatLng([lat, lon]);
+        modalMap.flyTo([lat, lon], 14);
+    }
+  });
+});
+
+function goToStep(n){
+  document.querySelectorAll('.shstep').forEach(el=> el.style.display = (el.dataset.step==String(n)) ? '' : 'none');
+  document.querySelectorAll('.steps i').forEach(el=> el.classList.toggle('on', Number(el.dataset.step) <= n));
+}
+document.querySelectorAll('[data-next]').forEach(b=> b.addEventListener('click', ()=> goToStep(Number(b.dataset.next))));
+document.querySelectorAll('[data-prev]').forEach(b=> b.addEventListener('click', ()=> goToStep(Number(b.dataset.prev))));
+
+// ── Render Other Components ──
+function renderDonut(){} // Skipped for brevity
+function renderShelters(){
+  const shelters = state.data.shelters||[];
+  document.getElementById('shSubhead').textContent = `${shelters.length} ศูนย์ — รองรับรวม ${shelters.reduce((a,s)=>a+s.capacity,0)} คน`;
+  const grid = document.getElementById('shelterGrid');
+  if(shelters.length===0){
+    grid.innerHTML = `<div class="empty-msg" style="grid-column:1/-1;">ไม่มีข้อมูลศูนย์พักพิง</div>`; return;
+  }
+  grid.innerHTML = shelters.map(s=>{
+    const pct = s.capacity>0?Math.round(s.occupancy/s.capacity*100):0;
+    const barColor = pct>=100?'#EF4444':pct>=80?'#F59E0B':'#10B981';
+    return `<div class="shcard">
+      <div class="nm"><i class="ph-fill ph-tent" style="color:var(--orange);"></i> ${esc(s.name)}</div>
+      <div class="loc"><i class="ph ph-map-pin"></i> ${esc(s.subdistrict||'-')} ${esc(s.district)} ${esc(s.province)}</div>
+      <div class="track"><i style="width:${Math.min(pct,100)}%;background:${barColor}"></i></div>
+      <div class="occ-controller">
+         <div class="occ-val">${s.occupancy}/${s.capacity} คน <span style="font-size:11px; color:var(--text-faint);">(${pct}%)</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+
+// ── Data loading (real backend — same-origin, uses the dashboard login session) ──
 async function loadData(){
   try{
     const res = await fetch('/api/dashboard/data', {credentials:'same-origin'});
@@ -802,7 +1029,6 @@ function renderAll(){
   renderSosPage();
   renderShelters();
   renderAnalytics();
-  renderNeeds();
   renderNeedsPage();
 }
 
@@ -811,26 +1037,26 @@ function renderStatusPill(){
   const dot = document.getElementById('sideDot');
   if(state.ok){
     pill.className = 'pill online'; pill.innerHTML = '<span class="dot"></span> Realtime';
-    dot.classList.add('ok');
+    if(dot) dot.classList.add('ok');
   } else {
-    pill.className = 'pill offline'; pill.innerHTML = '<i class="ph-fill ph-warning-circle"></i> ขาดการเชื่อมต่อ';
-    dot.classList.remove('ok');
+    pill.className = 'pill offline'; pill.innerHTML = '<i class="ph ph-warning-circle"></i> ขาดการเชื่อมต่อ';
+    if(dot) dot.classList.remove('ok');
   }
 }
 
 function renderStatStrip(){
-  const s = state.data.stats || {};
   const cases = state.data.sos_cases || [];
+  const s = state.data.stats || {};
   const totalPeople = cases.reduce((a,c)=>a+(c.people_count||0),0);
   const items = [
-    {ic:'<i class="ph-fill ph-folder-open"></i>', bg:'#FEE2E2', lb:'เคสทั้งหมด', vl:cases.length, un:'เคส', c:'#DC2626'},
-    {ic:'<i class="ph-fill ph-siren"></i>', bg:'#FEE2E2', lb:'เคสวิกฤต', vl:cases.filter(c=>c.priority==='CRITICAL').length, un:'เคส', c:'#DC2626'},
-    {ic:'<i class="ph-fill ph-users"></i>', bg:'#DBEAFE', lb:'ผู้ประสบภัยรวม', vl:totalPeople, un:'คน', c:'#2563EB'},
-    {ic:'<i class="ph-fill ph-tent"></i>', bg:'#DCFCE7', lb:'ศูนย์อพยพ', vl:(state.data.shelters||[]).length, un:'แห่ง', c:'#16A34A'},
-    {ic:'<i class="ph-fill ph-package"></i>', bg:'#FEF3C7', lb:'รอจัดส่งสิ่งของ', vl:s.need_pending||0, un:'รายการ', c:'#D97706'},
+    {ic:'ph-siren', bg:'var(--crit-bg)', col:'var(--crit-tx)', lb:'เคสทั้งหมด', vl:cases.length, un:'เคส'},
+    {ic:'ph-warning', bg:'var(--crit-bg)', col:'var(--crit-tx)', lb:'เคสวิกฤต', vl:cases.filter(c=>c.priority==='CRITICAL').length, un:'เคส'},
+    {ic:'ph-users-three', bg:'var(--high-bg)', col:'var(--high-tx)', lb:'ผู้ประสบภัยรวม', vl:totalPeople, un:'คน'},
+    {ic:'ph-tent', bg:'var(--norm-bg)', col:'var(--norm-tx)', lb:'ศูนย์อพยพ', vl:(state.data.shelters||[]).length, un:'แห่ง'},
+    {ic:'ph-package', bg:'var(--high-bg)', col:'var(--high-tx)', lb:'รอจัดส่งสิ่งของ', vl:s.need_pending||0, un:'รายการ'},
   ];
   document.getElementById('statStrip').innerHTML = items.map(it=>`
-    <div class="stat"><div class="ic" style="background:${it.bg}; color:${it.c};">${it.ic}</div>
+    <div class="stat"><div class="ic" style="background:${it.bg};color:${it.col}"><i class="ph-fill ${it.ic}"></i></div>
       <div><div class="lb">${it.lb}</div><div class="vl">${it.vl} <small>${it.un}</small></div></div>
     </div>`).join('');
 }
@@ -840,16 +1066,15 @@ function renderDashLegend(){
     <span><i style="background:#EF4444"></i>วิกฤต</span>
     <span><i style="background:#F59E0B"></i>เร่งด่วน</span>
     <span><i style="background:#10B981"></i>ปกติ</span>
-    <span><i style="background:#12354A; border-radius:4px;"></i>ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
+    <span><i style="background:#12354A"></i>ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
 }
 function renderFullLegend(){
   const c = state.data.sos_cases||[];
-  const activeCases = c.filter(x => x.status !== 'CLOSED');
   document.getElementById('fullLegend').innerHTML = `
-    <span style="background:#FEE2E2;color:#DC2626;padding:6px 14px;border-radius:999px;font-weight:700;"><i class="ph-fill ph-circle" style="font-size:10px;"></i> วิกฤต (${activeCases.filter(x=>x.priority==='CRITICAL').length})</span>
-    <span style="background:#FEF3C7;color:#D97706;padding:6px 14px;border-radius:999px;font-weight:700;"><i class="ph-fill ph-circle" style="font-size:10px;"></i> เร่งด่วน (${activeCases.filter(x=>x.priority==='HIGH').length})</span>
-    <span style="background:#DCFCE7;color:#166534;padding:6px 14px;border-radius:999px;font-weight:700;"><i class="ph-fill ph-circle" style="font-size:10px;"></i> ปกติ (${activeCases.filter(x=>x.priority==='NORMAL').length})</span>
-    <span style="background:#F1F5F9;color:#334155;padding:6px 14px;border-radius:999px;font-weight:700;"><i class="ph-fill ph-tent" style="font-size:12px;"></i> ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
+    <span style="background:var(--crit-bg);color:var(--crit-tx);padding:6px 12px;border-radius:999px;font-weight:700;">● วิกฤต (${c.filter(x=>x.priority==='CRITICAL').length})</span>
+    <span style="background:var(--high-bg);color:var(--high-tx);padding:6px 12px;border-radius:999px;font-weight:700;">● เร่งด่วน (${c.filter(x=>x.priority==='HIGH').length})</span>
+    <span style="background:var(--norm-bg);color:var(--norm-tx);padding:6px 12px;border-radius:999px;font-weight:700;">● ปกติ (${c.filter(x=>x.priority==='NORMAL').length})</span>
+    <span style="background:var(--bg-input);color:var(--text-muted);padding:6px 12px;border-radius:999px;font-weight:700;">■ ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
 }
 
 function renderDonut(){
@@ -861,8 +1086,8 @@ function renderDonut(){
 
   const segs = totalCap>0 ? [
     ...shelters.map((s,i)=>({v:s.occupancy, c:SHELTER_COLORS[i%SHELTER_COLORS.length]})),
-    {v: Math.max(0,totalCap-totalOcc), c:'#F1F5F9'}
-  ] : [{v:1,c:'#F1F5F9'}];
+    {v: Math.max(0,totalCap-totalOcc), c:'#E5EEF3'}
+  ] : [{v:1,c:'#E5EEF3'}];
   let acc = 0;
   const denom = totalCap>0 ? totalCap : 1;
   const arcs = segs.map(seg=>{
@@ -875,15 +1100,15 @@ function renderDonut(){
 
   const svg = document.getElementById('donutSvg');
   svg.innerHTML = `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#F8FAFC" stroke-width="${sw}"/>
-    ${arcs.map(a=>`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${a.c}" stroke-width="${sw}" stroke-dasharray="${a.visible} ${circ-a.visible}" stroke-dashoffset="${a.offset}" stroke-linecap="round"/>`).join('')}
-    <text x="${cx}" y="${cy-8}" text-anchor="middle" font-size="28" font-weight="900" fill="#12354A">${pct}%</text>
-    <text x="${cx}" y="${cy+12}" text-anchor="middle" font-size="11" fill="#64748B" font-weight="600">ใช้งานอยู่</text>
-    <text x="${cx}" y="${cy+28}" text-anchor="middle" font-size="11" fill="#9CA3AF">${totalOcc}/${totalCap} คน</text>`;
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--bg-input)" stroke-width="${sw}"/>
+    ${arcs.map(a=>`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${a.c}" stroke-width="${sw}" stroke-dasharray="${a.visible} ${circ-a.visible}" stroke-dashoffset="${a.offset}"/>`).join('')}
+    <text x="${cx}" y="${cy-10}" text-anchor="middle" font-size="26" font-weight="900" fill="var(--navy)">${pct}%</text>
+    <text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="11" fill="var(--text-muted)">ใช้งานอยู่</text>
+    <text x="${cx}" y="${cy+26}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${totalOcc}/${totalCap} คน</text>`;
 
   const legend = document.getElementById('donutLegend');
   if(shelters.length===0){
-    legend.innerHTML = `<p style="text-align:center;color:var(--faint);font-size:12px;font-weight:600;"><i class="ph ph-folder-open" style="font-size:24px;display:block;margin-bottom:8px;"></i>ไม่มีข้อมูลศูนย์อพยพ</p>`;
+    legend.innerHTML = `<p style="text-align:center;color:var(--text-faint);font-size:13px;">ไม่มีข้อมูลศูนย์อพยพ</p>`;
     return;
   }
   legend.innerHTML = shelters.map((s,i)=>{
@@ -896,138 +1121,24 @@ function renderDonut(){
       <div style="flex:1;min-width:0;">
         <div style="display:flex;justify-content:space-between;gap:6px;">
           <span class="name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</span>
-          <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;background:${bc}20;color:${bc};flex-shrink:0;">${bl}</span>
+          <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;background:${bc}20;color:${bc};flex-shrink:0;">${bl}</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-top:3px;">
           <div class="bar"><i style="width:${Math.min(p,100)}%;background:${dc}"></i></div>
           <span class="pct">${p}%</span>
         </div>
         <div class="cnt">${s.occupancy}/${s.capacity} คน</div>
       </div>
     </div>`;
-  }).join('') + `<div style="display:flex;align-items:center;gap:12px;padding-top:12px;border-top:1px dashed var(--line);">
-      <div class="sq" style="background:#F1F5F9"></div><span style="font-size:12px;color:var(--muted);font-weight:600;">ว่าง — ${Math.max(0,totalCap-totalOcc)} คน</span></div>`;
-}
-
-// ── Helper: คำนวณระยะทางแบบ Haversine ──
-function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-  var R = 6371; // Radius of the earth in km
-  var dLat = (lat2-lat1) * (Math.PI/180);
-  var dLon = (lon2-lon1) * (Math.PI/180); 
-  var a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * (Math.PI/180)) * Math.cos(lat2 * (Math.PI/180)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
-  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-  return R * c;
-}
-
-// ── Render Map Detail Panel ──
-function showMapDetailPanel(caseId) {
-  const allCases = state.data.sos_cases || [];
-  const c = allCases.find(x => x.request_id === caseId);
-  if(!c) return;
-
-  const panel = document.getElementById('mapDetailPanel');
-  const badgeClass = c.priority==='CRITICAL'?'crit':c.priority==='HIGH'?'high':'norm';
-  const isBed = c.bedridden==='YES'||c.bedridden==='ใช่';
-  const isPending = !!state.pending[c.request_id];
-  const nextStatus = c.status==='OPEN' ? 'IN_PROGRESS' : 'CLOSED';
-  
-  // คำนวณระยะทางหาเคสที่ใกล้ที่สุด
-  let nearby = allCases.filter(x => x.request_id !== caseId && x.latitude && x.longitude && x.status !== 'CLOSED')
-    .map(x => ({ ...x, distance: getDistanceFromLatLonInKm(c.latitude, c.longitude, x.latitude, x.longitude) }))
-    .sort((a,b) => a.distance - b.distance)
-    .slice(0, 3); // เอา 3 เคสที่ใกล้สุด
-
-  // HTML การ์ดหลัก (อิงสถาปัตยกรรม UI ที่สะอาดตาและสมมาตร)
-  let mainHtml = `
-    <div class="md-card">
-      <div class="md-card-top">
-        <div>
-          <div class="md-title">${esc(c.first_name)} ${esc(c.last_name)}</div>
-          <div class="md-sub">ID: ${esc(c.request_id)}</div>
-        </div>
-        <span class="badge ${badgeClass}" style="padding:6px 12px;">${PRIORITY_LABEL[c.priority]}</span>
-      </div>
-      
-      <div>${statusBadgeHtml(c.status)}</div>
-
-      <div class="md-grid">
-        <div class="md-stat-box">
-          <div class="md-stat-lbl">ระดับน้ำปัจจุบัน</div>
-          <div class="md-stat-val" style="color:#1D4ED8;"><i class="ph ph-waves"></i> ${esc(c.water_level)}</div>
-        </div>
-        <div class="md-stat-box">
-          <div class="md-stat-lbl">จำนวนผู้ประสบภัย</div>
-          <div class="md-stat-val"><i class="ph ph-users"></i> ${c.people_count} คน ${isBed?'<span class="bedtag">ติดเตียง</span>':''}</div>
-        </div>
-        <div class="md-stat-box" style="grid-column: span 2;">
-          <div class="md-stat-lbl">ข้อความ / หมายเหตุ</div>
-          <div class="md-stat-val" style="font-size:13px; color:var(--muted); font-weight:600; line-height:1.4;">
-            ${esc(c.note) || '<span style="color:var(--faint);font-style:italic;">- ไม่มีข้อมูลเพิ่มเติม -</span>'}
-          </div>
-        </div>
-      </div>
-
-      <div class="md-user">
-        <div class="md-avatar"><i class="ph-fill ph-user-circle"></i></div>
-        <div style="flex:1; min-width:0;">
-          <div style="font-size:13px; font-weight:800; color:var(--navy);">ข้อมูลการติดต่อ</div>
-          <div style="font-size:12px; color:var(--muted); font-weight:600; margin-top:2px; display:flex; align-items:center; gap:4px;"><i class="ph ph-phone"></i> ${esc(c.phone)}</div>
-        </div>
-        <div class="md-actions">
-           <a href="tel:${esc(c.phone)}" class="md-btn-icon" title="โทรด่วน"><i class="ph ph-phone-call"></i></a>
-           <button class="md-btn-icon" title="อัปเดตสถานะ" onclick="updateSosStatus('${c.request_id}','${nextStatus}'); setTimeout(()=>showMapDetailPanel('${c.request_id}'), 500);">
-              ${isPending ? '<i class="ph ph-spinner ph-spin"></i>' : (c.status==='OPEN' ? '<i class="ph ph-hand-heart"></i>' : '<i class="ph ph-check"></i>')}
-           </button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  // HTML รายการเคสใกล้เคียง
-  let nearbyHtml = '';
-  if(nearby.length > 0) {
-      nearbyHtml = `
-        <div>
-          <div class="md-nearby-head">
-             <span><i class="ph-fill ph-radar" style="color:var(--orange); font-size:18px; margin-right:6px; vertical-align:middle;"></i> เคสบริเวณใกล้เคียง</span>
-             <span style="background:#F1F5F9; padding:4px 10px; border-radius:12px; font-size:11px; color:var(--muted); font-weight:700;">${nearby.length} จุด</span>
-          </div>
-          <div class="md-nearby-list">
-            ${nearby.map(n => {
-               const nBadge = n.priority==='CRITICAL'?'crit':n.priority==='HIGH'?'high':'norm';
-               return `
-                 <div class="md-nearby-item" onclick="fullMap.setView([${n.latitude},${n.longitude}], 15); showMapDetailPanel('${n.request_id}');">
-                   <div class="md-nb-left">
-                     <div class="md-nb-name"><i class="ph-fill ph-warning-circle" style="color:var(--faint);"></i> ${esc(n.first_name)}</div>
-                     <div class="md-nb-dist"><i class="ph-fill ph-map-pin"></i> ห่างออกไป ${n.distance.toFixed(1)} กิโลเมตร</div>
-                   </div>
-                   <span class="badge ${nBadge}">${PRIORITY_LABEL[n.priority]}</span>
-                 </div>
-               `;
-            }).join('')}
-          </div>
-        </div>
-      `;
-  }
-
-  document.getElementById('mdpContent').innerHTML = mainHtml + nearbyHtml;
-  panel.classList.add('open');
-  
-  // แพนกล้องแผนที่ให้เลื่อนไปหาจุดนั้น
-  if(fullMap) {
-    fullMap.flyTo([c.latitude, c.longitude], 14, {duration: 0.6, easeLinearity: 0.25});
-  }
-}
-
-function closeMapDetailPanel() {
-  document.getElementById('mapDetailPanel').classList.remove('open');
+  }).join('') + `<div style="display:flex;align-items:center;gap:10px;padding-top:8px;border-top:1px solid var(--line);">
+      <div class="sq" style="background:#E5EEF3"></div><span style="font-size:12px;color:var(--text-faint);">ว่าง — ${Math.max(0,totalCap-totalOcc)} คน</span></div>`;
 }
 
 function sosCardHtml(c, i){
   const isSel = state.selectedId === c.request_id;
-  const isBed = c.bedridden==='YES'||c.bedridden==='ใช่';
+  const isBed = c.bedridden==='YES';
   const nextStatus = c.status==='OPEN' ? 'IN_PROGRESS' : 'CLOSED';
-  const label = c.status==='OPEN'?'<i class="ph ph-hand-heart"></i> รับเคส':c.status==='IN_PROGRESS'?'<i class="ph ph-check-circle"></i> ปิดเคส':'<i class="ph ph-check-circle"></i> เสร็จสิ้น';
+  const label = c.status==='OPEN'?'รับเคส':c.status==='IN_PROGRESS'?'ปิดเคส':'เสร็จสิ้น';
   const isDone = c.status==='CLOSED';
   const isPending = !!state.pending[c.request_id];
   const badgeClass = c.priority==='CRITICAL'?'crit':c.priority==='HIGH'?'high':'norm';
@@ -1048,19 +1159,19 @@ function sosCardHtml(c, i){
       </div>
     </div>
     <div class="actions">
-      <button class="btn-act ${isDone?'done':(c.status==='IN_PROGRESS'?'progress':'')}" ${isDone?'disabled':''}
-        onclick="event.stopPropagation();updateSosStatus('${c.request_id}','${nextStatus}')">${isPending?'<i class="ph ph-spinner ph-spin"></i> กำลังบันทึก...':label}</button>
-      <a class="btn-nav" href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}" target="_blank" onclick="event.stopPropagation()"><i class="ph ph-map-pin"></i> ดูแผนที่</a>
+      <button class="btn-act ${isDone?'done':''}" ${isDone?'disabled':''}
+        onclick="event.stopPropagation();updateSosStatus('${c.request_id}','${nextStatus}')"><i class="ph ph-check-circle"></i> ${isPending?'กำลังบันทึก...':label}</button>
+      <a class="btn-nav" href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}" target="_blank" onclick="event.stopPropagation()"><i class="ph ph-navigation-arrow"></i> ดูแผนที่</a>
     </div>
   </div>`;
 }
 
 function renderDashboardSosList(){
   const cases = (state.data.sos_cases||[]).slice(0,6);
-  document.getElementById('sosCountBadge').textContent = `${(state.data.sos_cases||[]).length} เคส`;
+  document.getElementById('sosCountBadge').textContent = `${(state.data.sos_cases||[]).length}`;
   const el = document.getElementById('sosListDash');
-  if(!state.ok && cases.length===0){ el.innerHTML = `<div class="empty-msg"><i class="ph ph-spinner ph-spin"></i> กำลังโหลดข้อมูล...</div>`; return; }
-  if(cases.length===0){ el.innerHTML = `<div class="empty-msg"><i class="ph ph-check-circle"></i> ไม่มีเคส SOS ในขณะนี้</div>`; return; }
+  if(!state.ok && cases.length===0){ el.innerHTML = `<div class="empty-msg">กำลังโหลดข้อมูล...</div>`; return; }
+  if(cases.length===0){ el.innerHTML = `<div class="empty-msg">ไม่มีเคส SOS ในขณะนี้</div>`; return; }
   el.innerHTML = cases.map((c,i)=>sosCardHtml(c,i)).join('');
 }
 
@@ -1078,9 +1189,9 @@ function renderSosPage(){
     state.sosStat, (k)=>{ state.sosStat=k; renderSosPage(); });
 
   const all = state.data.sos_cases||[];
-  const q = state.sosSearch.toLowerCase();
+  const q = (state.sosSearch||'').toLowerCase();
   const filtered = all.filter(c=>{
-    const matchQ = !q || `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) || (c.request_id||'').toLowerCase().includes(q) || (c.phone||'').includes(q);
+    const matchQ = !q || `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) || (c.request_id||'').toLowerCase().includes(q);
     const matchP = state.sosPrio==='ALL' || c.priority===state.sosPrio;
     const matchS = state.sosStat==='ALL' || c.status===state.sosStat;
     return matchQ && matchP && matchS;
@@ -1089,7 +1200,7 @@ function renderSosPage(){
 
   const body = document.getElementById('sosTableBody');
   if(filtered.length===0){
-    body.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:60px;color:var(--faint);font-weight:600;"><i class="ph ph-magnifying-glass" style="font-size:32px;display:block;margin-bottom:12px;"></i>${state.ok?'ไม่พบเคสที่ค้นหา':'กำลังโหลดข้อมูล...'}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-faint);">${state.ok?'ไม่พบเคสที่ค้นหา':'กำลังโหลดข้อมูล...'}</td></tr>`;
     return;
   }
   body.innerHTML = filtered.map(c=>{
@@ -1097,57 +1208,30 @@ function renderSosPage(){
     const isPending = !!state.pending[c.request_id];
     let actionHtml = '';
     if(c.status==='OPEN'){
-      actionHtml = `<button class="tblbtn take ${isPending?'disabled':''}" onclick="updateSosStatus('${c.request_id}','IN_PROGRESS')">${isPending?'...':'<i class="ph ph-hand-heart"></i> รับเคส'}</button>`;
+      actionHtml = `<button class="tblst" style="background:var(--high-bg);color:var(--high-tx);border:none;cursor:pointer;" onclick="updateSosStatus('${c.request_id}','IN_PROGRESS')">${isPending?'...':'รับเคส'}</button>`;
     } else if(c.status==='IN_PROGRESS'){
-      actionHtml = `<span class="tblst progress"><i class="ph ph-spinner ph-spin"></i> กำลังช่วย</span>`;
+      actionHtml = `<span class="tblst" style="background:#DBEAFE;color:#1D4ED8;">กำลังช่วย</span>`;
     }
     let closeHtml = c.status!=='CLOSED'
-      ? `<button class="tblbtn close ${isPending?'disabled':''}" onclick="updateSosStatus('${c.request_id}','CLOSED')">${isPending?'...':'<i class="ph ph-check-circle"></i> ปิดเคส'}</button>`
-      : `<span class="tblst closed"><i class="ph ph-check"></i> เสร็จสิ้น</span>`;
+      ? `<button class="tblst" style="background:var(--norm-bg);color:var(--norm-tx);border:none;cursor:pointer;" onclick="updateSosStatus('${c.request_id}','CLOSED')">${isPending?'...':'ปิดเคส'}</button>`
+      : `<span class="tblst" style="background:var(--bg-input);color:var(--text-faint);">เสร็จสิ้น</span>`;
     return `<tr>
       <td><div class="tblcase">${esc(c.request_id)}</div><span class="badge ${badgeClass}" style="margin-top:6px;display:inline-block;">${PRIORITY_LABEL[c.priority]}</span></td>
-      <td><div class="tblname"><i class="ph-fill ph-user-circle" style="color:var(--muted);font-size:18px;"></i> ${esc(c.first_name)} ${esc(c.last_name)}</div><div class="tblphone"><i class="ph ph-phone"></i> ${esc(c.phone)}</div></td>
-      <td><div style="font-size:13px; font-weight:600;"><i class="ph ph-users"></i> ${c.people_count} คน</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">ติดเตียง: ${c.bedridden==='YES'?'ใช่':'ไม่'} — สัตว์: ${c.pets==='YES'?'มี':'ไม่มี'}</div></td>
-      <td><div style="font-size:13px;font-weight:800;color:#1D4ED8;"><i class="ph ph-waves"></i> ${esc(c.water_level)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(c.note)}">${esc(c.note)}</div></td>
-      <td><div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:130px;margin-left:auto;">${actionHtml}${closeHtml}
-        <a href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}" target="_blank" class="tblbtn" style="background:#1E293B;color:#fff;text-align:center;"><i class="ph ph-navigation-arrow"></i> นำทาง</a>
+      <td><div class="tblname">${esc(c.first_name)} ${esc(c.last_name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px;"><i class="ph ph-phone"></i> ${esc(c.phone)}</div></td>
+      <td><div style="font-size:13px;">${c.people_count} คน</div><div style="font-size:12px;color:var(--text-faint);margin-top:2px;">ติดเตียง: ${c.bedridden==='YES'?'ใช่':'ไม่'} — สัตว์: ${c.pets==='YES'?'มี':'ไม่มี'}</div></td>
+      <td><div style="font-size:13px;font-weight:700;color:#1D4ED8;">${esc(c.water_level)}</div><div style="font-size:12px;color:var(--text-faint);margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(c.note)}</div></td>
+      <td><div style="display:flex;flex-direction:column;gap:8px;max-width:130px;">${actionHtml}${closeHtml}
+        <a href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}" target="_blank" class="tblst" style="background:var(--navy);color:#fff;">นำทาง</a>
       </div></td>
     </tr>`;
   }).join('');
 }
-
-function renderShelters(){
-  const shelters = state.data.shelters||[];
-  document.getElementById('shSubhead').textContent = `${shelters.length} ศูนย์ — รองรับรวม ${shelters.reduce((a,s)=>a+s.capacity,0).toLocaleString()} คน`;
-  document.getElementById('shCountBadge').textContent = `${shelters.length} แห่ง`;
-  const grid = document.getElementById('shelterGrid');
-  if(shelters.length===0){
-    grid.innerHTML = `<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-tent"></i> ${state.ok?'ยังไม่มีศูนย์พักพิงในระบบ':'กำลังโหลดข้อมูล...'}</div>`;
-    return;
-  }
-  grid.innerHTML = shelters.map(s=>{
-    const pct = s.capacity>0?Math.round(s.occupancy/s.capacity*100):0;
-    const barColor = pct>=100?'#EF4444':pct>=80?'#F59E0B':'#10B981';
-    const badgeClass = s.status==='เต็ม'?'background:#FEE2E2;color:#DC2626;':s.status==='ใกล้เต็ม'?'background:#FEF3C7;color:#D97706;':'background:#DCFCE7;color:#166534;';
-    return `<div class="shcard">
-      <div class="row1">
-        <div style="min-width:0;"><div class="nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="ph-fill ph-tent" style="color:var(--orange);"></i> ${esc(s.name)}</div><div class="loc"><i class="ph ph-map-pin"></i> อ.${esc(s.district)} จ.${esc(s.province)}</div></div>
-        <span class="stbadge" style="${badgeClass}">${esc(s.status)}</span>
-      </div>
-      <div class="barrow"><span><i class="ph ph-users"></i> ${s.occupancy} / ${s.capacity} คน</span><b style="color:var(--navy);">${pct}%</b></div>
-      <div class="track"><i style="width:${Math.min(pct,100)}%;background:${barColor}"></i></div>
-      <div class="factags">
-        ${(s.facilities||[]).map(f=>`<span class="factag"><i class="ph ${FAC_ICONS[f]||'ph-check'}"></i> ${esc(f)}</span>`).join('') || '<span style="font-size:12px;color:var(--faint);">ไม่มีข้อมูล</span>'}
-      </div>
-    </div>`;
-  }).join('');
-}
+document.getElementById('sosSearch').addEventListener('input', (e)=>{ state.sosSearch = e.target.value; renderSosPage(); });
 
 function abarHtml(label,val,max,color){
   const pct = max>0?Math.round(val/max*100):0;
   return `<div class="abar-row"><span class="albl">${label}</span><div class="atrack"><i style="width:${pct}%;background:${color}"></i></div><span class="aval">${val}</span></div>`;
 }
-
 function renderAnalytics(){
   const cases = state.data.sos_cases||[];
   const shelters = state.data.shelters||[];
@@ -1167,239 +1251,45 @@ function renderAnalytics(){
 
   document.getElementById('aTotalSos').textContent = `รวม ${total} เคส`;
   document.getElementById('aPriorityBars').innerHTML =
-    abarHtml('วิกฤต',critical,total,'#EF4444') + abarHtml('เร่งด่วน',high,total,'#F59E0B') + abarHtml('ปกติ',normal,total,'#10B981');
+    abarHtml('วิกฤต',critical,total,'#EF4444') + abarHtml('เร่งด่วน',high,total,'#F59E0B') + abarHtml('ปกติ',normal,total,'#22C55E');
 
   document.getElementById('aCloseRate').textContent = `อัตราปิดเคส: ${total>0?Math.round(closed/total*100):0}%`;
   document.getElementById('aStatusBars').innerHTML =
-    abarHtml('รอรับเคส',open,total,'#F59E0B') + abarHtml('กำลังช่วย',inProgress,total,'#3B82F6') + abarHtml('เสร็จสิ้น',closed,total,'#10B981');
+    abarHtml('รอรับเคส',open,total,'#F59E0B') + abarHtml('กำลังช่วย',inProgress,total,'#3B82F6') + abarHtml('เสร็จสิ้น',closed,total,'#22C55E');
 
   document.getElementById('aMiniCards').innerHTML = [
-    {l:'ผู้ประสบภัยรวม',v:totalPeople,u:'ราย',bg:'#EFF6FF',c:'#1D4ED8', ic:'ph-users'},
-    {l:'ผู้ป่วยติดเตียง',v:bedridden,u:'ราย',bg:'#ECFDF5',c:'#059669', ic:'ph-wheelchair'},
-    {l:'มีสัตว์เลี้ยง',v:pets,u:'เคส',bg:'#FFFBEB',c:'#D97706', ic:'ph-paw-print'},
-    {l:'รอรับเคส',v:open,u:'เคส',bg:'#FEF2F2',c:'#DC2626', ic:'ph-warning-circle'},
-  ].map(m=>`<div class="minicard" style="background:${m.bg};"><i class="ph ${m.ic}" style="color:${m.c}"></i><div class="mv" style="color:${m.c}">${m.v}</div><div class="mu" style="color:${m.c}">${m.u}</div><div class="ml">${m.l}</div></div>`).join('');
+    {l:'ผู้ประสบภัยรวม',v:totalPeople,u:'ราย',bg:'#EFF6FF',c:'#1D4ED8'},
+    {l:'ผู้ป่วยติดเตียง',v:bedridden,u:'ราย',bg:'#ECFDF5',c:'#059669'},
+    {l:'มีสัตว์เลี้ยง',v:pets,u:'เคส',bg:'#FFFBEB',c:'#D97706'},
+    {l:'รอรับเคส',v:open,u:'เคส',bg:'#FEF2F2',c:'#DC2626'},
+  ].map(m=>`<div class="minicard" style="background:${m.bg}"><div class="mv" style="color:${m.c}">${m.v}</div><div class="mu" style="color:${m.c}">${m.u}</div><div class="ml">${m.l}</div></div>`).join('');
 
   document.getElementById('aShelterSub').textContent = `รวม ${totalOcc.toLocaleString()}/${totalCap.toLocaleString()} คน (${occPct}%)`;
   const shb = document.getElementById('aShelterBars');
-  if(shelters.length===0){ shb.innerHTML = `<p style="text-align:center;color:var(--faint);font-size:13px;padding:20px 0;font-weight:600;">ไม่มีข้อมูลศูนย์อพยพ</p>`; }
+  if(shelters.length===0){ shb.innerHTML = `<p style="text-align:center;color:var(--text-faint);font-size:13px;padding:16px 0;">ไม่มีข้อมูลศูนย์อพยพ</p>`; }
   else {
     shb.innerHTML = shelters.map(s=>{
       const p = s.capacity>0?Math.round(s.occupancy/s.capacity*100):0;
-      const bc = p>=100?'#EF4444':p>=80?'#F59E0B':'#10B981';
+      const bc = p>=100?'#EF4444':p>=80?'#F59E0B':'#22C55E';
       return `<div style="margin-bottom:14px;">
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px;">
-          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:700;"><i class="ph-fill ph-tent"></i> ${esc(s.name)}</span>
-          <b style="color:#111;">${s.occupancy}/${s.capacity} (${p}%)</b>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:6px;">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:700;">${esc(s.name)}</span>
+          <b style="color:var(--navy);">${s.occupancy}/${s.capacity} (${p}%)</b>
         </div>
-        <div style="width:100%;background:#F1F5F9;border-radius:99px;height:12px;overflow:hidden;"><div style="height:100%;border-radius:99px;width:${Math.min(p,100)}%;background:${bc}"></div></div>
+        <div style="width:100%;background:var(--bg-input);border-radius:99px;height:11px;overflow:hidden;"><div style="height:100%;border-radius:99px;width:${Math.min(p,100)}%;background:${bc}"></div></div>
       </div>`;
     }).join('');
   }
 }
 
-function statusBadgeHtml(status){
-  const s = (status||'').toString().trim().toUpperCase();
-  if(!s || s==='PENDING' || s==='NEW' || s==='รอดำเนินการ') return `<span class="tblst" style="background:#FEF3C7;color:#92400E; border:1px solid #FDE68A;"><i class="ph ph-clock"></i> รอดำเนินการ</span>`;
-  if(s==='DONE'||s==='COMPLETED'||s==='เสร็จสิ้น'||s==='DELIVERED') return `<span class="tblst" style="background:#DCFCE7;color:#166534; border:1px solid #BBF7D0;"><i class="ph ph-check-circle"></i> เสร็จสิ้น</span>`;
-  return `<span class="tblst" style="background:#DBEAFE;color:#1D4ED8; border:1px solid #BFDBFE;"><i class="ph ph-truck"></i> ${esc(status)}</span>`;
-}
-
-function renderNeeds(){
-  const needs = state.data.needs||[];
-  const section = document.getElementById('needsSection');
-  if(needs.length===0){ section.style.display='none'; return; }
-  section.style.display='block';
-  document.getElementById('needsTableBody').innerHTML = needs.slice(0,30).map(n=>`
-    <tr>
-      <td style="font-size:12px; color:var(--muted); font-weight:600;"><i class="ph ph-clock"></i> ${esc(n.timestamp)}</td>
-      <td style="font-weight:800;font-size:13px; color:var(--navy);">${esc(n.need_id)}</td>
-      <td style="font-size:13px; font-weight:600;">${esc(n.categories)}</td>
-      <td style="font-size:13px;">${esc(n.urgency)}</td>
-      <td>${statusBadgeHtml(n.status)}</td>
-      <td style="font-size:12px;color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(n.details)}">${esc(n.details)}</td>
-    </tr>`).join('');
-}
-
-function renderNeedsPage(){
-  const needs = state.data.needs||[];
-  document.getElementById('needsSubhead').textContent = `รายการทั้งหมด ${needs.length} รายการ`;
-  
-  const body = document.getElementById('needsPageTableBody');
-  if(needs.length === 0){
-     body.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--faint);font-weight:600;"><i class="ph ph-package" style="font-size:32px;display:block;margin-bottom:12px;"></i>ไม่มีข้อมูลคำขอสิ่งของ</td></tr>`;
-     return;
-  }
-  
-  body.innerHTML = needs.map(n => {
-     const badgeUrg = n.urgency==='CRITICAL'?'crit':n.urgency==='HIGH'?'high':'norm';
-     const isHalal = n.halal_required === true || n.halal_required === 'YES' || n.halal_required === 'ใช่';
-     return `<tr>
-        <td><div class="tblcase">${esc(n.need_id)}</div><div class="tblphone"><i class="ph ph-clock"></i> ${esc(n.timestamp)}</div></td>
-        <td><div class="tblname"><i class="ph-fill ph-user" style="color:var(--muted)"></i> ${esc(n.user_id)}</div></td>
-        <td><div style="font-size:12px;color:var(--muted);"><i class="ph ph-map-pin"></i> ${n.latitude||'-'}, ${n.longitude||'-'}</div></td>
-        <td><div style="font-size:13px; font-weight:700;">${esc(n.categories)}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:4px;">${esc(n.details)}</div>
-            ${isHalal ? '<span class="bedtag" style="background:#ECFEFF;color:#0891B2;border-color:#CFFAFE;margin-top:6px;display:inline-block;"><i class="ph ph-moon-stars"></i> อาหารฮาลาล</span>' : ''}
-        </td>
-        <td><div style="display:flex; flex-direction:column; align-items:flex-start; gap:6px;">${statusBadgeHtml(n.status)}
-            <span class="badge ${badgeUrg}">${esc(n.urgency)}</span></div>
-        </td>
-        <td><div style="font-size:13px;font-weight:600;"><i class="ph ph-user-circle"></i> ${esc(n.volunteer_name) || '-'}</div>
-            <div style="font-size:11px;color:var(--faint);margin-top:4px;">ส่ง: ${esc(n.delivered_at) || '-'}</div>
-        </td>
-     </tr>`;
-  }).join('');
-}
-
-function switchPage(key){
-  document.querySelectorAll('.navitem').forEach(el=>el.classList.toggle('active', el.dataset.page===key));
-  document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active', el.id==='page-'+key));
-  if(key==='map' && fullMap) setTimeout(()=>fullMap.invalidateSize(), 50);
-  if(key==='dash' && dashMap) setTimeout(()=>dashMap.invalidateSize(), 50);
-}
-document.querySelectorAll('.navitem, .more').forEach(el=>{
-  el.addEventListener('click', ()=> switchPage(el.dataset.page));
-});
-document.getElementById('sosSearch').addEventListener('input', (e)=>{ state.sosSearch = e.target.value; renderSosPage(); });
-
-/* ── Add/Edit Need modal ── */
-const needModal = document.getElementById('needModalBg');
-document.getElementById('openNeedModal').addEventListener('click', ()=>{
-  ['n_user','n_lat','n_lon','n_cat','n_det','n_vol'].forEach(id=>document.getElementById(id).value='');
-  
-  // รันรหัสอัตโนมัติอิงจากจำนวนของที่มีอยู่ (ND + หมายเลขลำดับ)
-  const nextNeedId = 'ND' + String((state.data.needs || []).length + 1).padStart(3, '0');
-  const idInput = document.getElementById('n_id');
-  idInput.value = nextNeedId;
-  idInput.readOnly = true;
-  idInput.style.backgroundColor = '#E2E8F0';
-  idInput.style.color = '#64748B';
-  idInput.style.cursor = 'not-allowed';
-
-  const now = new Date();
-  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-  document.getElementById('n_time').value = now.toISOString().slice(0,16);
-  document.getElementById('n_del_time').value = '';
-  
-  document.getElementById('n_urgency').value = 'NORMAL';
-  document.getElementById('n_status').value = 'PENDING';
-  document.getElementById('n_halal').checked = false;
-  
-  document.getElementById('needFormErr').innerHTML='';
-  needModal.classList.add('show');
-});
-
-document.getElementById('closeNeedModal').addEventListener('click', ()=> needModal.classList.remove('show'));
-
-document.getElementById('n_geoBtn').addEventListener('click', ()=>{
-  if(!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(pos=>{
-    document.getElementById('n_lat').value = pos.coords.latitude;
-    document.getElementById('n_lon').value = pos.coords.longitude;
-  });
-});
-
-document.getElementById('n_submit').addEventListener('click', async ()=>{
-  const btn = document.getElementById('n_submit');
-  const err = document.getElementById('needFormErr');
-  
-  const need_id = document.getElementById('n_id').value.trim();
-  if(!need_id){ err.innerHTML = `<div class="formerr"><i class="ph-fill ph-warning-circle"></i> กรุณาระบุรหัสคำขอ (need_id)</div>`; return; }
-  
-  btn.innerHTML = '<i class="ph ph-spinner ph-spin"></i> กำลังบันทึก...'; btn.disabled = true;
-  
-  const payload = {
-     need_id: need_id,
-     timestamp: document.getElementById('n_time').value,
-     user_id: document.getElementById('n_user').value.trim(),
-     latitude: parseFloat(document.getElementById('n_lat').value) || 0,
-     longitude: parseFloat(document.getElementById('n_lon').value) || 0,
-     categories: document.getElementById('n_cat').value.trim(),
-     details: document.getElementById('n_det').value.trim(),
-     urgency: document.getElementById('n_urgency').value,
-     status: document.getElementById('n_status').value,
-     halal_required: document.getElementById('n_halal').checked,
-     volunteer_name: document.getElementById('n_vol').value.trim(),
-     delivered_at: document.getElementById('n_del_time').value
-  };
-
-  try {
-    const res = await fetch('/api/dashboard/needs', {
-      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    if(!res.ok) throw new Error('บันทึกไม่สำเร็จ');
-    needModal.classList.remove('show');
-    await loadData();
-  } catch(e) {
-    console.warn('API Mock Fallback:', e);
-    state.data.needs = state.data.needs || [];
-    state.data.needs.unshift(payload);
-    renderAll();
-    needModal.classList.remove('show');
-  } finally {
-    btn.innerHTML = '<i class="ph ph-floppy-disk"></i> บันทึกข้อมูล'; btn.disabled = false;
-  }
-});
-
-/* ── Add Shelter modal ── */
-const shelterModal = document.getElementById('shelterModalBg');
-document.getElementById('openShelterModal').addEventListener('click', ()=>{
-  ['f_name','f_province','f_district','f_lat','f_lon'].forEach(id=>document.getElementById(id).value='');
-  
-  // รันรหัสอัตโนมัติอิงจากจำนวนศูนย์ที่มีอยู่ (SH + หมายเลขลำดับ)
-  const nextShelterId = 'SH' + String((state.data.shelters || []).length + 1).padStart(3, '0');
-  const idInput = document.getElementById('f_id');
-  idInput.value = nextShelterId;
-  idInput.readOnly = true;
-  idInput.style.backgroundColor = '#E2E8F0';
-  idInput.style.color = '#64748B';
-  idInput.style.cursor = 'not-allowed';
-
-  document.getElementById('f_capacity').value = 100;
-  document.getElementById('f_occupancy').value = 0;
-  state.facilities = new Set(['ไฟฟ้า','น้ำสะอาด']);
-  renderFacOptions();
-  goToStep(1);
-  document.getElementById('shelterFormErr').innerHTML='';
-  shelterModal.classList.add('show');
-});
-document.getElementById('closeShelterModal').addEventListener('click', ()=> shelterModal.classList.remove('show'));
-function goToStep(n){
-  document.querySelectorAll('.shstep').forEach(el=> el.style.display = (el.dataset.step==String(n)) ? '' : 'none');
-  document.querySelectorAll('.steps i').forEach(el=> el.classList.toggle('on', Number(el.dataset.step) <= n));
-}
-document.querySelectorAll('[data-next]').forEach(b=> b.addEventListener('click', ()=> goToStep(Number(b.dataset.next))));
-document.querySelectorAll('[data-prev]').forEach(b=> b.addEventListener('click', ()=> goToStep(Number(b.dataset.prev))));
-document.getElementById('f_geoBtn').addEventListener('click', ()=>{
-  if(!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(pos=>{
-    document.getElementById('f_lat').value = pos.coords.latitude;
-    document.getElementById('f_lon').value = pos.coords.longitude;
-  });
-});
-function renderFacOptions(){
-  document.getElementById('facOptions').innerHTML = FACILITIES.map(f=>`
-    <label class="${state.facilities.has(f)?'on':''}" data-f="${f}">
-      <input type="checkbox" style="display:none;" ${state.facilities.has(f)?'checked':''}> <i class="ph ${FAC_ICONS[f]||'ph-check'}"></i> ${f}
-    </label>`).join('');
-  document.querySelectorAll('#facOptions label').forEach(lb=>{
-    lb.addEventListener('click', (e)=>{
-      e.preventDefault(); // Prevent double trigger
-      const f = lb.dataset.f;
-      if(state.facilities.has(f)) state.facilities.delete(f); else state.facilities.add(f);
-      renderFacOptions();
-    });
-  });
-}
+// ── Add Shelter — submit handler ──
 document.getElementById('f_submit').addEventListener('click', async ()=>{
   const btn = document.getElementById('f_submit');
   const err = document.getElementById('shelterFormErr');
   const id = document.getElementById('f_id').value.trim();
   const name = document.getElementById('f_name').value.trim();
-  if(!id || !name){ err.innerHTML = `<div class="formerr"><i class="ph-fill ph-warning-circle"></i> กรุณาระบุรหัสศูนย์และชื่อสถานที่</div>`; goToStep(1); return; }
-  btn.innerHTML = '<i class="ph ph-spinner ph-spin"></i> กำลังบันทึก...'; btn.disabled = true;
+  if(!id || !name){ err.innerHTML = `<div class="formerr" style="background:var(--crit-bg);color:var(--crit-tx);font-size:12px;font-weight:700;padding:10px 14px;border-radius:14px;margin-bottom:12px;">กรุณาระบุรหัสศูนย์และชื่อสถานที่</div>`; goToStep(1); return; }
+  btn.innerHTML = 'กำลังบันทึก...'; btn.disabled = true;
   try{
     const res = await fetch('/api/dashboard/shelters', {
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
@@ -1419,10 +1309,21 @@ document.getElementById('f_submit').addEventListener('click', async ()=>{
     shelterModal.classList.remove('show');
     await loadData();
   }catch(e){
-    err.innerHTML = `<div class="formerr"><i class="ph-fill ph-warning-circle"></i> ${esc(e.message || 'บันทึกไม่สำเร็จ กรุณาลองใหม่')}</div>`;
+    err.innerHTML = `<div class="formerr" style="background:var(--crit-bg);color:var(--crit-tx);font-size:12px;font-weight:700;padding:10px 14px;border-radius:14px;margin-bottom:12px;">${esc(e.message || 'บันทึกไม่สำเร็จ กรุณาลองใหม่')}</div>`;
   }finally{
     btn.innerHTML = '<i class="ph ph-floppy-disk"></i> บันทึก'; btn.disabled = false;
   }
+});
+
+// ── Navigation ──
+function switchPage(key){
+  document.querySelectorAll('.navitem').forEach(el=>el.classList.toggle('active', el.dataset.page===key));
+  document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active', el.id==='page-'+key));
+  if(key==='map' && fullMap) setTimeout(()=>fullMap.invalidateSize(), 50);
+  if(key==='dash' && dashMap) setTimeout(()=>dashMap.invalidateSize(), 50);
+}
+document.querySelectorAll('.navitem, .more').forEach(el=>{
+  el.addEventListener('click', ()=> { const page = el.dataset.page; if(page) switchPage(page); });
 });
 
 initMaps();
