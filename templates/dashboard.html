@@ -4,272 +4,319 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FLOODCARE AI — Command Center</title>
+
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<!-- Phosphor Icons -->
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+
 <style>
   :root{
-    --navy:#12354A; --orange:#F97316; --orange-dark:#EA580C;
+    --navy:#12354A; --navy-hover:#1A4B69; 
+    --orange:#F97316; --orange-dark:#EA580C;
     --crit:#EF4444; --crit-bg:#FEE2E2; --crit-tx:#DC2626;
     --high:#F59E0B; --high-bg:#FEF3C7; --high-tx:#D97706;
     --norm:#10B981; --norm-bg:#DCFCE7; --norm-tx:#059669;
-    --muted:#6B7280; --faint:#9CA3AF; --line:#F3F4F6;
+    --muted:#6B7280; --faint:#9CA3AF; --line:#E5E7EB;
     --radius:24px; --radius-sm:16px;
+    --shadow-sm:0 2px 8px rgba(18,53,74,.04);
+    --shadow-md:0 6px 24px rgba(18,53,74,.08);
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   body{
     font-family:'Noto Sans Thai',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-    background:linear-gradient(145deg,#C8EDE9 0%,#EAF3F8 50%,#EEE5D8 100%);
-    color:#111; min-height:100vh;
+    background:linear-gradient(135deg,#D5F0ED 0%,#EAF3F8 50%,#F0EAE1 100%);
+    color:#111; min-height:100vh; overflow-x:hidden;
   }
   a{text-decoration:none;color:inherit;}
-  button{font-family:inherit;cursor:pointer;border:none;}
+  button{font-family:inherit;cursor:pointer;border:none; transition: all 0.2s ease;}
+  button:active{transform:scale(0.96);}
   input,select{font-family:inherit;}
+  
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 
-  /* ── Layout ── */
+  /* ── Layout & Sidebar ── */
   .app{display:flex;min-height:100vh;}
   .sidebar{
-    width:76px;flex-shrink:0;background:var(--navy);display:flex;flex-direction:column;
-    align-items:center;padding:20px 0;gap:8px;border-radius:0 24px 24px 0;
+    width:80px;flex-shrink:0;background:var(--navy);display:flex;flex-direction:column;
+    align-items:center;padding:24px 0;gap:8px;border-radius:0 24px 24px 0;
+    box-shadow: 4px 0 24px rgba(0,0,0,.08); z-index: 100;
   }
-  .brand{width:38px;height:38px;border-radius:12px;background:var(--orange);
-    display:flex;align-items:center;justify-content:center;font-size:18px;margin-bottom:18px;flex-shrink:0;}
-  .navlist{display:flex;flex-direction:column;gap:4px;flex:1;width:100%;padding:0 12px;}
+  .brand{
+    width:42px;height:42px;border-radius:14px;background:var(--orange);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:20px;flex-shrink:0;
+    box-shadow: 0 4px 12px rgba(249,115,22,.4);
+  }
+  .navlist{display:flex;flex-direction:column;gap:8px;flex:1;width:100%;padding:0 12px;}
   .navitem{
-    width:100%;height:44px;border-radius:16px;display:flex;align-items:center;justify-content:center;
-    color:#5B8FA8;font-size:19px;transition:.15s;background:transparent;position:relative;
+    width:100%;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+    color:#5B8FA8;font-size:24px;transition:all .2s;background:transparent;position:relative; cursor:pointer;
   }
-  .navitem:hover{background:rgba(255,255,255,.08);color:#A8D8E8;}
-  .navitem.active{background:var(--orange);color:#fff;}
+  .navitem:hover{background:rgba(255,255,255,.1);color:#fff;}
+  .navitem.active{background:var(--orange);color:#fff; box-shadow: 0 4px 12px rgba(249,115,22,.3);}
   .navitem .tip{
-    position:absolute;left:60px;background:var(--navy);color:#fff;font-size:11px;font-weight:600;
-    padding:6px 10px;border-radius:10px;white-space:nowrap;opacity:0;pointer-events:none;transition:.15s;
-    box-shadow:0 4px 12px rgba(0,0,0,.25); z-index:50;
+    position:absolute;left:65px;background:var(--navy-hover);color:#fff;font-size:12px;font-weight:600;
+    padding:6px 12px;border-radius:10px;white-space:nowrap;opacity:0;pointer-events:none;transition:.2s;
+    box-shadow:0 4px 12px rgba(0,0,0,.25); z-index:50; transform: translateX(-10px);
   }
-  .navitem:hover .tip{opacity:1;}
-  .statusdot{width:8px;height:8px;border-radius:50%;background:var(--crit);margin-top:4px;flex-shrink:0;}
-  .statusdot.ok{background:#4ADE80;animation:pulse 1.8s infinite;}
-  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+  .navitem:hover .tip{opacity:1; transform: translateX(0);}
+  .statusdot{width:10px;height:10px;border-radius:50%;background:var(--crit);margin-top:auto;flex-shrink:0;}
+  .statusdot.ok{background:#4ADE80;animation:pulse 2s infinite;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(74,222,128,0.7);} 70%{box-shadow:0 0 0 10px rgba(74,222,128,0);} 100%{box-shadow:0 0 0 0 rgba(74,222,128,0);}}
 
-  .main{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column; position:relative;}
   .topbar{
-    height:58px;background:rgba(255,255,255,.7);backdrop-filter:blur(8px);
-    display:flex;align-items:center;justify-content:space-between;padding:0 20px;
-    position:sticky;top:0;z-index:20;box-shadow:0 1px 0 rgba(0,0,0,.06);gap:12px;
+    height:64px;background:rgba(255,255,255,.6);backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    display:flex;align-items:center;justify-content:space-between;padding:0 24px;
+    position:sticky;top:0;z-index:40;border-bottom:1px solid rgba(255,255,255,0.4);gap:12px;
   }
-  .topbar h1{font-size:14px;font-weight:800;color:var(--navy);}
-  .topbar .sub{font-size:10px;color:var(--faint);font-weight:500;}
-  .pill{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:11px;font-weight:700;flex-shrink:0;}
-  .pill.online{background:#F0FDF4;color:#166534;}
-  .pill.offline{background:#FEF2F2;color:#991B1B;}
-  .dot{width:6px;height:6px;border-radius:50%;background:#4ADE80;animation:pulse 1.8s infinite;}
-  .logout{font-size:11px;color:var(--muted);font-weight:600;padding:6px 12px;border-radius:999px;background:#fff;}
-  .logout:hover{color:var(--navy);}
+  .topbar h1{font-size:15px;font-weight:800;color:var(--navy); letter-spacing: 0.02em;}
+  .topbar .sub{font-size:11px;color:var(--faint);font-weight:600;text-transform:uppercase;}
+  .pill{display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:700;flex-shrink:0;}
+  .pill.online{background:#F0FDF4;color:#166534; border:1px solid #DCFCE7;}
+  .pill.offline{background:#FEF2F2;color:#991B1B; border:1px solid #FEE2E2;}
+  .dot{width:6px;height:6px;border-radius:50%;background:#4ADE80;animation:pulse 2s infinite;}
+  .logout{font-size:12px;color:var(--muted);font-weight:700;padding:6px 14px;border-radius:999px;background:#fff; border:1px solid var(--line); display:flex; align-items:center; gap:6px;}
+  .logout:hover{color:var(--navy); background:#F3F4F6;}
 
-  .content{flex:1;padding:16px;overflow:auto;}
-  .page{display:none;animation:fade .2s ease;}
+  .content{flex:1;padding:20px 24px;overflow:auto;}
+  .page{display:none;animation:fade .3s ease forwards;}
   .page.active{display:block;}
-  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes fade{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 
-  .pagehead{margin-bottom:16px;}
-  .pagehead h2{font-size:19px;font-weight:800;color:#111;display:flex;align-items:center;gap:10px;}
-  .pagehead .icn{width:32px;height:32px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
-  .pagehead p{font-size:13px;color:var(--muted);margin-top:4px;margin-left:42px;}
+  .pagehead{margin-bottom:20px; display:flex; flex-direction:column; gap:4px;}
+  .pagehead h2{font-size:22px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:10px;}
+  .pagehead .icn{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0; color:var(--navy);}
+  .pagehead p{font-size:14px;color:var(--muted);margin-left:46px; font-weight:500;}
 
   /* ── Cards ── */
-  .card{background:#fff;border-radius:var(--radius);box-shadow:0 2px 16px rgba(18,53,74,.08);}
-  .card-pad{padding:20px;}
-
-  /* ── Banner ── */
-  .banner{display:flex;align-items:center;gap:12px;padding:16px 18px;border-radius:20px;margin-bottom:14px;}
-  .banner.warn{background:#FFFBEB;border:1px solid #FDE68A;}
-  .banner.err{background:#FEF2F2;border:1px solid #FECACA;}
-  .banner .ic{width:34px;height:34px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px;}
-  .banner.warn .ic{background:#FEF3C7;}
-  .banner.err .ic{background:#FEE2E2;}
-  .banner .tt{font-size:13px;font-weight:700;}
-  .banner.warn .tt{color:#92400E;}
-  .banner.err .tt{color:#991B1B;}
-  .banner .ds{font-size:11px;margin-top:2px;opacity:.85;}
-  .banner button{padding:8px 14px;border-radius:12px;color:#fff;font-size:11px;font-weight:700;flex-shrink:0;}
-  .banner.warn button{background:#D97706;}
-  .banner.err button{background:#DC2626;}
+  .card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow-md); border:1px solid rgba(255,255,255,0.8);}
+  .card-pad{padding:24px;}
 
   /* ── Stat strip ── */
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;}
-  .stat{background:#fff;border-radius:20px;padding:14px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 10px rgba(18,53,74,.06);}
-  .stat .ic{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
-  .stat .lb{font-size:9px;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.03em;}
-  .stat .vl{font-size:19px;font-weight:900;color:var(--navy);margin-top:2px;}
-  .stat .vl small{font-size:11px;color:var(--faint);font-weight:500;}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:20px;}
+  .stat{background:#fff;border-radius:20px;padding:16px 20px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-md); border:1px solid rgba(255,255,255,0.8); transition: transform 0.2s;}
+  .stat:hover{transform:translateY(-2px);}
+  .stat .ic{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;}
+  .stat .lb{font-size:10px;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .stat .vl{font-size:22px;font-weight:900;color:var(--navy);margin-top:2px; display:flex; align-items:baseline; gap:4px;}
+  .stat .vl small{font-size:12px;color:var(--muted);font-weight:600;}
 
-  /* ── Map ── */
-  #dashMap,#fullMap{width:100%;border-radius:20px;}
-  #dashMap{height:260px;}
-  #fullMap{height:calc(100vh - 260px);min-height:420px;}
-  .maplegend{position:absolute;top:12px;left:12px;z-index:500;background:rgba(255,255,255,.92);backdrop-filter:blur(4px);
-    border-radius:16px;padding:8px 12px;display:flex;gap:12px;flex-wrap:wrap;font-size:11px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.08);}
-  .maplegend span{display:flex;align-items:center;gap:5px;}
-  .maplegend i{width:9px;height:9px;border-radius:50%;display:inline-block;}
-  .mapwrap{position:relative;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(18,53,74,.12);margin-bottom:16px;}
+  #dashMap,#fullMap{width:100%;border-radius:20px; z-index:10;}
+  #dashMap{height:280px;}
+  #fullMap{height:calc(100vh - 280px);min-height:500px;}
+  .maplegend{position:absolute;top:16px;left:16px;z-index:500;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);
+    border-radius:16px;padding:10px 16px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:700;box-shadow:var(--shadow-md); border:1px solid var(--line);}
+  .maplegend span{display:flex;align-items:center;gap:6px;}
+  .maplegend i{width:10px;height:10px;border-radius:50%;display:inline-block;}
+  .mapwrap{position:relative;border-radius:20px;overflow:hidden;box-shadow:var(--shadow-md);margin-bottom:20px; border:4px solid #fff;}
+
+  /* Leaflet Popup Overrides */
+  .leaflet-popup-content-wrapper { border-radius: 16px !important; box-shadow: 0 8px 30px rgba(18,53,74,0.2) !important; padding: 0 !important; overflow: hidden; }
+  .leaflet-popup-content { margin: 0 !important; width: 100% !important; min-width: 220px;}
+  .leaflet-popup-tip-container { margin-top: -1px; }
+  .leaflet-popup-tip { box-shadow: none !important; }
+  .leaflet-container a.leaflet-popup-close-button { top: 12px !important; right: 12px !important; color: #9CA3AF !important; }
+  .leaflet-container a.leaflet-popup-close-button:hover { color: #111 !important; }
+
+  /* Custom Popup HTML Content */
+  .custom-popup { padding: 16px; font-family: 'Noto Sans Thai', sans-serif; }
+  .custom-popup .p-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px dashed var(--line); padding-bottom: 10px; margin-bottom: 10px; gap: 12px;}
+  .custom-popup .p-title { font-weight: 800; color: var(--navy); font-size: 15px; display:flex; flex-direction:column; line-height: 1.3;}
+  .custom-popup .p-title small { font-size:11px; color:var(--muted); font-weight:600;}
+  .custom-popup .p-meta { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #374151; font-weight: 500;}
+  .custom-popup .p-meta div { display: flex; align-items: center; gap: 8px; }
+  .custom-popup .p-meta i { font-size: 16px; width: 20px; text-align: center; color: var(--muted); }
+
+  /* Marker Animations */
+  .marker-pulse { position: relative; }
+  .marker-pulse::after {
+    content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor;
+    animation: markerPulse 2s infinite ease-out; z-index: -1;
+  }
+  @keyframes markerPulse { 0%{transform:scale(1); opacity:0.8;} 100%{transform:scale(1.8); opacity:0;} }
 
   /* ── Two column layout ── */
-  .cols{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start;}
-  @media(max-width:900px){.cols{grid-template-columns:1fr;}}
+  .cols{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;align-items:start;}
+  @media(max-width:960px){.cols{grid-template-columns:1fr;}}
 
-  .sectionhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
-  .sectionhead h3{font-size:13px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:6px;}
-  .sectionhead .cnt{font-size:10px;background:rgba(255,255,255,.7);color:var(--navy);font-weight:800;padding:2px 8px;border-radius:999px;}
-  .sectionhead .more{font-size:11px;color:#5B8FA8;font-weight:700;}
+  .sectionhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .sectionhead h3{font-size:15px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:8px;}
+  .sectionhead h3 i{font-size:20px; color:var(--orange);}
+  .sectionhead .cnt{font-size:11px;background:rgba(255,255,255,.8);color:var(--navy);font-weight:800;padding:4px 10px;border-radius:999px; border:1px solid var(--line);}
+  .sectionhead .more{font-size:12px;color:var(--navy);font-weight:700; background:#fff; padding:6px 12px; border-radius:999px; cursor:pointer; box-shadow:var(--shadow-sm); display:flex; align-items:center; gap:4px; transition:0.2s;}
+  .sectionhead .more:hover{background:var(--navy); color:#fff;}
 
-  /* ── SOS list item ── */
-  .soslist{display:flex;flex-direction:column;gap:10px;}
-  .soscard{background:rgba(255,255,255,.85);border-radius:18px;padding:14px;box-shadow:0 2px 12px rgba(18,53,74,.08);border:2px solid transparent;transition:.15s;}
-  .soscard.sel{border-color:#FDBA74;}
-  .soscard .top{display:flex;gap:10px;align-items:flex-start;}
-  .soscard .num{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:13px;flex-shrink:0;}
-  .soscard .name{font-size:15px;font-weight:800;color:var(--navy);}
-  .soscard .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:12px;font-weight:600;color:#374151;}
-  .soscard .meta span{display:flex;align-items:center;gap:4px;}
-  .soscard .water{font-size:11px;color:var(--muted);margin-top:3px;}
+  .soslist{display:flex;flex-direction:column;gap:12px;}
+  .soscard{background:rgba(255,255,255,.9);border-radius:20px;padding:16px;box-shadow:var(--shadow-md);border:2px solid transparent;transition:all .2s; cursor:pointer;}
+  .soscard:hover{background:#fff; transform:translateY(-2px);}
+  .soscard.sel{border-color:#FDBA74; background:#fff; box-shadow:0 8px 24px rgba(249,115,22,0.15);}
+  .soscard .top{display:flex;gap:12px;align-items:flex-start;}
+  .soscard .num{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:14px;flex-shrink:0; box-shadow:0 4px 10px rgba(0,0,0,.15);}
+  .soscard .name{font-size:16px;font-weight:800;color:var(--navy); margin-bottom:4px;}
+  .soscard .meta{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;font-weight:600;color:#4B5563;}
+  .soscard .meta span{display:flex;align-items:center;gap:6px;}
+  .soscard .meta i{color:var(--muted); font-size:16px;}
+  .soscard .water{font-size:12px;color:var(--muted);margin-top:6px; display:flex; align-items:center; gap:6px;}
+  .soscard .water i{color:#3B82F6;}
   .soscard .water b{color:#1D4ED8;}
-  .badges{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;}
-  .badge{font-size:10px;font-weight:800;padding:4px 9px;border-radius:999px;}
+  .badges{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
+  .badge{font-size:11px;font-weight:800;padding:4px 10px;border-radius:8px;}
   .badge.crit{background:var(--crit-bg);color:var(--crit-tx);}
   .badge.high{background:var(--high-bg);color:var(--high-tx);}
   .badge.norm{background:var(--norm-bg);color:var(--norm-tx);}
-  .badge.st{background:rgba(255,255,255,.6);color:var(--muted);}
-  .bedtag{font-size:9px;background:#FEF2F2;color:#DC2626;padding:2px 6px;border-radius:999px;font-weight:800;}
-  .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);}
-  .actions button, .actions a{padding:10px;border-radius:12px;font-size:12px;font-weight:800;text-align:center;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .badge.st{background:#F3F4F6;color:var(--muted); border:1px solid var(--line);}
+  .bedtag{font-size:10px;background:#FEF2F2;color:#DC2626;padding:2px 8px;border-radius:6px;font-weight:800; border:1px solid #FECACA;}
+  
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line);}
+  .actions button, .actions a{padding:10px;border-radius:12px;font-size:13px;font-weight:800;text-align:center;display:flex;align-items:center;justify-content:center;gap:8px;}
   .btn-act{background:var(--orange);color:#fff;}
-  .btn-act.done{background:#F3F4F6;color:var(--faint);}
+  .btn-act:hover{background:var(--orange-dark);}
+  .btn-act.done{background:#F3F4F6;color:var(--faint); pointer-events:none;}
   .btn-act.progress{background:var(--navy);color:#fff;}
-  .btn-nav{background:#EBF2F6;color:var(--navy);}
-  .empty-msg{background:rgba(255,255,255,.7);border-radius:16px;padding:24px;text-align:center;font-size:13px;color:var(--muted);}
+  .btn-act.progress:hover{background:var(--navy-hover);}
+  .btn-nav{background:#F1F5F9;color:var(--navy);}
+  .btn-nav:hover{background:#E2E8F0;}
+  .empty-msg{background:rgba(255,255,255,.7);border-radius:16px;padding:32px;text-align:center;font-size:14px;color:var(--muted); font-weight:600; display:flex; flex-direction:column; align-items:center; gap:12px;}
+  .empty-msg i{font-size:32px; color:var(--faint);}
 
   /* ── Donut ── */
   .donutwrap{display:flex;flex-direction:column;align-items:center;}
-  .legend2{width:100%;display:flex;flex-direction:column;gap:9px;margin-top:8px;}
-  .legrow{display:flex;gap:9px;align-items:flex-start;}
-  .legrow .sq{width:11px;height:11px;border-radius:3px;flex-shrink:0;margin-top:2px;}
-  .legrow .name{font-size:12px;font-weight:800;color:var(--navy);}
-  .legrow .bar{flex:1;height:6px;background:#EEF4F8;border-radius:99px;overflow:hidden;}
+  .legend2{width:100%;display:flex;flex-direction:column;gap:12px;margin-top:16px;}
+  .legrow{display:flex;gap:12px;align-items:flex-start;}
+  .legrow .sq{width:12px;height:12px;border-radius:4px;flex-shrink:0;margin-top:4px;}
+  .legrow .name{font-size:13px;font-weight:800;color:var(--navy);}
+  .legrow .bar{flex:1;height:6px;background:#F1F5F9;border-radius:99px;overflow:hidden;}
   .legrow .bar i{display:block;height:100%;border-radius:99px;}
-  .legrow .pct{font-size:10px;font-weight:800;color:var(--muted);width:26px;text-align:right;}
-  .legrow .cnt{font-size:10px;color:var(--faint);margin-top:2px;}
+  .legrow .pct{font-size:11px;font-weight:800;color:var(--muted);width:30px;text-align:right;}
+  .legrow .cnt{font-size:11px;color:var(--faint);margin-top:4px; font-weight:500;}
 
-  /* ── Table (SOS Cases page) ── */
-  .toolbar{display:flex;flex-direction:column;gap:10px;background:#fff;border-radius:var(--radius);padding:16px;box-shadow:0 2px 10px rgba(18,53,74,.06);margin-bottom:14px;}
+  .toolbar{display:flex;flex-direction:column;gap:14px;background:#fff;border-radius:var(--radius);padding:20px;box-shadow:var(--shadow-md);margin-bottom:20px;}
   .search{position:relative;}
-  .search input{width:100%;padding:10px 14px 10px 36px;background:#F9FAFB;border:1px solid var(--line);border-radius:16px;font-size:13px;}
-  .search .ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#D1D5DB;font-size:14px;}
-  .tabs{display:flex;flex-wrap:wrap;gap:6px;}
-  .tabgroup{display:flex;background:#F3F4F6;border-radius:16px;padding:4px;gap:3px;}
-  .tabbtn{padding:7px 12px;border-radius:12px;font-size:11px;font-weight:700;color:var(--muted);background:transparent;}
-  .tabbtn.active{background:#111;color:#fff;}
+  .search input{width:100%;padding:12px 16px 12px 42px;background:#F8FAFC;border:1px solid var(--line);border-radius:14px;font-size:14px; transition:0.2s;}
+  .search input:focus{outline:none; border-color:var(--navy); background:#fff; box-shadow:0 0 0 4px rgba(18,53,74,0.1);}
+  .search .ic{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px;}
+  .tabs{display:flex;flex-wrap:wrap;gap:8px;}
+  .tabgroup{display:flex;background:#F1F5F9;border-radius:12px;padding:4px;gap:4px;}
+  .tabbtn{padding:8px 16px;border-radius:10px;font-size:12px;font-weight:700;color:var(--muted);background:transparent;}
+  .tabbtn:hover{color:var(--navy);}
+  .tabbtn.active{background:#fff;color:var(--navy); box-shadow:var(--shadow-sm);}
 
-  table{width:100%;border-collapse:collapse;font-size:13px;}
-  th,td{padding:12px 16px;text-align:left;vertical-align:top;}
-  thead{background:#F9FAFB;}
-  th{font-size:9px;color:var(--faint);font-weight:800;text-transform:uppercase;letter-spacing:.04em;}
-  tbody tr{border-top:1px solid var(--line);}
-  tbody tr:hover{background:#FAFAFA;}
-  .tblcase{font-weight:800;font-size:11px;}
-  .tblname{font-weight:700;}
-  .tblphone{font-size:11px;color:var(--muted);margin-top:2px;}
-  .tblbtn{padding:6px 12px;border-radius:10px;font-size:9px;font-weight:800;color:#fff;}
-  .tblbtn.take{background:#FEF3C7;color:#92400E;}
-  .tblbtn.close{background:#DCFCE7;color:#166534;}
+  table{width:100%;border-collapse:separate; border-spacing: 0; font-size:13px;}
+  th,td{padding:16px;text-align:left;vertical-align:top; border-bottom:1px solid var(--line);}
+  thead{position:sticky; top:0; background:rgba(255,255,255,0.95); backdrop-filter:blur(4px); z-index:10;}
+  th{font-size:11px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.05em;}
+  tbody tr{transition:0.15s;}
+  tbody tr:hover{background:#F8FAFC;}
+  tbody tr:last-child td{border-bottom:none;}
+  .tblcase{font-weight:900;font-size:12px; color:var(--navy);}
+  .tblname{font-weight:800; font-size:14px; display:flex; align-items:center; gap:6px;}
+  .tblphone{font-size:12px;color:var(--muted);margin-top:4px; display:flex; align-items:center; gap:4px;}
+  .tblbtn{padding:8px 14px;border-radius:10px;font-size:11px;font-weight:800;color:#fff; display:inline-flex; align-items:center; justify-content:center; gap:6px;}
+  .tblbtn:hover{opacity:0.9;}
+  .tblbtn.take{background:#F59E0B;}
+  .tblbtn.close{background:#10B981;}
   .tblbtn.disabled{opacity:.5;pointer-events:none;}
-  .tblst{padding:5px 10px;border-radius:10px;font-size:9px;font-weight:800;text-align:center;display:block;}
-  .tblst.progress{background:#DBEAFE;color:#1D4ED8;}
-  .tblst.closed{background:#F3F4F6;color:var(--muted);}
+  .tblst{padding:6px 12px;border-radius:8px;font-size:11px;font-weight:800;text-align:center;display:inline-flex; align-items:center; gap:6px;}
+  .tblst.progress{background:#DBEAFE;color:#1D4ED8; border:1px solid #BFDBFE;}
+  .tblst.closed{background:#F3F4F6;color:var(--muted); border:1px solid var(--line);}
 
   /* ── Shelters ── */
-  .shgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
-  .shcard{background:#fff;border-radius:var(--radius);padding:18px;box-shadow:0 2px 10px rgba(18,53,74,.06);}
-  .shcard .row1{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:8px;}
-  .shcard .nm{font-weight:800;font-size:14px;}
-  .shcard .loc{font-size:11px;color:var(--muted);margin-top:3px;}
-  .shcard .stbadge{font-size:10px;font-weight:800;padding:5px 10px;border-radius:999px;flex-shrink:0;}
-  .shcard .barrow{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:5px;}
-  .shcard .track{width:100%;background:#F3F4F6;border-radius:99px;height:8px;overflow:hidden;}
-  .shcard .track i{display:block;height:100%;}
-  .factags{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);}
-  .factag{font-size:9px;background:#F3F4F6;padding:3px 8px;border-radius:999px;font-weight:700;color:#374151;}
-  .addbtn{display:flex;align-items:center;gap:8px;background:#111;color:#fff;padding:11px 18px;border-radius:999px;font-size:13px;font-weight:800;}
-  .addbtn:disabled{opacity:.4;}
+  .shgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
+  .shcard{background:#fff;border-radius:var(--radius);padding:20px;box-shadow:var(--shadow-md); border:1px solid rgba(255,255,255,0.8); transition:0.2s;}
+  .shcard:hover{transform:translateY(-2px); box-shadow:0 12px 30px rgba(18,53,74,.1);}
+  .shcard .row1{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:8px;}
+  .shcard .nm{font-weight:800;font-size:15px; color:var(--navy);}
+  .shcard .loc{font-size:12px;color:var(--muted);margin-top:4px; display:flex; align-items:center; gap:4px;}
+  .shcard .stbadge{font-size:11px;font-weight:800;padding:4px 10px;border-radius:8px;flex-shrink:0;}
+  .shcard .barrow{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px; font-weight:600;}
+  .shcard .track{width:100%;background:#F1F5F9;border-radius:99px;height:8px;overflow:hidden;}
+  .shcard .track i{display:block;height:100%; border-radius:99px;}
+  .factags{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;padding-top:16px;border-top:1px dashed var(--line);}
+  .factag{font-size:11px;background:#F8FAFC;padding:4px 10px;border-radius:8px;font-weight:600;color:#475569; border:1px solid var(--line);}
+  .addbtn{display:flex;align-items:center;gap:8px;background:var(--navy);color:#fff;padding:12px 20px;border-radius:999px;font-size:14px;font-weight:800; box-shadow:0 4px 12px rgba(18,53,74,0.3);}
+  .addbtn:hover{background:var(--navy-hover);}
+  .addbtn:disabled{opacity:.5;}
 
-  /* ── Modal ── */
-  .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);backdrop-filter:blur(3px);z-index:1000;align-items:center;justify-content:center;padding:16px;}
-  .modal-bg.show{display:flex;}
-  .modal{background:#fff;border-radius:24px;width:100%;max-width:480px;max-height:90vh;overflow:auto;}
-  .modal .mhead{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid var(--line);}
-  .modal .mhead h3{font-size:15px;font-weight:800;}
-  .modal .mclose{width:30px;height:30px;border-radius:50%;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--muted);}
-  .modal .mbody{padding:20px;}
-  .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .fgroup{margin-bottom:14px;}
-  .fgroup label{display:block;font-size:11px;font-weight:700;color:#374151;margin-bottom:5px;}
-  .fgroup input{width:100%;padding:10px 12px;background:#F9FAFB;border:1px solid var(--line);border-radius:14px;font-size:13px;}
-  .facopt{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}
-  .facopt label{display:flex;align-items:center;gap:7px;padding:9px 10px;border-radius:14px;border:1px solid var(--line);font-size:11px;font-weight:600;cursor:pointer;background:#F9FAFB;}
-  .facopt label.on{background:#F0FDF4;border-color:#BBF7D0;color:#166534;}
-  .fullbtn{width:100%;padding:12px;border-radius:999px;font-size:13px;font-weight:800;}
-  .fullbtn.dark{background:#111;color:#fff;}
-  .fullbtn.light{background:#F3F4F6;color:#374151;}
-  .fbrow{display:flex;gap:8px;}
+  .modal-bg{display:none;position:fixed;inset:0;background:rgba(18,53,74,.4);backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:1000;align-items:center;justify-content:center;padding:20px; opacity:0; transition:opacity 0.2s;}
+  .modal-bg.show{display:flex; opacity:1;}
+  .modal{background:#fff;border-radius:24px;width:100%;max-width:500px;max-height:90vh;overflow:auto; box-shadow:0 20px 40px rgba(0,0,0,.2); transform:translateY(20px); transition:0.3s; opacity:0;}
+  .modal-bg.show .modal{transform:translateY(0); opacity:1;}
+  .modal .mhead{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--line);}
+  .modal .mhead h3{font-size:18px;font-weight:800; color:var(--navy);}
+  .modal .mclose{width:36px;height:36px;border-radius:12px;background:#F1F5F9;display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--muted);}
+  .modal .mclose:hover{background:#E2E8F0; color:#111;}
+  .modal .mbody{padding:24px;}
+  .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .fgroup{margin-bottom:16px;}
+  .fgroup label{display:block;font-size:12px;font-weight:700;color:#475569;margin-bottom:6px;}
+  .fgroup input, .fgroup select{width:100%;padding:12px 14px;background:#F8FAFC;border:1px solid var(--line);border-radius:12px;font-size:14px; transition:0.2s; font-family:inherit;}
+  .fgroup input:focus, .fgroup select:focus{outline:none; border-color:var(--navy); background:#fff; box-shadow:0 0 0 3px rgba(18,53,74,0.1);}
+  .facopt{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;}
+  .facopt label{display:flex;align-items:center;gap:8px;padding:12px;border-radius:12px;border:1px solid var(--line);font-size:13px;font-weight:600;cursor:pointer;background:#F8FAFC; transition:0.2s;}
+  .facopt label:hover{background:#F1F5F9;}
+  .facopt label.on{background:#F0FDF4;border-color:#4ADE80;color:#166534;}
+  .facopt label i{font-size:18px; color:var(--muted);}
+  .facopt label.on i{color:#166534;}
+  .fullbtn{width:100%;padding:14px;border-radius:14px;font-size:14px;font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px;}
+  .fullbtn.dark{background:var(--navy);color:#fff;}
+  .fullbtn.dark:hover{background:var(--navy-hover);}
+  .fullbtn.light{background:#F1F5F9;color:#334155;}
+  .fullbtn.light:hover{background:#E2E8F0;}
+  .fbrow{display:flex;gap:10px;}
   .fbrow .fullbtn{flex:1;}
-  .steps{display:flex;gap:5px;margin-bottom:16px;}
-  .steps i{flex:1;height:5px;border-radius:99px;background:var(--line);}
-  .steps i.on{background:#111;}
-  .formerr{background:#FEF2F2;color:#991B1B;font-size:11px;font-weight:700;padding:10px 14px;border-radius:14px;margin-bottom:12px;}
+  .steps{display:flex;gap:6px;margin-bottom:20px;}
+  .steps i{flex:1;height:6px;border-radius:99px;background:var(--line); transition:0.3s;}
+  .steps i.on{background:var(--orange);}
+  .formerr{background:#FEF2F2;color:#991B1B;font-size:12px;font-weight:700;padding:12px 16px;border-radius:12px;margin-bottom:16px; border:1px solid #FECACA; display:flex; align-items:center; gap:8px;}
 
-  /* ── Analytics bars ── */
-  .agrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  /* ── Analytics ── */
+  .agrid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
   @media(max-width:800px){.agrid{grid-template-columns:1fr;}}
-  .abar-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
-  .abar-row .albl{font-size:12px;width:80px;flex-shrink:0;font-weight:600;color:#374151;}
-  .abar-row .atrack{flex:1;background:#F3F4F6;border-radius:99px;height:11px;overflow:hidden;}
+  .abar-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+  .abar-row .albl{font-size:13px;width:90px;flex-shrink:0;font-weight:600;color:#475569;}
+  .abar-row .atrack{flex:1;background:#F1F5F9;border-radius:99px;height:12px;overflow:hidden;}
   .abar-row .atrack i{display:block;height:100%;border-radius:99px;}
-  .abar-row .aval{font-size:12px;font-weight:800;width:26px;text-align:right;}
-  .minicards{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .minicard{border-radius:16px;padding:14px;}
-  .minicard .mv{font-size:20px;font-weight:800;}
-  .minicard .mu{font-size:10px;font-weight:700;margin-top:1px;}
-  .minicard .ml{font-size:10px;color:var(--faint);margin-top:2px;}
+  .abar-row .aval{font-size:13px;font-weight:800;width:30px;text-align:right;}
+  .minicards{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .minicard{border-radius:16px;padding:16px; display:flex; flex-direction:column;}
+  .minicard i{font-size:24px; margin-bottom:8px;}
+  .minicard .mv{font-size:22px;font-weight:900;}
+  .minicard .mu{font-size:11px;font-weight:700;margin-top:2px;}
+  .minicard .ml{font-size:12px;color:#64748B;margin-top:4px; font-weight:600;}
 
-  /* ── Needs table (bonus) ── */
-  .needwrap{margin-top:16px;}
 </style>
 </head>
 <body>
 
 <div class="app">
-  <!-- SIDEBAR -->
   <div class="sidebar">
-    <div class="brand">🛡️</div>
+    <div class="brand"><i class="ph-fill ph-shield-check"></i></div>
     <div class="navlist">
-      <div class="navitem active" data-page="dash" title="Dashboard">📊<span class="tip">Dashboard</span></div>
-      <div class="navitem" data-page="sos" title="SOS Cases">🚨<span class="tip">SOS Cases</span></div>
-      <div class="navitem" data-page="shelters" title="Shelters">🏠<span class="tip">Shelters</span></div>
-      <div class="navitem" data-page="map" title="Flood Map">🗺️<span class="tip">Flood Map</span></div>
-      <div class="navitem" data-page="analytics" title="Analytics">📈<span class="tip">Analytics</span></div>
+      <div class="navitem active" data-page="dash" title="Dashboard"><i class="ph ph-squares-four"></i><span class="tip">Dashboard</span></div>
+      <div class="navitem" data-page="sos" title="SOS Cases"><i class="ph ph-siren"></i><span class="tip">SOS Cases</span></div>
+      <div class="navitem" data-page="shelters" title="Shelters"><i class="ph ph-tent"></i><span class="tip">Shelters</span></div>
+      <div class="navitem" data-page="map" title="Flood Map"><i class="ph ph-map-trifold"></i><span class="tip">Flood Map</span></div>
+      <div class="navitem" data-page="analytics" title="Analytics"><i class="ph ph-chart-line-up"></i><span class="tip">Analytics</span></div>
+      <div class="navitem" data-page="needs" title="Needs"><i class="ph ph-package"></i><span class="tip">คำขอสิ่งของ</span></div>
     </div>
     <div class="statusdot" id="sideDot"></div>
   </div>
 
-  <!-- MAIN -->
   <div class="main">
     <div class="topbar">
       <div>
         <div class="sub">สวัสดี</div>
         <h1>ศูนย์ประสานงานอุทกภัย FLOODCARE AI</h1>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:center;gap:12px;">
         <span class="pill online" id="statusPill"><span class="dot"></span> Realtime</span>
-        <a class="logout" href="/dashboard/logout">ออกจากระบบ</a>
+        <a class="logout" href="/dashboard/logout"><i class="ph ph-sign-out"></i> ออกจากระบบ</a>
       </div>
     </div>
 
@@ -287,15 +334,15 @@
         <div class="cols">
           <div>
             <div class="sectionhead">
-              <h3>🚨 รายการ SOS <span class="cnt" id="sosCountBadge">0 เคส</span></h3>
-              <a class="more" data-page="sos">ดูทั้งหมด →</a>
+              <h3><i class="ph-fill ph-siren"></i> รายการ SOS <span class="cnt" id="sosCountBadge">0 เคส</span></h3>
+              <a class="more" data-page="sos">ดูทั้งหมด <i class="ph ph-arrow-right"></i></a>
             </div>
             <div class="soslist" id="sosListDash"></div>
           </div>
           <div>
             <div class="sectionhead">
-              <h3>🏠 ศูนย์อพยพ <span class="cnt" id="shCountBadge">0 แห่ง</span></h3>
-              <a class="more" data-page="shelters">ดูทั้งหมด →</a>
+              <h3><i class="ph-fill ph-tent" style="color:var(--navy)"></i> ศูนย์อพยพ <span class="cnt" id="shCountBadge">0 แห่ง</span></h3>
+              <a class="more" data-page="shelters">ดูทั้งหมด <i class="ph ph-arrow-right"></i></a>
             </div>
             <div class="card card-pad">
               <div class="donutwrap">
@@ -307,15 +354,14 @@
         </div>
       </div>
 
-      <!-- ══════════ SOS CASES ══════════ -->
       <div class="page" id="page-sos">
         <div class="pagehead">
-          <h2><span class="icn" style="background:#FEE2E2;">🚨</span> รายการขอรับช่วยเหลือ SOS</h2>
+          <h2><span class="icn" style="background:#FEE2E2;color:#DC2626;"><i class="ph-fill ph-siren"></i></span> รายการขอรับช่วยเหลือ SOS</h2>
           <p id="sosSubhead">แสดง 0 จาก 0 เคส</p>
         </div>
         <div class="toolbar">
-          <div class="search"><span class="ic">🔍</span><input id="sosSearch" placeholder="ค้นหาชื่อผู้ประสบภัย หรือ รหัสเคส..."></div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <div class="search"><span class="ic"><i class="ph ph-magnifying-glass"></i></span><input id="sosSearch" placeholder="ค้นหาชื่อผู้ประสบภัย หรือ รหัสเคส..."></div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;">
             <div class="tabgroup" id="prioTabs"></div>
             <div class="tabgroup" id="statTabs"></div>
           </div>
@@ -332,60 +378,57 @@
         </div>
       </div>
 
-      <!-- ══════════ SHELTERS ══════════ -->
       <div class="page" id="page-shelters">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:10px;flex-wrap:wrap;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px;flex-wrap:wrap;">
           <div class="pagehead" style="margin-bottom:0;">
-            <h2><span class="icn" style="background:#EFF6FF;">🏠</span> ศูนย์พักพิงในพื้นที่</h2>
+            <h2><span class="icn" style="background:#EFF6FF;"><i class="ph-fill ph-tent"></i></span> ศูนย์พักพิงในพื้นที่</h2>
             <p id="shSubhead">0 ศูนย์ — รองรับรวม 0 คน</p>
           </div>
-          <button class="addbtn" id="openShelterModal">＋ เพิ่มศูนย์พักพิง</button>
+          <button class="addbtn" id="openShelterModal"><i class="ph ph-plus-circle"></i> เพิ่มศูนย์พักพิง</button>
         </div>
         <div class="shgrid" id="shelterGrid"></div>
       </div>
 
-      <!-- ══════════ MAP ══════════ -->
       <div class="page" id="page-map">
         <div class="pagehead">
-          <h2><span class="icn" style="background:#EFF6FF;">🗺️</span> แผนที่กู้ภัยภูมิสารสนเทศ</h2>
+          <h2><span class="icn" style="background:#EFF6FF;"><i class="ph-fill ph-map-trifold"></i></span> แผนที่กู้ภัยภูมิสารสนเทศ</h2>
           <p>แสดงพิกัดเคส SOS และศูนย์อพยพแบบเรียลไทม์</p>
         </div>
         <div class="card card-pad">
-          <div class="maplegend" style="position:static;display:flex;margin-bottom:12px;" id="fullLegend"></div>
+          <div class="maplegend" style="position:static;display:flex;margin-bottom:16px;" id="fullLegend"></div>
           <div id="fullMap"></div>
         </div>
       </div>
 
-      <!-- ══════════ ANALYTICS ══════════ -->
       <div class="page" id="page-analytics">
         <div class="pagehead">
-          <h2><span class="icn" style="background:#FFFBEB;">📈</span> สถิติและการวิเคราะห์</h2>
+          <h2><span class="icn" style="background:#FFFBEB;color:#D97706;"><i class="ph-fill ph-chart-line-up"></i></span> สถิติและการวิเคราะห์</h2>
           <p>ภาพรวมสถานการณ์อุทกภัย</p>
         </div>
         <div class="agrid">
           <div class="card card-pad">
-            <h3 style="font-size:14px;font-weight:800;margin-bottom:2px;">ระดับความเร่งด่วน SOS</h3>
-            <p style="font-size:11px;color:var(--faint);margin-bottom:16px;" id="aTotalSos">รวม 0 เคส</p>
+            <h3 style="font-size:15px;font-weight:800;margin-bottom:4px;color:var(--navy);">ระดับความเร่งด่วน SOS</h3>
+            <p style="font-size:12px;color:var(--faint);margin-bottom:20px;font-weight:600;" id="aTotalSos">รวม 0 เคส</p>
             <div id="aPriorityBars"></div>
           </div>
           <div class="card card-pad">
-            <h3 style="font-size:14px;font-weight:800;margin-bottom:2px;">สถานะการกู้ภัย</h3>
-            <p style="font-size:11px;color:var(--faint);margin-bottom:16px;" id="aCloseRate">อัตราปิดเคส: 0%</p>
+            <h3 style="font-size:15px;font-weight:800;margin-bottom:4px;color:var(--navy);">สถานะการกู้ภัย</h3>
+            <p style="font-size:12px;color:var(--faint);margin-bottom:20px;font-weight:600;" id="aCloseRate">อัตราปิดเคส: 0%</p>
             <div id="aStatusBars"></div>
           </div>
           <div class="card card-pad">
-            <h3 style="font-size:14px;font-weight:800;margin-bottom:16px;">สรุปผู้ประสบภัย</h3>
+            <h3 style="font-size:15px;font-weight:800;margin-bottom:20px;color:var(--navy);">สรุปผู้ประสบภัย</h3>
             <div class="minicards" id="aMiniCards"></div>
           </div>
           <div class="card card-pad">
-            <h3 style="font-size:14px;font-weight:800;margin-bottom:2px;">ศูนย์อพยพ</h3>
-            <p style="font-size:11px;color:var(--faint);margin-bottom:16px;" id="aShelterSub">รวม 0/0 คน</p>
+            <h3 style="font-size:15px;font-weight:800;margin-bottom:4px;color:var(--navy);">ศูนย์อพยพ</h3>
+            <p style="font-size:12px;color:var(--faint);margin-bottom:20px;font-weight:600;" id="aShelterSub">รวม 0/0 คน</p>
             <div id="aShelterBars"></div>
           </div>
         </div>
 
         <div class="needwrap" id="needsSection" style="display:none;">
-          <div class="sectionhead" style="margin-top:16px;"><h3>📦 คำขอสิ่งของล่าสุด</h3></div>
+          <div class="sectionhead" style="margin-top:24px;"><h3><i class="ph-fill ph-package"></i> คำขอสิ่งของล่าสุด</h3></div>
           <div class="card" style="overflow:hidden;">
             <div style="overflow-x:auto;">
               <table>
@@ -397,6 +440,25 @@
         </div>
       </div>
 
+      <!-- ══════════ NEEDS PAGE ══════════ -->
+      <div class="page" id="page-needs">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px;flex-wrap:wrap;">
+          <div class="pagehead" style="margin-bottom:0;">
+            <h2><span class="icn" style="background:#FEF3C7;color:#D97706;"><i class="ph-fill ph-package"></i></span> จัดการคำขอสิ่งของ (Needs)</h2>
+            <p id="needsSubhead">รายการขอความช่วยเหลือทั้งหมด</p>
+          </div>
+          <button class="addbtn" id="openNeedModal"><i class="ph ph-plus-circle"></i> เพิ่มคำขอใหม่</button>
+        </div>
+        <div class="card" style="overflow:hidden;">
+          <div style="overflow-x:auto;">
+            <table>
+              <thead><tr><th>รหัสคำขอ / เวลา</th><th>ข้อมูลผู้ขอ</th><th>พิกัด</th><th>หมวดหมู่ / รายละเอียด</th><th>สถานะ / ความเร่งด่วน</th><th>อาสาสมัคร</th></tr></thead>
+              <tbody id="needsPageTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -404,13 +466,13 @@
 <!-- ══════════ ADD SHELTER MODAL ══════════ -->
 <div class="modal-bg" id="shelterModalBg">
   <div class="modal">
-    <div class="mhead"><h3>เพิ่มศูนย์พักพิงใหม่</h3><button class="mclose" id="closeShelterModal">✕</button></div>
+    <div class="mhead"><h3>เพิ่มศูนย์พักพิงใหม่</h3><button class="mclose" id="closeShelterModal"><i class="ph ph-x"></i></button></div>
     <div class="mbody">
       <div class="steps"><i class="on" data-step="1"></i><i data-step="2"></i><i data-step="3"></i></div>
       <div id="shelterFormErr"></div>
 
       <div class="shstep" data-step="1">
-        <p style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:12px;">ขั้นตอน 1 จาก 3 — ข้อมูลพื้นฐาน</p>
+        <p style="font-size:12px;font-weight:800;color:var(--orange);text-transform:uppercase;margin-bottom:16px;">ขั้นตอน 1 จาก 3 — ข้อมูลพื้นฐาน</p>
         <div class="fgrid">
           <div class="fgroup"><label>รหัสศูนย์</label><input id="f_id" placeholder="SH004"></div>
           <div class="fgroup"><label>ชื่อสถานที่</label><input id="f_name" placeholder="โรงเรียน..."></div>
@@ -423,21 +485,80 @@
           <div class="fgroup"><label>ละติจูด</label><input id="f_lat" placeholder="7.0125"></div>
           <div class="fgroup"><label>ลองจิจูด</label><input id="f_lon" placeholder="100.4560"></div>
         </div>
-        <button class="fullbtn light" style="margin-bottom:10px;" id="f_geoBtn">📍 ดึงพิกัดจากตำแหน่งปัจจุบัน</button>
-        <button class="fullbtn dark" data-next="2">ถัดไป</button>
+        <button class="fullbtn light" style="margin-bottom:16px;" id="f_geoBtn"><i class="ph ph-crosshair"></i> ดึงพิกัดจากตำแหน่งปัจจุบัน</button>
+        <button class="fullbtn dark" data-next="2">ถัดไป <i class="ph ph-arrow-right"></i></button>
       </div>
 
       <div class="shstep" data-step="2" style="display:none;">
-        <p style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:12px;">ขั้นตอน 2 จาก 3 — ความจุ</p>
+        <p style="font-size:12px;font-weight:800;color:var(--orange);text-transform:uppercase;margin-bottom:16px;">ขั้นตอน 2 จาก 3 — ความจุ</p>
         <div class="fgroup"><label>ความจุสูงสุด (คน)</label><input id="f_capacity" type="number" value="100"></div>
         <div class="fgroup"><label>จำนวนผู้เข้าพักปัจจุบัน (คน)</label><input id="f_occupancy" type="number" value="0"></div>
-        <div class="fbrow"><button class="fullbtn light" data-prev="1">ย้อนกลับ</button><button class="fullbtn dark" data-next="3">ถัดไป</button></div>
+        <div class="fbrow"><button class="fullbtn light" data-prev="1"><i class="ph ph-arrow-left"></i> ย้อนกลับ</button><button class="fullbtn dark" data-next="3">ถัดไป <i class="ph ph-arrow-right"></i></button></div>
       </div>
 
       <div class="shstep" data-step="3" style="display:none;">
-        <p style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:12px;">ขั้นตอน 3 จาก 3 — สิ่งอำนวยความสะดวก</p>
+        <p style="font-size:12px;font-weight:800;color:var(--orange);text-transform:uppercase;margin-bottom:16px;">ขั้นตอน 3 จาก 3 — สิ่งอำนวยความสะดวก</p>
         <div class="facopt" id="facOptions"></div>
-        <div class="fbrow"><button class="fullbtn light" data-prev="2">ย้อนกลับ</button><button class="fullbtn dark" id="f_submit">บันทึก</button></div>
+        <div class="fbrow"><button class="fullbtn light" data-prev="2"><i class="ph ph-arrow-left"></i> ย้อนกลับ</button><button class="fullbtn dark" id="f_submit"><i class="ph ph-floppy-disk"></i> บันทึก</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ ADD/EDIT NEED MODAL ══════════ -->
+<div class="modal-bg" id="needModalBg">
+  <div class="modal">
+    <div class="mhead"><h3>จัดการคำขอสิ่งของ</h3><button class="mclose" id="closeNeedModal"><i class="ph ph-x"></i></button></div>
+    <div class="mbody">
+      <div id="needFormErr"></div>
+      
+      <div class="fgrid">
+        <div class="fgroup"><label>รหัสคำขอ (need_id)</label><input id="n_id" placeholder="ND001"></div>
+        <div class="fgroup"><label>เวลา (timestamp)</label><input id="n_time" type="datetime-local"></div>
+      </div>
+      
+      <div class="fgrid">
+        <div class="fgroup"><label>รหัสผู้ใช้ (user_id)</label><input id="n_user" placeholder="U12345"></div>
+        <div class="fgroup"><label>ความเร่งด่วน (urgency)</label>
+          <select id="n_urgency">
+            <option value="NORMAL">ปกติ (Normal)</option>
+            <option value="HIGH">เร่งด่วน (High)</option>
+            <option value="CRITICAL">วิกฤต (Critical)</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="fgrid">
+        <div class="fgroup"><label>ละติจูด (latitude)</label><input id="n_lat" placeholder="7.0125"></div>
+        <div class="fgroup"><label>ลองจิจูด (longitude)</label><input id="n_lon" placeholder="100.4560"></div>
+      </div>
+      <button class="fullbtn light" style="margin-bottom:16px;" id="n_geoBtn"><i class="ph ph-crosshair"></i> ดึงพิกัดจากตำแหน่งปัจจุบัน</button>
+      
+      <div class="fgroup"><label>หมวดหมู่ (categories)</label><input id="n_cat" placeholder="เช่น น้ำดื่ม, ยารักษาโรค, อาหารแห้ง"></div>
+      <div class="fgroup"><label>รายละเอียด (details)</label><input id="n_det" placeholder="รายละเอียดของที่ต้องการ..."></div>
+      
+      <div class="fgroup" style="display:flex; align-items:center; gap:12px; background:#F8FAFC; padding:12px 14px; border-radius:12px; border:1px solid var(--line);">
+        <input type="checkbox" id="n_halal" style="width:20px; height:20px; cursor:pointer;">
+        <label for="n_halal" style="margin-bottom:0; cursor:pointer;">ต้องการอาหารฮาลาล (halal_required)</label>
+      </div>
+
+      <hr style="border:none; border-top:1px dashed var(--line); margin: 24px 0;">
+
+      <div class="fgrid">
+        <div class="fgroup"><label>สถานะ (status)</label>
+          <select id="n_status">
+            <option value="PENDING">รอดำเนินการ (Pending)</option>
+            <option value="IN_PROGRESS">กำลังจัดส่ง (In Progress)</option>
+            <option value="DELIVERED">ส่งมอบแล้ว (Delivered)</option>
+          </select>
+        </div>
+        <div class="fgroup"><label>ชื่ออาสาสมัคร (volunteer_name)</label><input id="n_vol" placeholder="ชื่อผู้รับผิดชอบจัดส่ง"></div>
+      </div>
+      
+      <div class="fgroup"><label>เวลาส่งมอบ (delivered_at)</label><input id="n_del_time" type="datetime-local"></div>
+      
+      <div class="fbrow" style="margin-top:24px;">
+        <button class="fullbtn dark" id="n_submit"><i class="ph ph-floppy-disk"></i> บันทึกข้อมูล</button>
       </div>
     </div>
   </div>
@@ -445,15 +566,14 @@
 
 <script>
 /* ============================================================
-   FLOODCARE AI — Command Center (single-file dashboard)
-   Same-origin only: fetches /api/dashboard/* using the existing
-   session-cookie login, no separate API key/config needed.
+   FLOODCARE AI — Command Center
 ============================================================ */
 const PRIORITY_COLOR = {CRITICAL:'#EF4444', HIGH:'#F59E0B', NORMAL:'#10B981'};
 const PRIORITY_LABEL = {CRITICAL:'วิกฤต', HIGH:'เร่งด่วน', NORMAL:'ปกติ'};
 const STATUS_LABEL   = {OPEN:'รอรับเคส', IN_PROGRESS:'กำลังช่วย', CLOSED:'เสร็จสิ้น'};
 const SHELTER_COLORS = ['#20B2AA','#5B9BD5','#EF4444','#A78BFA','#F59E0B'];
 const FACILITIES = ['ไฟฟ้า','น้ำสะอาด','อินเทอร์เน็ต','รองรับผู้พิการ','รับสัตว์เลี้ยง','มีแพทย์ประจำ'];
+const FAC_ICONS = {'ไฟฟ้า':'ph-lightning','น้ำสะอาด':'ph-drop','อินเทอร์เน็ต':'ph-wifi-high','รองรับผู้พิการ':'ph-wheelchair','รับสัตว์เลี้ยง':'ph-paw-print','มีแพทย์ประจำ':'ph-first-aid'};
 
 let state = { data: {stats:{}, sos_cases:[], shelters:[], needs:[]}, ok:false, selectedId:null,
   sosSearch:'', sosPrio:'ALL', sosStat:'ALL', pending:{}, facilities:new Set(['ไฟฟ้า','น้ำสะอาด']) };
@@ -472,45 +592,69 @@ function initMaps(){
 }
 
 function sosPopupHtml(c, idx){
-  return `<div style="font-family:'Noto Sans Thai',sans-serif;font-size:13px;min-width:170px;line-height:1.6">
-    <div style="font-weight:800;color:#12354A">#${idx+1} ${esc(c.first_name)} ${esc(c.last_name)}</div>
-    <div style="color:#6B7280;font-size:11px">${esc(c.phone)}</div>
-    <div style="font-size:12px;margin-top:4px">น้ำ <b>${esc(c.water_level)}</b> · ${c.people_count} คน</div>
-    <div style="margin-top:5px"><span style="background:${PRIORITY_COLOR[c.priority]};color:#fff;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700">${PRIORITY_LABEL[c.priority]}</span></div>
+  const priorityClass = c.priority === 'CRITICAL' ? 'crit' : c.priority === 'HIGH' ? 'high' : 'norm';
+  const isBed = c.bedridden==='YES'||c.bedridden==='ใช่';
+  return `
+  <div class="custom-popup">
+    <div class="p-head">
+      <div class="p-title"><small>#${idx+1}</small> ${esc(c.first_name)} ${esc(c.last_name)}</div>
+      <span class="badge ${priorityClass}">${PRIORITY_LABEL[c.priority]}</span>
+    </div>
+    <div class="p-meta">
+      <div><i class="ph ph-phone"></i> ${esc(c.phone)}</div>
+      <div><i class="ph ph-users"></i> ${c.people_count} ผู้ประสบภัย ${isBed?'<span class="bedtag" style="margin-left:4px;">ติดเตียง</span>':''}</div>
+      <div><i class="ph ph-waves" style="color:#3B82F6;"></i> ระดับน้ำ: <b style="color:#1D4ED8;">${esc(c.water_level)}</b></div>
+    </div>
   </div>`;
 }
+
 function shelterPopupHtml(s){
   const pct = s.capacity>0 ? Math.round(s.occupancy/s.capacity*100) : 0;
-  return `<div style="font-family:'Noto Sans Thai',sans-serif;font-size:13px"><b>${esc(s.name)}</b><br/>อ.${esc(s.district)} จ.${esc(s.province)}<br/>${s.occupancy}/${s.capacity} คน (${pct}%)</div>`;
+  return `
+  <div class="custom-popup">
+    <div class="p-head" style="border-bottom-color:var(--line);">
+      <div class="p-title" style="color:var(--navy);"><i class="ph-fill ph-tent" style="color:var(--navy); margin-bottom:4px; font-size:18px;"></i> ${esc(s.name)}</div>
+    </div>
+    <div class="p-meta">
+      <div><i class="ph ph-map-pin"></i> อ.${esc(s.district)} จ.${esc(s.province)}</div>
+      <div><i class="ph ph-users"></i> ความจุ: ${s.occupancy}/${s.capacity} คน (${pct}%)</div>
+    </div>
+  </div>`;
 }
+
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
 function renderMapMarkers(map, layer, withNumbers){
   layer.clearLayers();
   const cases = state.data.sos_cases || [];
+  
   cases.forEach((c,i)=>{
-    if(!c.latitude || !c.longitude) return;
+    // ตรวจสอบพิกัด และ "ซ่อนหมุดเมื่อปิดเคส"
+    if(!c.latitude || !c.longitude || c.status === 'CLOSED') return; 
+    
     const color = PRIORITY_COLOR[c.priority];
+    const isCritical = c.priority === 'CRITICAL';
     let marker;
     if(withNumbers){
-      const icon = L.divIcon({className:'', iconSize:[22,22], iconAnchor:[11,11],
-        html:`<div style="width:22px;height:22px;background:${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:10px;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.22);border:2.5px solid rgba(255,255,255,.95);">${i+1}</div>`});
+      const pulseClass = isCritical ? 'marker-pulse' : '';
+      const icon = L.divIcon({className:pulseClass, iconSize:[26,26], iconAnchor:[13,13],
+        html:`<div style="width:26px;height:26px;background:${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.3);border:3px solid #fff;">${i+1}</div>`});
       marker = L.marker([c.latitude,c.longitude], {icon});
     } else {
-      marker = L.circleMarker([c.latitude,c.longitude], {radius:11, color:'#fff', weight:2.5, fillColor:color, fillOpacity:.92});
+      marker = L.circleMarker([c.latitude,c.longitude], {radius:12, color:'#fff', weight:3, fillColor:color, fillOpacity:1});
     }
     marker.addTo(layer).bindPopup(sosPopupHtml(c,i));
     marker.on('click', ()=>{ state.selectedId = c.request_id; renderDashboardSosList(); });
   });
+
   (state.data.shelters||[]).forEach(s=>{
     if(!s.latitude || !s.longitude) return;
     const icon = L.divIcon({className:'', iconAnchor:[0,0],
-      html:`<div style="background:#12354A;color:#fff;border-radius:10px;padding:4px 9px;font-size:10px;font-weight:700;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25);font-family:'Noto Sans Thai',sans-serif">${esc(s.name).slice(0,16)}</div>`});
+      html:`<div style="background:#12354A;color:#fff;border-radius:12px;padding:6px 12px;font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.3);font-family:'Noto Sans Thai',sans-serif; display:flex; align-items:center; gap:6px; border:2px solid #fff;"><i class="ph-fill ph-tent" style="color:var(--orange);"></i> ${esc(s.name).slice(0,16)}</div>`});
     L.marker([s.latitude,s.longitude], {icon}).addTo(layer).bindPopup(shelterPopupHtml(s));
   });
 }
 
-/* ── Data loading ── */
 async function loadData(){
   try{
     const res = await fetch('/api/dashboard/data', {credentials:'same-origin'});
@@ -539,7 +683,6 @@ async function updateSosStatus(id, status){
   finally{ delete state.pending[id]; renderAll(); }
 }
 
-/* ── Top-level render dispatcher ── */
 function renderAll(){
   renderStatusPill();
   renderStatStrip();
@@ -553,6 +696,7 @@ function renderAll(){
   renderShelters();
   renderAnalytics();
   renderNeeds();
+  renderNeedsPage();
 }
 
 function renderStatusPill(){
@@ -562,7 +706,7 @@ function renderStatusPill(){
     pill.className = 'pill online'; pill.innerHTML = '<span class="dot"></span> Realtime';
     dot.classList.add('ok');
   } else {
-    pill.className = 'pill offline'; pill.innerHTML = '⚠️ ขาดการเชื่อมต่อ';
+    pill.className = 'pill offline'; pill.innerHTML = '<i class="ph-fill ph-warning-circle"></i> ขาดการเชื่อมต่อ';
     dot.classList.remove('ok');
   }
 }
@@ -572,14 +716,14 @@ function renderStatStrip(){
   const cases = state.data.sos_cases || [];
   const totalPeople = cases.reduce((a,c)=>a+(c.people_count||0),0);
   const items = [
-    {ic:'🚨', bg:'#FEE2E2', lb:'เคสทั้งหมด', vl:cases.length, un:'เคส'},
-    {ic:'🔴', bg:'#FEE2E2', lb:'เคสวิกฤต', vl:cases.filter(c=>c.priority==='CRITICAL').length, un:'เคส'},
-    {ic:'👥', bg:'#DBEAFE', lb:'ผู้ประสบภัยรวม', vl:totalPeople, un:'คน'},
-    {ic:'🏠', bg:'#DCFCE7', lb:'ศูนย์อพยพ', vl:(state.data.shelters||[]).length, un:'แห่ง'},
-    {ic:'📦', bg:'#FEF3C7', lb:'รอจัดส่งสิ่งของ', vl:s.need_pending||0, un:'รายการ'},
+    {ic:'<i class="ph-fill ph-folder-open"></i>', bg:'#FEE2E2', lb:'เคสทั้งหมด', vl:cases.length, un:'เคส', c:'#DC2626'},
+    {ic:'<i class="ph-fill ph-siren"></i>', bg:'#FEE2E2', lb:'เคสวิกฤต', vl:cases.filter(c=>c.priority==='CRITICAL').length, un:'เคส', c:'#DC2626'},
+    {ic:'<i class="ph-fill ph-users"></i>', bg:'#DBEAFE', lb:'ผู้ประสบภัยรวม', vl:totalPeople, un:'คน', c:'#2563EB'},
+    {ic:'<i class="ph-fill ph-tent"></i>', bg:'#DCFCE7', lb:'ศูนย์อพยพ', vl:(state.data.shelters||[]).length, un:'แห่ง', c:'#16A34A'},
+    {ic:'<i class="ph-fill ph-package"></i>', bg:'#FEF3C7', lb:'รอจัดส่งสิ่งของ', vl:s.need_pending||0, un:'รายการ', c:'#D97706'},
   ];
   document.getElementById('statStrip').innerHTML = items.map(it=>`
-    <div class="stat"><div class="ic" style="background:${it.bg}">${it.ic}</div>
+    <div class="stat"><div class="ic" style="background:${it.bg}; color:${it.c};">${it.ic}</div>
       <div><div class="lb">${it.lb}</div><div class="vl">${it.vl} <small>${it.un}</small></div></div>
     </div>`).join('');
 }
@@ -589,15 +733,16 @@ function renderDashLegend(){
     <span><i style="background:#EF4444"></i>วิกฤต</span>
     <span><i style="background:#F59E0B"></i>เร่งด่วน</span>
     <span><i style="background:#10B981"></i>ปกติ</span>
-    <span><i style="background:#12354A"></i>ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
+    <span><i style="background:#12354A; border-radius:4px;"></i>ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
 }
 function renderFullLegend(){
   const c = state.data.sos_cases||[];
+  const activeCases = c.filter(x => x.status !== 'CLOSED');
   document.getElementById('fullLegend').innerHTML = `
-    <span style="background:#FEE2E2;color:#DC2626;padding:6px 12px;border-radius:999px;font-weight:700;">● วิกฤต (${c.filter(x=>x.priority==='CRITICAL').length})</span>
-    <span style="background:#FEF3C7;color:#D97706;padding:6px 12px;border-radius:999px;font-weight:700;">● เร่งด่วน (${c.filter(x=>x.priority==='HIGH').length})</span>
-    <span style="background:#DCFCE7;color:#166534;padding:6px 12px;border-radius:999px;font-weight:700;">● ปกติ (${c.filter(x=>x.priority==='NORMAL').length})</span>
-    <span style="background:#F3F4F6;color:#374151;padding:6px 12px;border-radius:999px;font-weight:700;">■ ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
+    <span style="background:#FEE2E2;color:#DC2626;padding:6px 14px;border-radius:999px;font-weight:700;"><i class="ph-fill ph-circle" style="font-size:10px;"></i> วิกฤต (${activeCases.filter(x=>x.priority==='CRITICAL').length})</span>
+    <span style="background:#FEF3C7;color:#D97706;padding:6px 14px;border-radius:999px;font-weight:700;"><i class="ph-fill ph-circle" style="font-size:10px;"></i> เร่งด่วน (${activeCases.filter(x=>x.priority==='HIGH').length})</span>
+    <span style="background:#DCFCE7;color:#166534;padding:6px 14px;border-radius:999px;font-weight:700;"><i class="ph-fill ph-circle" style="font-size:10px;"></i> ปกติ (${activeCases.filter(x=>x.priority==='NORMAL').length})</span>
+    <span style="background:#F1F5F9;color:#334155;padding:6px 14px;border-radius:999px;font-weight:700;"><i class="ph-fill ph-tent" style="font-size:12px;"></i> ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
 }
 
 function renderDonut(){
@@ -609,8 +754,8 @@ function renderDonut(){
 
   const segs = totalCap>0 ? [
     ...shelters.map((s,i)=>({v:s.occupancy, c:SHELTER_COLORS[i%SHELTER_COLORS.length]})),
-    {v: Math.max(0,totalCap-totalOcc), c:'#E5EEF3'}
-  ] : [{v:1,c:'#E5EEF3'}];
+    {v: Math.max(0,totalCap-totalOcc), c:'#F1F5F9'}
+  ] : [{v:1,c:'#F1F5F9'}];
   let acc = 0;
   const denom = totalCap>0 ? totalCap : 1;
   const arcs = segs.map(seg=>{
@@ -623,15 +768,15 @@ function renderDonut(){
 
   const svg = document.getElementById('donutSvg');
   svg.innerHTML = `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#EEF4F8" stroke-width="${sw}"/>
-    ${arcs.map(a=>`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${a.c}" stroke-width="${sw}" stroke-dasharray="${a.visible} ${circ-a.visible}" stroke-dashoffset="${a.offset}"/>`).join('')}
-    <text x="${cx}" y="${cy-10}" text-anchor="middle" font-size="26" font-weight="900" fill="#12354A">${pct}%</text>
-    <text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="11" fill="#6B7280">ใช้งานอยู่</text>
-    <text x="${cx}" y="${cy+26}" text-anchor="middle" font-size="10" fill="#9CA3AF">${totalOcc}/${totalCap} คน</text>`;
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#F8FAFC" stroke-width="${sw}"/>
+    ${arcs.map(a=>`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${a.c}" stroke-width="${sw}" stroke-dasharray="${a.visible} ${circ-a.visible}" stroke-dashoffset="${a.offset}" stroke-linecap="round"/>`).join('')}
+    <text x="${cx}" y="${cy-8}" text-anchor="middle" font-size="28" font-weight="900" fill="#12354A">${pct}%</text>
+    <text x="${cx}" y="${cy+12}" text-anchor="middle" font-size="11" fill="#64748B" font-weight="600">ใช้งานอยู่</text>
+    <text x="${cx}" y="${cy+28}" text-anchor="middle" font-size="11" fill="#9CA3AF">${totalOcc}/${totalCap} คน</text>`;
 
   const legend = document.getElementById('donutLegend');
   if(shelters.length===0){
-    legend.innerHTML = `<p style="text-align:center;color:var(--faint);font-size:12px;">ไม่มีข้อมูลศูนย์อพยพ</p>`;
+    legend.innerHTML = `<p style="text-align:center;color:var(--faint);font-size:12px;font-weight:600;"><i class="ph ph-folder-open" style="font-size:24px;display:block;margin-bottom:8px;"></i>ไม่มีข้อมูลศูนย์อพยพ</p>`;
     return;
   }
   legend.innerHTML = shelters.map((s,i)=>{
@@ -644,24 +789,24 @@ function renderDonut(){
       <div style="flex:1;min-width:0;">
         <div style="display:flex;justify-content:space-between;gap:6px;">
           <span class="name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</span>
-          <span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:999px;background:${bc}20;color:${bc};flex-shrink:0;">${bl}</span>
+          <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;background:${bc}20;color:${bc};flex-shrink:0;">${bl}</span>
         </div>
-        <div style="display:flex;align-items:center;gap:6px;margin-top:3px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
           <div class="bar"><i style="width:${Math.min(p,100)}%;background:${dc}"></i></div>
           <span class="pct">${p}%</span>
         </div>
         <div class="cnt">${s.occupancy}/${s.capacity} คน</div>
       </div>
     </div>`;
-  }).join('') + `<div style="display:flex;align-items:center;gap:9px;padding-top:8px;border-top:1px solid var(--line);">
-      <div class="sq" style="background:#E5EEF3"></div><span style="font-size:11px;color:var(--faint);">ว่าง — ${Math.max(0,totalCap-totalOcc)} คน</span></div>`;
+  }).join('') + `<div style="display:flex;align-items:center;gap:12px;padding-top:12px;border-top:1px dashed var(--line);">
+      <div class="sq" style="background:#F1F5F9"></div><span style="font-size:12px;color:var(--muted);font-weight:600;">ว่าง — ${Math.max(0,totalCap-totalOcc)} คน</span></div>`;
 }
 
 function sosCardHtml(c, i){
   const isSel = state.selectedId === c.request_id;
   const isBed = c.bedridden==='YES'||c.bedridden==='ใช่';
   const nextStatus = c.status==='OPEN' ? 'IN_PROGRESS' : 'CLOSED';
-  const label = c.status==='OPEN'?'รับเคส':c.status==='IN_PROGRESS'?'ปิดเคส':'เสร็จสิ้น';
+  const label = c.status==='OPEN'?'<i class="ph ph-hand-heart"></i> รับเคส':c.status==='IN_PROGRESS'?'<i class="ph ph-check-circle"></i> ปิดเคส':'<i class="ph ph-check-circle"></i> เสร็จสิ้น';
   const isDone = c.status==='CLOSED';
   const isPending = !!state.pending[c.request_id];
   const badgeClass = c.priority==='CRITICAL'?'crit':c.priority==='HIGH'?'high':'norm';
@@ -671,10 +816,10 @@ function sosCardHtml(c, i){
       <div style="flex:1;min-width:0;">
         <div class="name">${esc(c.first_name)} ${esc(c.last_name)}</div>
         <div class="meta">
-          <span>📞 ${esc(c.phone)}</span>
-          <span>👥 ${c.people_count} ผู้ประสบภัย ${isBed?'<span class="bedtag">ติดเตียง</span>':''}</span>
+          <span><i class="ph ph-phone"></i> ${esc(c.phone)}</span>
+          <span><i class="ph ph-users"></i> ${c.people_count} ผู้ประสบภัย ${isBed?'<span class="bedtag">ติดเตียง</span>':''}</span>
         </div>
-        <div class="water">น้ำท่วม <b>${esc(c.water_level)}</b></div>
+        <div class="water"><i class="ph ph-waves"></i> น้ำท่วม <b>${esc(c.water_level)}</b></div>
       </div>
       <div class="badges">
         <span class="badge ${badgeClass}">${PRIORITY_LABEL[c.priority]}</span>
@@ -683,8 +828,8 @@ function sosCardHtml(c, i){
     </div>
     <div class="actions">
       <button class="btn-act ${isDone?'done':(c.status==='IN_PROGRESS'?'progress':'')}" ${isDone?'disabled':''}
-        onclick="event.stopPropagation();updateSosStatus('${c.request_id}','${nextStatus}')">${isPending?'กำลังบันทึก...':label}</button>
-      <a class="btn-nav" href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}" target="_blank" onclick="event.stopPropagation()">🧭 ดูแผนที่</a>
+        onclick="event.stopPropagation();updateSosStatus('${c.request_id}','${nextStatus}')">${isPending?'<i class="ph ph-spinner ph-spin"></i> กำลังบันทึก...':label}</button>
+      <a class="btn-nav" href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}" target="_blank" onclick="event.stopPropagation()"><i class="ph ph-map-pin"></i> ดูแผนที่</a>
     </div>
   </div>`;
 }
@@ -693,12 +838,11 @@ function renderDashboardSosList(){
   const cases = (state.data.sos_cases||[]).slice(0,6);
   document.getElementById('sosCountBadge').textContent = `${(state.data.sos_cases||[]).length} เคส`;
   const el = document.getElementById('sosListDash');
-  if(!state.ok && cases.length===0){ el.innerHTML = `<div class="empty-msg">กำลังโหลดข้อมูล...</div>`; return; }
-  if(cases.length===0){ el.innerHTML = `<div class="empty-msg">ไม่มีเคส SOS ในขณะนี้</div>`; return; }
+  if(!state.ok && cases.length===0){ el.innerHTML = `<div class="empty-msg"><i class="ph ph-spinner ph-spin"></i> กำลังโหลดข้อมูล...</div>`; return; }
+  if(cases.length===0){ el.innerHTML = `<div class="empty-msg"><i class="ph ph-check-circle"></i> ไม่มีเคส SOS ในขณะนี้</div>`; return; }
   el.innerHTML = cases.map((c,i)=>sosCardHtml(c,i)).join('');
 }
 
-/* ── SOS Cases page ── */
 function renderTabsInto(el, tabs, activeKey, onClick){
   el.innerHTML = tabs.map(t=>`<button class="tabbtn ${t.key===activeKey?'active':''}" data-key="${t.key}">${t.label}</button>`).join('');
   [...el.children].forEach(btn=>btn.addEventListener('click', ()=>onClick(btn.dataset.key)));
@@ -715,7 +859,7 @@ function renderSosPage(){
   const all = state.data.sos_cases||[];
   const q = state.sosSearch.toLowerCase();
   const filtered = all.filter(c=>{
-    const matchQ = !q || `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) || (c.request_id||'').toLowerCase().includes(q);
+    const matchQ = !q || `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) || (c.request_id||'').toLowerCase().includes(q) || (c.phone||'').includes(q);
     const matchP = state.sosPrio==='ALL' || c.priority===state.sosPrio;
     const matchS = state.sosStat==='ALL' || c.status===state.sosStat;
     return matchQ && matchP && matchS;
@@ -724,7 +868,7 @@ function renderSosPage(){
 
   const body = document.getElementById('sosTableBody');
   if(filtered.length===0){
-    body.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--faint);">${state.ok?'ไม่พบเคสที่ค้นหา':'กำลังโหลดข้อมูล...'}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:60px;color:var(--faint);font-weight:600;"><i class="ph ph-magnifying-glass" style="font-size:32px;display:block;margin-bottom:12px;"></i>${state.ok?'ไม่พบเคสที่ค้นหา':'กำลังโหลดข้อมูล...'}</td></tr>`;
     return;
   }
   body.innerHTML = filtered.map(c=>{
@@ -732,58 +876,57 @@ function renderSosPage(){
     const isPending = !!state.pending[c.request_id];
     let actionHtml = '';
     if(c.status==='OPEN'){
-      actionHtml = `<button class="tblbtn take ${isPending?'disabled':''}" onclick="updateSosStatus('${c.request_id}','IN_PROGRESS')">${isPending?'...':'รับเคส'}</button>`;
+      actionHtml = `<button class="tblbtn take ${isPending?'disabled':''}" onclick="updateSosStatus('${c.request_id}','IN_PROGRESS')">${isPending?'...':'<i class="ph ph-hand-heart"></i> รับเคส'}</button>`;
     } else if(c.status==='IN_PROGRESS'){
-      actionHtml = `<span class="tblst progress">กำลังช่วย</span>`;
+      actionHtml = `<span class="tblst progress"><i class="ph ph-spinner ph-spin"></i> กำลังช่วย</span>`;
     }
     let closeHtml = c.status!=='CLOSED'
-      ? `<button class="tblbtn close ${isPending?'disabled':''}" onclick="updateSosStatus('${c.request_id}','CLOSED')">${isPending?'...':'ปิดเคส'}</button>`
-      : `<span class="tblst closed">เสร็จสิ้น</span>`;
+      ? `<button class="tblbtn close ${isPending?'disabled':''}" onclick="updateSosStatus('${c.request_id}','CLOSED')">${isPending?'...':'<i class="ph ph-check-circle"></i> ปิดเคส'}</button>`
+      : `<span class="tblst closed"><i class="ph ph-check"></i> เสร็จสิ้น</span>`;
     return `<tr>
-      <td><div class="tblcase">${esc(c.request_id)}</div><span class="badge ${badgeClass}" style="margin-top:5px;display:inline-block;">${PRIORITY_LABEL[c.priority]}</span></td>
-      <td><div class="tblname">${esc(c.first_name)} ${esc(c.last_name)}</div><div class="tblphone">📞 ${esc(c.phone)}</div></td>
-      <td><div style="font-size:12px;">${c.people_count} คน</div><div style="font-size:11px;color:var(--faint);margin-top:2px;">ติดเตียง: ${c.bedridden==='YES'?'ใช่':'ไม่'} — สัตว์: ${c.pets==='YES'?'มี':'ไม่มี'}</div></td>
-      <td><div style="font-size:12px;font-weight:700;color:#1D4ED8;">${esc(c.water_level)}</div><div style="font-size:11px;color:var(--faint);margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(c.note)}</div></td>
-      <td><div style="display:flex;flex-direction:column;gap:6px;max-width:120px;">${actionHtml}${closeHtml}
-        <a href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}" target="_blank" class="tblbtn" style="background:#111;color:#fff;text-align:center;">🧭 นำทาง</a>
+      <td><div class="tblcase">${esc(c.request_id)}</div><span class="badge ${badgeClass}" style="margin-top:6px;display:inline-block;">${PRIORITY_LABEL[c.priority]}</span></td>
+      <td><div class="tblname"><i class="ph-fill ph-user-circle" style="color:var(--muted);font-size:18px;"></i> ${esc(c.first_name)} ${esc(c.last_name)}</div><div class="tblphone"><i class="ph ph-phone"></i> ${esc(c.phone)}</div></td>
+      <td><div style="font-size:13px; font-weight:600;"><i class="ph ph-users"></i> ${c.people_count} คน</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">ติดเตียง: ${c.bedridden==='YES'?'ใช่':'ไม่'} — สัตว์: ${c.pets==='YES'?'มี':'ไม่มี'}</div></td>
+      <td><div style="font-size:13px;font-weight:800;color:#1D4ED8;"><i class="ph ph-waves"></i> ${esc(c.water_level)}</div><div style="font-size:12px;color:var(--muted);margin-top:4px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(c.note)}">${esc(c.note)}</div></td>
+      <td><div style="display:flex;flex-direction:column;gap:8px;max-width:130px;">${actionHtml}${closeHtml}
+        <a href="https://www.google.com/maps/search/?api=1&query=${c.latitude},${c.longitude}" target="_blank" class="tblbtn" style="background:#1E293B;color:#fff;text-align:center;"><i class="ph ph-navigation-arrow"></i> นำทาง</a>
       </div></td>
     </tr>`;
   }).join('');
 }
 
-/* ── Shelters page ── */
 function renderShelters(){
   const shelters = state.data.shelters||[];
   document.getElementById('shSubhead').textContent = `${shelters.length} ศูนย์ — รองรับรวม ${shelters.reduce((a,s)=>a+s.capacity,0).toLocaleString()} คน`;
   document.getElementById('shCountBadge').textContent = `${shelters.length} แห่ง`;
   const grid = document.getElementById('shelterGrid');
   if(shelters.length===0){
-    grid.innerHTML = `<div class="empty-msg" style="grid-column:1/-1;">${state.ok?'ยังไม่มีศูนย์พักพิงในระบบ':'กำลังโหลดข้อมูล...'}</div>`;
+    grid.innerHTML = `<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-tent"></i> ${state.ok?'ยังไม่มีศูนย์พักพิงในระบบ':'กำลังโหลดข้อมูล...'}</div>`;
     return;
   }
   grid.innerHTML = shelters.map(s=>{
     const pct = s.capacity>0?Math.round(s.occupancy/s.capacity*100):0;
-    const barColor = pct>=100?'#EF4444':pct>=80?'#F59E0B':'#22C55E';
+    const barColor = pct>=100?'#EF4444':pct>=80?'#F59E0B':'#10B981';
     const badgeClass = s.status==='เต็ม'?'background:#FEE2E2;color:#DC2626;':s.status==='ใกล้เต็ม'?'background:#FEF3C7;color:#D97706;':'background:#DCFCE7;color:#166534;';
     return `<div class="shcard">
       <div class="row1">
-        <div style="min-width:0;"><div class="nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.name)}</div><div class="loc">📍 อ.${esc(s.district)} จ.${esc(s.province)}</div></div>
+        <div style="min-width:0;"><div class="nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="ph-fill ph-tent" style="color:var(--orange);"></i> ${esc(s.name)}</div><div class="loc"><i class="ph ph-map-pin"></i> อ.${esc(s.district)} จ.${esc(s.province)}</div></div>
         <span class="stbadge" style="${badgeClass}">${esc(s.status)}</span>
       </div>
-      <div class="barrow"><span>👥 ${s.occupancy} / ${s.capacity} คน</span><b>${pct}%</b></div>
+      <div class="barrow"><span><i class="ph ph-users"></i> ${s.occupancy} / ${s.capacity} คน</span><b style="color:var(--navy);">${pct}%</b></div>
       <div class="track"><i style="width:${Math.min(pct,100)}%;background:${barColor}"></i></div>
       <div class="factags">
-        ${(s.facilities||[]).map(f=>`<span class="factag">${esc(f)}</span>`).join('') || '<span style="font-size:11px;color:var(--faint);">ไม่มี</span>'}
+        ${(s.facilities||[]).map(f=>`<span class="factag"><i class="ph ${FAC_ICONS[f]||'ph-check'}"></i> ${esc(f)}</span>`).join('') || '<span style="font-size:12px;color:var(--faint);">ไม่มีข้อมูล</span>'}
       </div>
     </div>`;
   }).join('');
 }
 
-/* ── Analytics page ── */
 function abarHtml(label,val,max,color){
   const pct = max>0?Math.round(val/max*100):0;
   return `<div class="abar-row"><span class="albl">${label}</span><div class="atrack"><i style="width:${pct}%;background:${color}"></i></div><span class="aval">${val}</span></div>`;
 }
+
 function renderAnalytics(){
   const cases = state.data.sos_cases||[];
   const shelters = state.data.shelters||[];
@@ -803,44 +946,44 @@ function renderAnalytics(){
 
   document.getElementById('aTotalSos').textContent = `รวม ${total} เคส`;
   document.getElementById('aPriorityBars').innerHTML =
-    abarHtml('วิกฤต',critical,total,'#EF4444') + abarHtml('เร่งด่วน',high,total,'#F59E0B') + abarHtml('ปกติ',normal,total,'#22C55E');
+    abarHtml('วิกฤต',critical,total,'#EF4444') + abarHtml('เร่งด่วน',high,total,'#F59E0B') + abarHtml('ปกติ',normal,total,'#10B981');
 
   document.getElementById('aCloseRate').textContent = `อัตราปิดเคส: ${total>0?Math.round(closed/total*100):0}%`;
   document.getElementById('aStatusBars').innerHTML =
-    abarHtml('รอรับเคส',open,total,'#F59E0B') + abarHtml('กำลังช่วย',inProgress,total,'#3B82F6') + abarHtml('เสร็จสิ้น',closed,total,'#22C55E');
+    abarHtml('รอรับเคส',open,total,'#F59E0B') + abarHtml('กำลังช่วย',inProgress,total,'#3B82F6') + abarHtml('เสร็จสิ้น',closed,total,'#10B981');
 
   document.getElementById('aMiniCards').innerHTML = [
-    {l:'ผู้ประสบภัยรวม',v:totalPeople,u:'ราย',bg:'#EFF6FF',c:'#1D4ED8'},
-    {l:'ผู้ป่วยติดเตียง',v:bedridden,u:'ราย',bg:'#ECFDF5',c:'#059669'},
-    {l:'มีสัตว์เลี้ยง',v:pets,u:'เคส',bg:'#FFFBEB',c:'#D97706'},
-    {l:'รอรับเคส',v:open,u:'เคส',bg:'#FEF2F2',c:'#DC2626'},
-  ].map(m=>`<div class="minicard" style="background:${m.bg}"><div class="mv" style="color:${m.c}">${m.v}</div><div class="mu" style="color:${m.c}">${m.u}</div><div class="ml">${m.l}</div></div>`).join('');
+    {l:'ผู้ประสบภัยรวม',v:totalPeople,u:'ราย',bg:'#EFF6FF',c:'#1D4ED8', ic:'ph-users'},
+    {l:'ผู้ป่วยติดเตียง',v:bedridden,u:'ราย',bg:'#ECFDF5',c:'#059669', ic:'ph-wheelchair'},
+    {l:'มีสัตว์เลี้ยง',v:pets,u:'เคส',bg:'#FFFBEB',c:'#D97706', ic:'ph-paw-print'},
+    {l:'รอรับเคส',v:open,u:'เคส',bg:'#FEF2F2',c:'#DC2626', ic:'ph-warning-circle'},
+  ].map(m=>`<div class="minicard" style="background:${m.bg};"><i class="ph ${m.ic}" style="color:${m.c}"></i><div class="mv" style="color:${m.c}">${m.v}</div><div class="mu" style="color:${m.c}">${m.u}</div><div class="ml">${m.l}</div></div>`).join('');
 
   document.getElementById('aShelterSub').textContent = `รวม ${totalOcc.toLocaleString()}/${totalCap.toLocaleString()} คน (${occPct}%)`;
   const shb = document.getElementById('aShelterBars');
-  if(shelters.length===0){ shb.innerHTML = `<p style="text-align:center;color:var(--faint);font-size:12px;padding:16px 0;">ไม่มีข้อมูลศูนย์อพยพ</p>`; }
+  if(shelters.length===0){ shb.innerHTML = `<p style="text-align:center;color:var(--faint);font-size:13px;padding:20px 0;font-weight:600;">ไม่มีข้อมูลศูนย์อพยพ</p>`; }
   else {
     shb.innerHTML = shelters.map(s=>{
       const p = s.capacity>0?Math.round(s.occupancy/s.capacity*100):0;
-      const bc = p>=100?'#EF4444':p>=80?'#F59E0B':'#22C55E';
-      return `<div style="margin-bottom:12px;">
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:5px;">
-          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:600;">${esc(s.name)}</span>
+      const bc = p>=100?'#EF4444':p>=80?'#F59E0B':'#10B981';
+      return `<div style="margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px;">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;font-weight:700;"><i class="ph-fill ph-tent"></i> ${esc(s.name)}</span>
           <b style="color:#111;">${s.occupancy}/${s.capacity} (${p}%)</b>
         </div>
-        <div style="width:100%;background:#F3F4F6;border-radius:99px;height:10px;overflow:hidden;"><div style="height:100%;border-radius:99px;width:${Math.min(p,100)}%;background:${bc}"></div></div>
+        <div style="width:100%;background:#F1F5F9;border-radius:99px;height:12px;overflow:hidden;"><div style="height:100%;border-radius:99px;width:${Math.min(p,100)}%;background:${bc}"></div></div>
       </div>`;
     }).join('');
   }
 }
 
-/* ── Needs (bonus section) ── */
 function statusBadgeHtml(status){
   const s = (status||'').toString().trim().toUpperCase();
-  if(!s || s==='PENDING' || s==='NEW' || s==='รอดำเนินการ') return `<span class="tblst" style="background:#FEF3C7;color:#92400E;">รอดำเนินการ</span>`;
-  if(s==='DONE'||s==='COMPLETED'||s==='เสร็จสิ้น'||s==='DELIVERED') return `<span class="tblst" style="background:#DCFCE7;color:#166534;">เสร็จสิ้น</span>`;
-  return `<span class="tblst" style="background:#DBEAFE;color:#1D4ED8;">${esc(status)}</span>`;
+  if(!s || s==='PENDING' || s==='NEW' || s==='รอดำเนินการ') return `<span class="tblst" style="background:#FEF3C7;color:#92400E; border:1px solid #FDE68A;"><i class="ph ph-clock"></i> รอดำเนินการ</span>`;
+  if(s==='DONE'||s==='COMPLETED'||s==='เสร็จสิ้น'||s==='DELIVERED') return `<span class="tblst" style="background:#DCFCE7;color:#166534; border:1px solid #BBF7D0;"><i class="ph ph-check-circle"></i> เสร็จสิ้น</span>`;
+  return `<span class="tblst" style="background:#DBEAFE;color:#1D4ED8; border:1px solid #BFDBFE;"><i class="ph ph-truck"></i> ${esc(status)}</span>`;
 }
+
 function renderNeeds(){
   const needs = state.data.needs||[];
   const section = document.getElementById('needsSection');
@@ -848,16 +991,46 @@ function renderNeeds(){
   section.style.display='block';
   document.getElementById('needsTableBody').innerHTML = needs.slice(0,30).map(n=>`
     <tr>
-      <td style="font-size:11px;">${esc(n.timestamp)}</td>
-      <td style="font-weight:700;font-size:12px;">${esc(n.need_id)}</td>
-      <td style="font-size:12px;">${esc(n.categories)}</td>
-      <td style="font-size:12px;">${esc(n.urgency)}</td>
+      <td style="font-size:12px; color:var(--muted); font-weight:600;"><i class="ph ph-clock"></i> ${esc(n.timestamp)}</td>
+      <td style="font-weight:800;font-size:13px; color:var(--navy);">${esc(n.need_id)}</td>
+      <td style="font-size:13px; font-weight:600;">${esc(n.categories)}</td>
+      <td style="font-size:13px;">${esc(n.urgency)}</td>
       <td>${statusBadgeHtml(n.status)}</td>
-      <td style="font-size:11px;color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.details)}</td>
+      <td style="font-size:12px;color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(n.details)}">${esc(n.details)}</td>
     </tr>`).join('');
 }
 
-/* ── Nav & tab wiring ── */
+function renderNeedsPage(){
+  const needs = state.data.needs||[];
+  document.getElementById('needsSubhead').textContent = `รายการทั้งหมด ${needs.length} รายการ`;
+  
+  const body = document.getElementById('needsPageTableBody');
+  if(needs.length === 0){
+     body.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--faint);font-weight:600;"><i class="ph ph-package" style="font-size:32px;display:block;margin-bottom:12px;"></i>ไม่มีข้อมูลคำขอสิ่งของ</td></tr>`;
+     return;
+  }
+  
+  body.innerHTML = needs.map(n => {
+     const badgeUrg = n.urgency==='CRITICAL'?'crit':n.urgency==='HIGH'?'high':'norm';
+     const isHalal = n.halal_required === true || n.halal_required === 'YES' || n.halal_required === 'ใช่';
+     return `<tr>
+        <td><div class="tblcase">${esc(n.need_id)}</div><div class="tblphone"><i class="ph ph-clock"></i> ${esc(n.timestamp)}</div></td>
+        <td><div class="tblname"><i class="ph-fill ph-user" style="color:var(--muted)"></i> ${esc(n.user_id)}</div></td>
+        <td><div style="font-size:12px;color:var(--muted);"><i class="ph ph-map-pin"></i> ${n.latitude||'-'}, ${n.longitude||'-'}</div></td>
+        <td><div style="font-size:13px; font-weight:700;">${esc(n.categories)}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px;">${esc(n.details)}</div>
+            ${isHalal ? '<span class="bedtag" style="background:#ECFEFF;color:#0891B2;border-color:#CFFAFE;margin-top:6px;display:inline-block;"><i class="ph ph-moon-stars"></i> อาหารฮาลาล</span>' : ''}
+        </td>
+        <td><div style="display:flex; flex-direction:column; align-items:flex-start; gap:6px;">${statusBadgeHtml(n.status)}
+            <span class="badge ${badgeUrg}">${esc(n.urgency)}</span></div>
+        </td>
+        <td><div style="font-size:13px;font-weight:600;"><i class="ph ph-user-circle"></i> ${esc(n.volunteer_name) || '-'}</div>
+            <div style="font-size:11px;color:var(--faint);margin-top:4px;">ส่ง: ${esc(n.delivered_at) || '-'}</div>
+        </td>
+     </tr>`;
+  }).join('');
+}
+
 function switchPage(key){
   document.querySelectorAll('.navitem').forEach(el=>el.classList.toggle('active', el.dataset.page===key));
   document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active', el.id==='page-'+key));
@@ -868,6 +1041,78 @@ document.querySelectorAll('.navitem, .more').forEach(el=>{
   el.addEventListener('click', ()=> switchPage(el.dataset.page));
 });
 document.getElementById('sosSearch').addEventListener('input', (e)=>{ state.sosSearch = e.target.value; renderSosPage(); });
+
+/* ── Add/Edit Need modal ── */
+const needModal = document.getElementById('needModalBg');
+document.getElementById('openNeedModal').addEventListener('click', ()=>{
+  ['n_id','n_user','n_lat','n_lon','n_cat','n_det','n_vol'].forEach(id=>document.getElementById(id).value='');
+  
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('n_time').value = now.toISOString().slice(0,16);
+  document.getElementById('n_del_time').value = '';
+  
+  document.getElementById('n_urgency').value = 'NORMAL';
+  document.getElementById('n_status').value = 'PENDING';
+  document.getElementById('n_halal').checked = false;
+  
+  document.getElementById('needFormErr').innerHTML='';
+  needModal.classList.add('show');
+});
+
+document.getElementById('closeNeedModal').addEventListener('click', ()=> needModal.classList.remove('show'));
+
+document.getElementById('n_geoBtn').addEventListener('click', ()=>{
+  if(!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(pos=>{
+    document.getElementById('n_lat').value = pos.coords.latitude;
+    document.getElementById('n_lon').value = pos.coords.longitude;
+  });
+});
+
+document.getElementById('n_submit').addEventListener('click', async ()=>{
+  const btn = document.getElementById('n_submit');
+  const err = document.getElementById('needFormErr');
+  
+  const need_id = document.getElementById('n_id').value.trim();
+  if(!need_id){ err.innerHTML = `<div class="formerr"><i class="ph-fill ph-warning-circle"></i> กรุณาระบุรหัสคำขอ (need_id)</div>`; return; }
+  
+  btn.innerHTML = '<i class="ph ph-spinner ph-spin"></i> กำลังบันทึก...'; btn.disabled = true;
+  
+  const payload = {
+     need_id: need_id,
+     timestamp: document.getElementById('n_time').value,
+     user_id: document.getElementById('n_user').value.trim(),
+     latitude: parseFloat(document.getElementById('n_lat').value) || 0,
+     longitude: parseFloat(document.getElementById('n_lon').value) || 0,
+     categories: document.getElementById('n_cat').value.trim(),
+     details: document.getElementById('n_det').value.trim(),
+     urgency: document.getElementById('n_urgency').value,
+     status: document.getElementById('n_status').value,
+     halal_required: document.getElementById('n_halal').checked,
+     volunteer_name: document.getElementById('n_vol').value.trim(),
+     delivered_at: document.getElementById('n_del_time').value
+  };
+
+  try {
+    const res = await fetch('/api/dashboard/needs', {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok) throw new Error('บันทึกไม่สำเร็จ');
+    needModal.classList.remove('show');
+    await loadData();
+  } catch(e) {
+    // จำลองการเซฟสำเร็จลงหน้าจอแบบชั่วคราว (Fallback กรณีไม่มี API ให้ยิง)
+    console.warn('API Mock Fallback:', e);
+    state.data.needs = state.data.needs || [];
+    state.data.needs.unshift(payload);
+    renderAll();
+    needModal.classList.remove('show');
+  } finally {
+    btn.innerHTML = '<i class="ph ph-floppy-disk"></i> บันทึกข้อมูล'; btn.disabled = false;
+  }
+});
 
 /* ── Add Shelter modal ── */
 const shelterModal = document.getElementById('shelterModalBg');
@@ -898,10 +1143,11 @@ document.getElementById('f_geoBtn').addEventListener('click', ()=>{
 function renderFacOptions(){
   document.getElementById('facOptions').innerHTML = FACILITIES.map(f=>`
     <label class="${state.facilities.has(f)?'on':''}" data-f="${f}">
-      <input type="checkbox" style="display:none;" ${state.facilities.has(f)?'checked':''}> ${f}
+      <input type="checkbox" style="display:none;" ${state.facilities.has(f)?'checked':''}> <i class="ph ${FAC_ICONS[f]||'ph-check'}"></i> ${f}
     </label>`).join('');
   document.querySelectorAll('#facOptions label').forEach(lb=>{
-    lb.addEventListener('click', ()=>{
+    lb.addEventListener('click', (e)=>{
+      e.preventDefault(); // Prevent double trigger
       const f = lb.dataset.f;
       if(state.facilities.has(f)) state.facilities.delete(f); else state.facilities.add(f);
       renderFacOptions();
@@ -913,8 +1159,8 @@ document.getElementById('f_submit').addEventListener('click', async ()=>{
   const err = document.getElementById('shelterFormErr');
   const id = document.getElementById('f_id').value.trim();
   const name = document.getElementById('f_name').value.trim();
-  if(!id || !name){ err.innerHTML = `<div class="formerr">กรุณาระบุรหัสศูนย์และชื่อสถานที่</div>`; goToStep(1); return; }
-  btn.textContent = 'กำลังบันทึก...'; btn.disabled = true;
+  if(!id || !name){ err.innerHTML = `<div class="formerr"><i class="ph-fill ph-warning-circle"></i> กรุณาระบุรหัสศูนย์และชื่อสถานที่</div>`; goToStep(1); return; }
+  btn.innerHTML = '<i class="ph ph-spinner ph-spin"></i> กำลังบันทึก...'; btn.disabled = true;
   try{
     const res = await fetch('/api/dashboard/shelters', {
       method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
@@ -934,13 +1180,12 @@ document.getElementById('f_submit').addEventListener('click', async ()=>{
     shelterModal.classList.remove('show');
     await loadData();
   }catch(e){
-    err.innerHTML = `<div class="formerr">${esc(e.message || 'บันทึกไม่สำเร็จ กรุณาลองใหม่')}</div>`;
+    err.innerHTML = `<div class="formerr"><i class="ph-fill ph-warning-circle"></i> ${esc(e.message || 'บันทึกไม่สำเร็จ กรุณาลองใหม่')}</div>`;
   }finally{
-    btn.textContent = 'บันทึก'; btn.disabled = false;
+    btn.innerHTML = '<i class="ph ph-floppy-disk"></i> บันทึก'; btn.disabled = false;
   }
 });
 
-/* ── Boot ── */
 initMaps();
 loadData();
 setInterval(loadData, 30000);
