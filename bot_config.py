@@ -1086,26 +1086,31 @@ class SheetsManager:
             Logger.error("Sheets", f"merge_sos_case error: {e}")
             return False
 
-    def update_sos_status(self, case_id: str, new_status: str, responder_name: str = "-") -> bool:
+    def update_sos_status(self, case_id: str, new_status: str, responder_name: str = "-") -> Optional[dict]:
         """
         Updates an sos_requests row's status by request_id (e.g. OPEN -> IN_PROGRESS -> CLOSED),
         used by the dashboard's "รับเคส" / "ปิดเคส" actions. Also stamps accepted_at /
         completed_at if those columns exist, so responders can see how long a case took.
+
+        Returns the case's record dict (as it was before the update, so callers can
+        read its user_id to notify the reporter on LINE) — or None if not found / on error.
         """
         client = self.get_client()
         if not client:
-            return False
+            return None
         try:
             sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             ws = sheet.worksheet("sos_requests")
             records = ws.get_all_records()
             row_number = None
+            matched_record = None
             for idx, rec in enumerate(records, start=2):
                 if str(rec.get("request_id", "")) == case_id:
                     row_number = idx
+                    matched_record = rec
                     break
             if not row_number:
-                return False
+                return None
 
             now_str = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
             updates = {"status": new_status, "responder_name": responder_name or "-"}
@@ -1123,10 +1128,10 @@ class SheetsManager:
             if cells:
                 ws.update_cells(cells, value_input_option='RAW')
             cache.sheets.delete("sheets:sos_requests")
-            return True
+            return matched_record
         except Exception as e:
             Logger.error("Sheets", f"update_sos_status error: {e}")
-            return False
+            return None
 
 sheets_mgr = SheetsManager()
 
