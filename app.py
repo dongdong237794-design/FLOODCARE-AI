@@ -908,7 +908,6 @@ def api_dashboard_data():
     sos_cases = []
     for rec in sos_sorted:
         user = users_by_id.get(str(rec.get("user_id", "")), {})
-        groups_text = f"{rec.get('vulnerable_groups', '')} {rec.get('group_types', '')}"
         status = str(rec.get("status", "OPEN")).strip().upper() or "OPEN"
         if status not in ("OPEN", "IN_PROGRESS", "CLOSED"):
             status = "OPEN"
@@ -917,20 +916,23 @@ def api_dashboard_data():
             priority = "NORMAL"
 
         try:
-            people_count = int(float(rec.get("victim_count", 1) or 1))
+            people_count = int(float(rec.get("people_count", 1) or 1))
         except (TypeError, ValueError):
             people_count = 1
 
+        def _is_yes(val):
+            return str(val or "").strip() in ("ใช่", "YES", "yes", "TRUE", "true", "1")
+
         sos_cases.append({
-            "request_id": rec.get("case_id", "-"),
+            "request_id": rec.get("request_id", "-"),
             "first_name": user.get("first_name", "") or "ไม่ระบุชื่อ",
             "last_name": user.get("last_name", "") or "",
             "phone": user.get("phone", "-") or "-",
             "people_count": people_count,
-            "bedridden": "YES" if _has_keyword(groups_text, ["ติดเตียง", "bedridden"]) else "NO",
-            "pets": "YES" if _has_keyword(groups_text, ["สัตว์เลี้ยง", "pet"]) else "NO",
-            "water_level": rec.get("water_level_status", "-") or "-",
-            "note": rec.get("details", "-") or "-",
+            "bedridden": "YES" if _is_yes(rec.get("bedridden")) else "NO",
+            "pets": "YES" if _is_yes(rec.get("pets")) else "NO",
+            "water_level": rec.get("water_level", "-") or "-",
+            "note": rec.get("note", "-") or "-",
             "priority": priority,
             "status": status,
             "latitude": _num(rec.get("latitude")),
@@ -1027,19 +1029,21 @@ def api_dashboard_create_shelter():
     facilities = data.get("facilities", [])
     facilities_str = ", ".join(facilities) if isinstance(facilities, list) else str(facilities or "-")
 
-    success = sheets_mgr.batch_append("Shelters", [[
-        shelter_id,
-        name,
-        data.get("province", "-") or "-",
-        data.get("district", "-") or "-",
-        latitude,
-        longitude,
-        capacity,
-        occupancy,
-        status_label,
-        "-", "-", "-",
-        facilities_str or "-",
-    ]])
+    success = sheets_mgr.append_row_by_headers("Shelters", {
+        "ShelterID": shelter_id,
+        "Name": name,
+        "Province": data.get("province", "-") or "-",
+        "District": data.get("district", "-") or "-",
+        "Latitude": latitude,
+        "Longitude": longitude,
+        "Capacity": capacity,
+        "Occupancy": occupancy,
+        "Status": status_label,
+        "Beds": "-",
+        "Toilets": "-",
+        "Parking": "-",
+        "Facilities": facilities_str or "-",
+    })
 
     if success:
         cache.sheets.delete("sheets:Shelters")
@@ -1100,55 +1104,61 @@ def api_sos_submit():
 
         timestamp = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Look up this reporter's household (set during registration) so that
-        # SOS reports fired by different members of the same household within
-        # a short window get merged into a single case instead of duplicated.
+        # Look up this reporter's household (only active once a 'household_id'
+        # column exists in both 'users' and 'sos_requests' — safely inert
+        # otherwise) so SOS reports fired by different members of the same
+        # household within a short window get merged into a single case.
         user_record = sheets_mgr.get_user_record(user_id)
         household_id = (user_record or {}).get("household_id", "-") or "-"
 
-        new_victim_count = int(str(data.get("victim_count", "1")).strip() or 1)
+        new_people_count = int(str(data.get("victim_count", "1")).strip() or 1)
         new_priority = data.get("priority", "NORMAL")
         PRIORITY_RANK = {"NORMAL": 1, "HIGH": 2, "CRITICAL": 3}
+
+        # Split the selected vulnerable-group checkboxes into their own
+        # yes/no columns — this is how the live 'sos_requests' sheet is
+        # actually laid out (separate 'children' / 'elderly' / 'bedridden' /
+        # 'pets' columns rather than one combined text field).
+        groups_text = str(data.get("vulnerable_groups", "")).lower()
+        def _flag(*keywords):
+            return "ใช่" if any(k in groups_text for k in keywords) else "-"
+        children_flag = _flag("เด็ก")
+        elderly_flag = _flag("สูงอายุ", "คนชรา")
+        bedridden_flag = _flag("ติดเตียง")
+        pets_flag = _flag("สัตว์เลี้ยง", "สัตว์")
 
         merge_row, existing_case = sheets_mgr.find_open_case_by_household(household_id, window_minutes=45)
 
         if merge_row and existing_case:
             # --- Merge into the existing household case, no duplicate row ---
-            case_id = existing_case.get("case_id", "-")
+            case_id = existing_case.get("request_id", "-")
 
             try:
-                combined_victims = int(str(existing_case.get("victim_count", "1")).strip() or 1) + new_victim_count
+                combined_people = int(str(existing_case.get("people_count", "1")).strip() or 1) + new_people_count
             except ValueError:
-                combined_victims = new_victim_count
+                combined_people = new_people_count
 
-            def _merge_csv(old_val: str, new_val: str) -> str:
-                items = [v.strip() for v in f"{old_val},{new_val}".split(",") if v.strip() and v.strip() != "-"]
-                seen, ordered = set(), []
-                for it in items:
-                    if it not in seen:
-                        seen.add(it)
-                        ordered.append(it)
-                return ", ".join(ordered) if ordered else "-"
-
-            combined_groups = _merge_csv(existing_case.get("vulnerable_groups", ""), data.get("vulnerable_groups", ""))
-            combined_types = _merge_csv(existing_case.get("group_types", ""), data.get("group_types", ""))
+            def _merge_flag(old_val: str, new_val: str) -> str:
+                return "ใช่" if "ใช่" in (old_val, new_val) else "-"
 
             old_priority = str(existing_case.get("priority", "NORMAL")).upper()
             combined_priority = old_priority if PRIORITY_RANK.get(old_priority, 1) >= PRIORITY_RANK.get(new_priority, 1) else new_priority
 
-            old_details = str(existing_case.get("details", "-") or "-")
+            old_note = str(existing_case.get("note", "-") or "-")
             new_note = data.get("details", "-") or "-"
-            combined_details = (
-                old_details if old_details != "-" else ""
+            combined_note = (
+                old_note if old_note != "-" else ""
             ) + f"\n[+รายงานซ้ำจากครัวเรือนเดียวกัน {timestamp}] {new_note}"
-            combined_details = combined_details.strip() or "-"
+            combined_note = combined_note.strip() or "-"
 
             success = sheets_mgr.merge_sos_case(merge_row, {
-                "victim_count": combined_victims,
-                "vulnerable_groups": combined_groups,
-                "group_types": combined_types,
+                "people_count": combined_people,
+                "children": _merge_flag(existing_case.get("children", "-"), children_flag),
+                "elderly": _merge_flag(existing_case.get("elderly", "-"), elderly_flag),
+                "bedridden": _merge_flag(existing_case.get("bedridden", "-"), bedridden_flag),
+                "pets": _merge_flag(existing_case.get("pets", "-"), pets_flag),
                 "priority": combined_priority,
-                "details": combined_details,
+                "note": combined_note,
             })
 
             Logger.info("SOS_API", f"Merged household report into existing case {case_id} (household {household_id})")
@@ -1167,24 +1177,23 @@ def api_sos_submit():
         # --- No existing open household case — create a new one ---
         case_id = generate_case_id()
 
-        success = sheets_mgr.batch_append("sos_requests", [[
-            case_id,
-            household_id,
-            user_id,
-            timestamp,
-            data.get("latitude", "0"),
-            data.get("longitude", "0"),
-            data.get("water_level_status", "-"),
-            new_victim_count,
-            data.get("vulnerable_groups", ""),
-            data.get("group_types", ""),
-            data.get("urgency_level", "ต่ำ"),
-            data.get("details", "-"),
-            data.get("photo_url", "-"),
-            new_priority,
-            "OPEN",
-            "-", "-", "-", "-"
-        ]])
+        success = sheets_mgr.append_row_by_headers("sos_requests", {
+            "request_id": case_id,
+            "household_id": household_id,
+            "user_id": user_id,
+            "timestamp": timestamp,
+            "latitude": data.get("latitude", "0"),
+            "longitude": data.get("longitude", "0"),
+            "people_count": new_people_count,
+            "children": children_flag,
+            "elderly": elderly_flag,
+            "bedridden": bedridden_flag,
+            "pets": pets_flag,
+            "water_level": data.get("water_level_status", "-"),
+            "note": data.get("details", "-"),
+            "priority": new_priority,
+            "status": "OPEN",
+        })
         
         Logger.info("SOS_API", f"Submitted case {case_id}")
 
@@ -1217,19 +1226,20 @@ def api_need_submit():
         need_id = generate_need_id()
         timestamp = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
         
-        success = sheets_mgr.batch_append("user_needs", [[
-            need_id,
-            timestamp,
-            user_id,
-            data.get("latitude", "0"),
-            data.get("longitude", "0"),
-            data.get("categories", ""),
-            data.get("details", "-"),
-            data.get("urgency", "ไม่ด่วน"),
-            "PENDING",
-            data.get("halal", "FALSE"),
-            "-", "-"
-        ]])
+        success = sheets_mgr.append_row_by_headers("user_needs", {
+            "need_id": need_id,
+            "timestamp": timestamp,
+            "user_id": user_id,
+            "latitude": data.get("latitude", "0"),
+            "longitude": data.get("longitude", "0"),
+            "categories": data.get("categories", ""),
+            "details": data.get("details", "-"),
+            "urgency": data.get("urgency", "ไม่ด่วน"),
+            "status": "PENDING",
+            "halal_required": data.get("halal", "FALSE"),
+            "volunteer_name": "-",
+            "delivered_at": "-",
+        })
         
         Logger.info("Need_API", f"Submitted need {need_id}")
 
@@ -1290,28 +1300,28 @@ def api_register_submit():
 
         register_date = get_bangkok_time().strftime("%Y-%m-%d")
 
-        success = sheets_mgr.batch_append("users", [[
-            user_id,
-            household_id,
-            first_name,
-            last_name,
-            phone,
-            housing_type,
-            house_no or "-",
-            condo_floor or "-",
-            condo_room or "-",
-            province,
-            district,
-            sub_district,
-            data.get("latitude", "0"),
-            data.get("longitude", "0"),
-            data.get("member_count", "1"),
-            data.get("emergency_contact", "-") or "-",
-            "TRUE",
-            "TRUE" if data.get("consent_pdpa") else "FALSE",
-            register_date,
-            "ACTIVE",
-        ]])
+        success = sheets_mgr.append_row_by_headers("users", {
+            "user_id": user_id,
+            "household_id": household_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "phone": phone,
+            "housing_type": housing_type,
+            "house_no": house_no or "-",
+            "condo_floor": condo_floor or "-",
+            "condo_room": condo_room or "-",
+            "province": province,
+            "district": district,
+            "sub_district": sub_district,
+            "gps_lat": data.get("latitude", "0"),
+            "gps_lon": data.get("longitude", "0"),
+            "member_count": data.get("member_count", "1"),
+            "emergency_contact": data.get("emergency_contact", "-") or "-",
+            "sms_enabled": "TRUE",
+            "consent_pdpa": "TRUE" if data.get("consent_pdpa") else "FALSE",
+            "register_date": register_date,
+            "status": "ACTIVE",
+        })
 
         cache.sheets.delete("sheets:users")
         Logger.info("Register_API", f"Registered user {bot_config.hash_user_id(user_id)}")
