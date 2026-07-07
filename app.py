@@ -917,6 +917,15 @@ def api_dashboard_data():
     # --- Normalized data for the React dashboard (artifacts/floodcare-dashboard) ---
     users_by_id = {str(u.get("user_id", "")): u for u in user_records}
 
+    # Attach the reporter's registered name/phone to each need request so the
+    # dashboard can show a real name instead of a raw LINE user_id.
+    for rec in need_sorted:
+        u = users_by_id.get(str(rec.get("user_id", "")), {})
+        first = u.get("first_name", "") or ""
+        last = u.get("last_name", "") or ""
+        rec["reporter_name"] = f"{first} {last}".strip() or "ไม่ระบุชื่อ"
+        rec["reporter_phone"] = u.get("phone", "-") or "-"
+
     def _num(val, default=0):
         try:
             return float(val)
