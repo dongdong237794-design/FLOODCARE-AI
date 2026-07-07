@@ -1241,22 +1241,29 @@ WEATHER_CONDITION_MAP = {
     11: "เย็น", 12: "ร้อนจัด"
 }
 
+# WMO weather codes used by the Open-Meteo fallback (api.open-meteo.com) —
+# keyless and globally available, so weather keeps working even if the TMD
+# token is missing/expired or TMD's quota/service is temporarily down.
+OPEN_METEO_CONDITION_MAP = {
+    0: "แจ่มใส", 1: "แจ่มใสเป็นส่วนใหญ่", 2: "เมฆบางส่วน", 3: "เมฆมาก",
+    45: "หมอก", 48: "หมอกน้ำแข็ง",
+    51: "ฝนละอองเล็กน้อย", 53: "ฝนละอองปานกลาง", 55: "ฝนละอองหนัก",
+    56: "ฝนละอองเยือกแข็งเล็กน้อย", 57: "ฝนละอองเยือกแข็งหนัก",
+    61: "ฝนเล็กน้อย", 63: "ฝนปานกลาง", 65: "ฝนหนัก",
+    66: "ฝนเยือกแข็งเล็กน้อย", 67: "ฝนเยือกแข็งหนัก",
+    71: "หิมะเล็กน้อย", 73: "หิมะปานกลาง", 75: "หิมะหนัก", 77: "เกล็ดหิมะ",
+    80: "ฝนซู่เล็กน้อย", 81: "ฝนซู่ปานกลาง", 82: "ฝนซู่รุนแรง",
+    85: "หิมะซู่เล็กน้อย", 86: "หิมะซู่หนัก",
+    95: "ฝนฟ้าคะนอง", 96: "ฝนฟ้าคะนองมีลูกเห็บเล็กน้อย", 99: "ฝนฟ้าคะนองมีลูกเห็บหนัก",
+}
+
 TMD_SOURCE_URL = "https://www.tmd.go.th"
 
 
-def get_live_weather_data(lat: float, lon: float) -> dict:
-    start = time.time()
-    cache_key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
-
-    cached = cache.weather.get(cache_key)
-    if cached:
-        Logger.perf("Weather", "cache_hit", (time.time() - start) * 1000)
-        return cached
-
+def _get_weather_from_tmd(lat: float, lon: float) -> dict:
+    """Primary source: Thai Meteorological Department (requires TMD_ACCESS_TOKEN)."""
     if not TMD_ACCESS_TOKEN or not requests:
-        result = {"ok": False, "error": "ไม่ได้ตั้งค่า TMD_ACCESS_TOKEN", "source": "TMD"}
-        cache.weather.set(cache_key, result)
-        return result
+        return {"ok": False, "error": "ไม่ได้ตั้งค่า TMD_ACCESS_TOKEN", "source": "TMD"}
 
     try:
         url = "https://data.tmd.go.th/nwpapi/v1/forecast/location/hourly/at"
@@ -1265,24 +1272,26 @@ def get_live_weather_data(lat: float, lon: float) -> dict:
 
         resp = requests.get(url, headers=headers, params=params, timeout=8)
 
+        if resp.status_code == 401 or resp.status_code == 403:
+            Logger.error("Weather", f"TMD auth error {resp.status_code}: {resp.text[:300]}")
+            return {"ok": False, "error": "TMD_ACCESS_TOKEN ไม่ถูกต้องหรือหมดอายุ", "source": "TMD"}
         if resp.status_code == 429:
-            result = {"ok": False, "error": "ระบบ TMD หนาแน่น กรุณาลองใหม่ในอีก 1 นาที", "source": "TMD"}
-            return result
+            Logger.error("Weather", f"TMD rate-limited: {resp.text[:300]}")
+            return {"ok": False, "error": "ระบบ TMD หนาแน่น กรุณาลองใหม่ในอีก 1 นาที", "source": "TMD"}
 
         resp.raise_for_status()
         data = resp.json()
 
         forecasts = data.get("WeatherForecasts", [])
         if not forecasts:
-            result = {"ok": False, "error": "ไม่พบข้อมูลพยากรณ์สำหรับพิกัดนี้", "source": "TMD"}
-            cache.weather.set(cache_key, result)
-            return result
+            Logger.error("Weather", f"TMD returned no forecasts for {lat},{lon}: {str(data)[:300]}")
+            return {"ok": False, "error": "ไม่พบข้อมูลพยากรณ์สำหรับพิกัดนี้จาก TMD", "source": "TMD"}
 
         latest = forecasts[0].get("forecasts", [])[0]
         d = latest.get("data", {})
         code = d.get("cond", 0)
 
-        result = {
+        return {
             "ok": True,
             "temp": d.get("tc", "-"),
             "rh": d.get("rh", "-"),
@@ -1291,15 +1300,77 @@ def get_live_weather_data(lat: float, lon: float) -> dict:
             "source": "TMD",
             "error": None,
         }
-        cache.weather.set(cache_key, result)
-
-        Logger.perf("Weather", "api_call", (time.time() - start) * 1000)
-        return result
     except Exception as e:
-        Logger.error("Weather", f"API error: {e}")
-        result = {"ok": False, "error": "ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้", "source": "TMD"}
-        cache.weather.set(cache_key, result)
-        return result
+        Logger.error("Weather", f"TMD API exception: {e}")
+        return {"ok": False, "error": f"TMD API error: {e}", "source": "TMD"}
+
+
+def _get_weather_from_open_meteo(lat: float, lon: float) -> dict:
+    """Fallback source: Open-Meteo (no API key, no quota) — used automatically
+    whenever TMD is unavailable, so the weather feature never goes fully dark."""
+    if not requests:
+        return {"ok": False, "error": "requests library not available", "source": "Open-Meteo"}
+    try:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat, "longitude": lon,
+            "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
+            "timezone": "Asia/Bangkok",
+        }
+        resp = requests.get(url, params=params, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+        current = data.get("current", {})
+        if not current:
+            Logger.error("Weather", f"Open-Meteo returned no current data for {lat},{lon}: {str(data)[:300]}")
+            return {"ok": False, "error": "ไม่พบข้อมูลอากาศสำหรับพิกัดนี้", "source": "Open-Meteo"}
+
+        code = current.get("weather_code", 0)
+        return {
+            "ok": True,
+            "temp": current.get("temperature_2m", "-"),
+            "rh": current.get("relative_humidity_2m", "-"),
+            "wind": current.get("wind_speed_10m", "-"),
+            "desc": OPEN_METEO_CONDITION_MAP.get(code, "ไม่ระบุ"),
+            "source": "Open-Meteo",
+            "error": None,
+        }
+    except Exception as e:
+        Logger.error("Weather", f"Open-Meteo API exception: {e}")
+        return {"ok": False, "error": f"Open-Meteo API error: {e}", "source": "Open-Meteo"}
+
+
+def get_live_weather_data(lat: float, lon: float) -> dict:
+    """
+    Returns current weather for (lat, lon). Tries TMD first (official Thai
+    source); if that fails for ANY reason (missing/expired token, TMD quota,
+    TMD outage, no data for this point), automatically falls back to
+    Open-Meteo (keyless, globally reliable) instead of showing an error —
+    so 'เช็คสภาพอากาศ' keeps working even when TMD alone would not.
+    """
+    start = time.time()
+    cache_key = f"{round(float(lat), 2)},{round(float(lon), 2)}"
+
+    cached = cache.weather.get(cache_key)
+    if cached:
+        Logger.perf("Weather", "cache_hit", (time.time() - start) * 1000)
+        return cached
+
+    result = _get_weather_from_tmd(lat, lon)
+
+    if not result.get("ok"):
+        Logger.info("Weather", f"TMD unavailable ({result.get('error')}) — falling back to Open-Meteo")
+        fallback = _get_weather_from_open_meteo(lat, lon)
+        if fallback.get("ok"):
+            result = fallback
+        else:
+            # Both sources failed — surface the TMD error (primary source) but
+            # log both so the real cause is easy to find in the server logs.
+            Logger.error("Weather", f"Both TMD and Open-Meteo failed. TMD={result.get('error')} | Open-Meteo={fallback.get('error')}")
+
+    cache.weather.set(cache_key, result)
+    Logger.perf("Weather", "api_call", (time.time() - start) * 1000)
+    return result
 
 
 def get_live_weather_scraper(lat: float, lon: float) -> str:
