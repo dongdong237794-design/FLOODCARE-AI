@@ -472,7 +472,7 @@
                 <tr>
                   <th>รหัสคำขอ</th>
                   <th>เวลา</th>
-                  <th>ผู้ขอ (User ID)</th>
+                  <th>ผู้ขอความช่วยเหลือ</th>
                   <th>ละติจูด, ลองจิจูด</th>
                   <th>หมวดหมู่สิ่งของ</th>
                   <th>รายละเอียด</th>
@@ -846,7 +846,7 @@ function renderNeedsPage(){
      return `<tr>
         <td style="font-weight:700; color:var(--navy);">${esc(n.need_id)}</td>
         <td>${esc(n.timestamp)}</td>
-        <td>${esc(n.user_id)}</td>
+        <td><div style="font-weight:700;">${esc(n.reporter_name || 'ไม่ระบุชื่อ')}</div><div style="font-size:11px;color:var(--text-muted);"><i class="ph ph-phone"></i> ${esc(n.reporter_phone || '-')}</div></td>
         <td>${n.latitude||'-'}, ${n.longitude||'-'}</td>
         <td style="font-weight:600;">${esc(n.categories)}</td>
         <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${esc(n.details)}</td>
