@@ -1029,9 +1029,10 @@ def api_dashboard_update_sos_status(case_id):
     reporter_id = case_record.get("user_id")
     if reporter_id and reporter_id != "unknown":
         if new_status == "IN_PROGRESS":
+            responder_text = f" (โดยเจ้าหน้าที่ {responder_name})" if responder_name and responder_name != "-" else ""
             notify_text = (
                 f"📣 อัปเดตเคส {case_id}\n\n"
-                f"ทีมกู้ภัยได้รับเรื่องและกำลังเดินทางไปช่วยเหลือคุณแล้วครับ 🚤\n"
+                f"ทีมกู้ภัย{responder_text}ได้รับเรื่องและกำลังเดินทางไปช่วยเหลือคุณแล้วครับ 🚤\n"
                 f"กรุณาอยู่ในที่ปลอดภัยและรอการติดต่อจากเจ้าหน้าที่"
             )
             _push_save_confirmation(reporter_id, notify_text)
