@@ -1160,6 +1160,20 @@
                     document.getElementById('step5').classList.add('hidden');
                     document.getElementById('successScreen').classList.remove('hidden');
                     document.getElementById('successScreen').classList.add('fade-in');
+                } else if (result.need_register) {
+                    const hotline = result.emergency_hotline || '1784';
+                    showCustomAlert(
+                        'กรุณาลงทะเบียนข้อมูลส่วนตัวก่อนแจ้งเหตุ SOS ครับ กำลังพาไปหน้าลงทะเบียน... \n\n' +
+                        'หากเหตุฉุกเฉินรุนแรง โทรสายด่วน ' + hotline + ' ได้ทันทีระหว่างรอครับ',
+                        'error'
+                    );
+                    setTimeout(() => {
+                        const registerLiffId = '{{ register_liff_id }}';
+                        if (registerLiffId) {
+                            window.location.href = 'https://liff.line.me/' + registerLiffId;
+                        }
+                    }, 2600);
+                    return;
                 } else {
                     throw new Error(result.error || 'ระบบเซิร์ฟเวอร์ขัดข้อง');
                 }
