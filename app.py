@@ -471,20 +471,15 @@ def handle_image_message(event):
 def _require_registered(event, user_id) -> bool:
     """
     Checks the 'users' sheet for this LINE user_id before letting them use
-    SOS / ขอความช่วยเหลือ. If they haven't registered yet, sends the
-    registration form instead and returns False so the caller stops there.
+    SOS / ขอความช่วยเหลือ. If they haven't registered yet, sends a single
+    card with a button that opens the registration link directly — no
+    extra text message first, just one clear tap to get to the form.
     """
     user_record = sheets_mgr.get_user_record(user_id)
     if user_record:
         return True
 
-    line_bot_api.reply_message(
-        event.reply_token,
-        [
-            TextSendMessage(text="กรุณากรอกข้อมูลส่วนตัวเพื่อลงทะเบียนก่อนใช้งานฟีเจอร์นี้ครับ 🙏\nกรอกครั้งเดียว ใช้เวลาไม่ถึง 1 นาที"),
-            build_register_form_flex("คุณ"),
-        ]
-    )
+    line_bot_api.reply_message(event.reply_token, build_register_form_flex("คุณ"))
     return False
 
 
@@ -777,8 +772,8 @@ def _render_liff_page(template_name: str, page_label: str):
             liff_id = NEED_LIFF_ID
         elif "register" in template_name:
             liff_id = REGISTER_LIFF_ID
-            
-        return render_template(template_name, liff_id=liff_id)
+
+        return render_template(template_name, liff_id=liff_id, register_liff_id=REGISTER_LIFF_ID)
     except Exception as e:
         import traceback
         Logger.error(
@@ -917,14 +912,22 @@ def api_dashboard_data():
     # --- Normalized data for the React dashboard (artifacts/floodcare-dashboard) ---
     users_by_id = {str(u.get("user_id", "")): u for u in user_records}
 
-    # Attach the reporter's registered name/phone to each need request so the
-    # dashboard can show a real name instead of a raw LINE user_id.
+    # Attach the reporter's name/phone to each need request so the dashboard
+    # shows a real name instead of a raw LINE user_id. Newer rows already
+    # store first_name/last_name/phone directly (written at submit time);
+    # older rows fall back to joining against the 'users' sheet by user_id.
     for rec in need_sorted:
-        u = users_by_id.get(str(rec.get("user_id", "")), {})
-        first = u.get("first_name", "") or ""
-        last = u.get("last_name", "") or ""
-        rec["reporter_name"] = f"{first} {last}".strip() or "ไม่ระบุชื่อ"
-        rec["reporter_phone"] = u.get("phone", "-") or "-"
+        stored_first = (rec.get("first_name") or "").strip()
+        stored_last = (rec.get("last_name") or "").strip()
+        if stored_first or stored_last:
+            rec["reporter_name"] = f"{stored_first} {stored_last}".strip()
+            rec["reporter_phone"] = rec.get("phone", "-") or "-"
+        else:
+            u = users_by_id.get(str(rec.get("user_id", "")), {})
+            first = u.get("first_name", "") or ""
+            last = u.get("last_name", "") or ""
+            rec["reporter_name"] = f"{first} {last}".strip() or "ไม่ระบุชื่อ"
+            rec["reporter_phone"] = u.get("phone", "-") or "-"
 
     def _num(val, default=0):
         try:
@@ -1029,10 +1032,9 @@ def api_dashboard_update_sos_status(case_id):
     reporter_id = case_record.get("user_id")
     if reporter_id and reporter_id != "unknown":
         if new_status == "IN_PROGRESS":
-            responder_text = f" (โดยเจ้าหน้าที่ {responder_name})" if responder_name and responder_name != "-" else ""
             notify_text = (
                 f"📣 อัปเดตเคส {case_id}\n\n"
-                f"ทีมกู้ภัย{responder_text}ได้รับเรื่องและกำลังเดินทางไปช่วยเหลือคุณแล้วครับ 🚤\n"
+                f"ทีมกู้ภัยได้รับเรื่องและกำลังเดินทางไปช่วยเหลือคุณแล้วครับ 🚤\n"
                 f"กรุณาอยู่ในที่ปลอดภัยและรอการติดต่อจากเจ้าหน้าที่"
             )
             _push_save_confirmation(reporter_id, notify_text)
@@ -1159,6 +1161,16 @@ def api_sos_submit():
         # otherwise) so SOS reports fired by different members of the same
         # household within a short window get merged into a single case.
         user_record = sheets_mgr.get_user_record(user_id)
+
+        if not user_record:
+            Logger.info("SOS_API", f"Blocked unregistered SOS submission from {user_id}")
+            return jsonify({
+                "success": False,
+                "error": "กรุณาลงทะเบียนข้อมูลส่วนตัวก่อนแจ้งเหตุ SOS ครับ เพื่อให้ทีมกู้ภัยติดต่อกลับและช่วยเหลือคุณได้ถูกต้อง",
+                "need_register": True,
+                "emergency_hotline": "1784",
+            }), 403
+
         household_id = (user_record or {}).get("household_id", "-") or "-"
 
         new_people_count = int(str(data.get("victim_count", "1")).strip() or 1)
@@ -1273,7 +1285,8 @@ def api_need_submit():
         verified_uid = g.get("verified_user_id")
         user_id = verified_uid or data.get("user_id", "unknown")
 
-        if not sheets_mgr.get_user_record(user_id):
+        user_record = sheets_mgr.get_user_record(user_id)
+        if not user_record:
             return jsonify({"success": False, "error": "กรุณาลงทะเบียนข้อมูลส่วนตัวก่อนขอความช่วยเหลือ", "need_register": True}), 403
 
         need_id = generate_need_id()
@@ -1283,6 +1296,9 @@ def api_need_submit():
             "need_id": need_id,
             "timestamp": timestamp,
             "user_id": user_id,
+            "first_name": user_record.get("first_name", "") or "-",
+            "last_name": user_record.get("last_name", "") or "-",
+            "phone": user_record.get("phone", "-") or "-",
             "latitude": data.get("latitude", "0"),
             "longitude": data.get("longitude", "0"),
             "categories": data.get("categories", ""),
