@@ -464,7 +464,9 @@ class IntentClassifier:
         ],
         "HELP": [
             "ทำอะไรได้บ้าง", "ทำอะไรได้", "มีอะไรบ้าง", "ช่วยอะไรได้บ้าง", "ใช้งานยังไง", 
-            "ใช้งานอย่างไร", "วิธีใช้", "what can you do", "capabilities", "คุณคือใคร", "คุณทำอะไรได้"
+            "ใช้งานอย่างไร", "วิธีใช้", "วิธีการใช้งาน", "วิธีใช้งาน", "คู่มือการใช้งาน",
+            "สอนใช้งาน", "แนะนำการใช้งาน", "เมนู", "menu", "help",
+            "what can you do", "capabilities", "คุณคือใคร", "คุณทำอะไรได้"
         ],
         "FAQ": [
             "คำถามยอดฮิต", "คำถามที่พบบ่อย", "faq", "คำถามทั่วไป", "อยากรู้เรื่อง", "บอกข้อมูล", 
@@ -872,8 +874,8 @@ class SheetsManager:
                 "sos_requests": ["request_id", "household_id", "user_id", "timestamp", "latitude", "longitude",
                                 "people_count", "children", "elderly", "bedridden", "pets",
                                 "water_level", "note", "priority", "status"],
-                "user_needs": ["need_id", "timestamp", "user_id", "latitude", "longitude",
-                              "categories", "details", "urgency", "status",
+                "user_needs": ["need_id", "timestamp", "user_id", "first_name", "last_name", "phone",
+                              "latitude", "longitude", "categories", "details", "urgency", "status",
                               "halal_required", "volunteer_name", "delivered_at"],
                 "Shelters": ["ShelterID", "Name", "Province", "District", "Latitude",
                             "Longitude", "Capacity", "Occupancy", "Status",
@@ -1965,13 +1967,31 @@ def build_language_selector_flex():
     )
 
 
+def _metric_row(icon_file: str, label: str, value: str):
+    """Row with a small custom icon image (not an emoji) + label + value."""
+    icon_url = hero_image_url(icon_file)
+    icon_component = (
+        ImageComponent(url=icon_url, size="22px", aspect_ratio="1:1", aspect_mode="cover", flex=0, gravity="center")
+        if icon_url else
+        TextComponent(text="•", size="sm", color="#9CA3AF", flex=0, gravity="center")
+    )
+    return BoxComponent(
+        layout="horizontal", margin="md", spacing="md",
+        contents=[
+            icon_component,
+            TextComponent(text=label, size="sm", color="#6B7280", flex=3, gravity="center"),
+            TextComponent(text=value, size="sm", weight="bold", color="#1F2937", flex=3, align="end", gravity="center"),
+        ]
+    )
+
+
 def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
     if not weather_data.get("ok"):
         body_contents = [
-            TextComponent(text="🌦️ สภาพอากาศ", weight="bold", size="lg", color="#1F2937"),
+            TextComponent(text="รายงานสภาพอากาศ", weight="bold", size="lg", color="#1F2937"),
             SeparatorComponent(margin="md"),
             TextComponent(
-                text=f"⚠️ {weather_data.get('error', 'ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้')}",
+                text=weather_data.get('error', 'ไม่สามารถดึงข้อมูลอากาศได้ในขณะนี้'),
                 size="sm", color="#C2452F", wrap=True, margin="md"
             ),
         ]
@@ -1982,29 +2002,21 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
         wind = weather_data["wind"]
 
         rows = [
-            ("🌡️", "อุณหภูมิ", f"{temp} °C"),
-            ("🌧️", "สภาพอากาศ", desc),
-            ("💧", "ความชื้น", f"{rh} %"),
-            ("🍃", "ความเร็วลม", f"{wind} m/s"),
+            ("icon_temp.jpg", "อุณหภูมิ", f"{temp} °C"),
+            ("icon_condition.jpg", "สภาพอากาศ", desc),
+            ("icon_humidity.jpg", "ความชื้น", f"{rh} %"),
+            ("icon_wind.jpg", "ความเร็วลม", f"{wind} m/s"),
         ]
         body_contents = [
-            TextComponent(text="🌦️ รายงานสภาพอากาศปัจจุบัน", weight="bold", size="lg", color="#1F2937"),
-            TextComponent(text=f"📍 {lat:.4f}, {lon:.4f}  •  🕒 {timestamp}", size="xxs", color="#9CA3AF", wrap=True),
+            TextComponent(text="รายงานสภาพอากาศปัจจุบัน", weight="bold", size="lg", color="#1F2937"),
+            TextComponent(text=f"{lat:.4f}, {lon:.4f}   ·   {timestamp}", size="xxs", color="#9CA3AF", wrap=True),
             SeparatorComponent(margin="md"),
         ]
-        for icon, label, value in rows:
-            body_contents.append(
-                BoxComponent(
-                    layout="horizontal", margin="md",
-                    contents=[
-                        TextComponent(text=f"{icon} {label}", size="sm", color="#6B7280", flex=2),
-                        TextComponent(text=value, size="sm", weight="bold", color="#1F2937", flex=2, align="end"),
-                    ]
-                )
-            )
+        for icon_file, label, value in rows:
+            body_contents.append(_metric_row(icon_file, label, value))
         body_contents.append(
             TextComponent(
-                text="⚠️ ข้อมูลพยากรณ์เบื้องต้น โปรดสังเกตท้องฟ้าจริงประกอบการตัดสินใจ",
+                text="ข้อมูลพยากรณ์เบื้องต้น โปรดสังเกตท้องฟ้าจริงประกอบการตัดสินใจ",
                 size="xxs", color="#9CA3AF", wrap=True, margin="lg"
             )
         )
@@ -2052,11 +2064,9 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
         layout="vertical",
         spacing="xs",
         contents=[
-            TextComponent(text="🌊 ระดับน้ำใกล้คุณ", weight="bold", size="md", color="#1F2937"),
-            TextComponent(
-                text=f"📍 {user_lat:.4f}, {user_lon:.4f}   ·   🕒 {timestamp}",
-                size="xxs", color="#9CA3AF", wrap=True
-            ),
+            TextComponent(text="ระดับน้ำใกล้คุณ", weight="bold", size="md", color="#1F2937"),
+            _icon_text("icon_pin.jpg", f"{user_lat:.4f}, {user_lon:.4f}"),
+            _icon_text("icon_clock.jpg", timestamp),
         ]
     )
 
@@ -2243,6 +2253,20 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
     return FlexSendMessage(alt_text="รายงานระดับน้ำ", contents=bubble)
 
 
+def _icon_text(icon_file: str, text: str, size="xs", color="#9CA3AF"):
+    """Small inline icon image + caption text (replaces emoji in header meta rows)."""
+    icon_url = hero_image_url(icon_file)
+    icon_component = (
+        ImageComponent(url=icon_url, size="13px", aspect_ratio="1:1", aspect_mode="cover", flex=0, gravity="center")
+        if icon_url else
+        TextComponent(text="•", size=size, color=color, flex=0, gravity="center")
+    )
+    return BoxComponent(
+        layout="horizontal", spacing="xs",
+        contents=[icon_component, TextComponent(text=text, size=size, color=color, wrap=True, gravity="center")]
+    )
+
+
 def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
     """
     Minimalist Shelter (Evacuation Center) Report card.
@@ -2252,10 +2276,9 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
         layout="vertical",
         spacing="xs",
         contents=[
-            TextComponent(text="🏠 ศูนย์พักพิงใกล้คุณ", weight="bold", size="md", color="#1F2937"),
-            TextComponent(text=f"📍 {user_lat:.4f}, {user_lon:.4f}", size="xs", color="#4B5563"),
-            TextComponent(text=f"🕒 อัปเดตวันนี้ {get_bangkok_time().strftime('%H:%M')} น.",
-                          size="xs", color="#9CA3AF")
+            TextComponent(text="ศูนย์พักพิงใกล้คุณ", weight="bold", size="md", color="#1F2937"),
+            _icon_text("icon_pin.jpg", f"{user_lat:.4f}, {user_lon:.4f}"),
+            _icon_text("icon_clock.jpg", f"อัปเดตวันนี้ {get_bangkok_time().strftime('%H:%M')} น."),
         ]
     )
 
@@ -2263,7 +2286,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
 
     if not shelters:
         shelters_box.contents.append(
-            TextComponent(text="⚠️ ไม่พบศูนย์พักพิงในพื้นที่ใกล้คุณ", size="sm", color="#EF4444", align="center")
+            TextComponent(text="ไม่พบศูนย์พักพิงในพื้นที่ใกล้คุณ", size="sm", color="#EF4444", align="center")
         )
     else:
         for sh in shelters:
@@ -2328,13 +2351,19 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                             )
                         ]
                     ),
-                    TextComponent(
-                        text=f"🛏️ {sh.get('Beds', '-')} | 🚻 {sh.get('Toilets', '-')} | 🅿️ {sh.get('Parking', '-')}",
-                        size="xs", color="#4B5563", margin="xs"
+                    BoxComponent(
+                        layout="horizontal",
+                        spacing="md",
+                        margin="xs",
+                        contents=[
+                            _icon_text("icon_bed.png", str(sh.get("Beds", "-")), size="xs", color="#4B5563"),
+                            _icon_text("icon_toilet.png", str(sh.get("Toilets", "-")), size="xs", color="#4B5563"),
+                            _icon_text("icon_parking.png", str(sh.get("Parking", "-")), size="xs", color="#4B5563"),
+                        ]
                     ),
                     ButtonComponent(
                         action=URIAction(
-                            label="🧭 นำทางไปศูนย์พักพิง",
+                            label="นำทางไปศูนย์พักพิง",
                             uri=f"https://www.google.com/maps/search/?api=1&query={sh.get('Latitude')},{sh.get('Longitude')}"
                         ),
                         style="secondary", color="#F3F4F6", height="sm", margin="sm"
