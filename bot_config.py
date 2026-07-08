@@ -430,7 +430,7 @@ class IntentClassifier:
             "ของที่ควรเตรียม", "checklist", "prepare for flood", "how to prepare", "เตรียมรับมือน้ำท่วม"
         ],
         "GREETING": [
-            "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า","hello", "hi", "hey", 
+            "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า", "ดีคับ", "hello", "hi", "hey", 
             "good morning", "good afternoon", "good evening", "เริ่ม", "start", "menu", "เมนู"
         ],
         "NEEDS": [
@@ -1496,61 +1496,47 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
     elif "ปกติ" in sit_str:
         status_key = "ปกติ"
     else:
-        try:
-            wl = float(wl_value) if wl_value not in [None, "-", ""] else 0
-            bl = float(bl_value) if bl_value not in [None, "-", ""] else 0
-            if bl > 0:
-                ratio = wl / bl
-                if wl >= bl:
-                    status_key = "ล้นตลิ่ง"
-                elif ratio >= 0.70:
-                    status_key = "มาก"
-                elif ratio >= 0.30:
-                    status_key = "ปกติ"
-                elif ratio >= 0.10:
-                    status_key = "น้อย"
-                else:
-                    status_key = "น้อยวิกฤต"
-            else:
-                status_key = "ปกติ"
-        except (ValueError, TypeError):
-            status_key = "ปกติ"
+        # No situation tag from ThaiWater for this station — we deliberately do
+        # NOT compute our own threshold from wl/bank level here, since
+        # ThaiWater's own classification criteria differ from any ratio we'd
+        # invent. Default to "ปกติ" (neutral) rather than guessing a severity.
+        status_key = "ปกติ"
 
     status_map = {
         "น้อยวิกฤต": {
             "status": "น้อยวิกฤต",
-            "bg": "#F8E9DC",
-            "text": "#D67B27",
+            "bg": "#D67B27",
+            "text": "#FFFFFF",
             "advice": "เฝ้าระวังภัยแล้ง/น้ำลดขีดอันตราย",
             "label_pill": "น้อยวิกฤต"
         },
         "น้อย": {
             "status": "น้อย",
-            "bg": "#FFF3CD",
-            "text": "#856404",
+            "bg": "#FFC000",
+            "text": "#FFFFFF",
             "advice": "ระดับน้ำน้อย",
             "label_pill": "น้อย"
         },
         "ปกติ": {
             "status": "ปกติ",
-            "bg": "#D4EDDA",
-            "text": "#155724",
+            "bg": "#00B050",
+            "text": "#FFFFFF",
             "advice": "ระดับน้ำปกติ ปลอดภัยดี",
             "label_pill": "ปกติ"
         },
         "มาก": {
             "status": "มาก",
-            "bg": "#CCE5FF",
-            "text": "#004085",
+            "bg": "#0000FF",
+            "text": "#FFFFFF",
             "advice": "ค่อนข้างสูง",
             "label_pill": "มาก"
         },
         "ล้นตลิ่ง": {
-            "status": "วิกฤต",
-            "bg": "#F8D7DA",
-            "text": "#721C24",
+            "status": "ล้นตลิ่ง",
+            "bg": "#FF0000",
+            "text": "#FFFFFF",
             "advice": "ระดับน้ำล้นตลิ่ง",
-            "label_pill": "วิกฤต"
+            "label_pill": "ล้นตลิ่ง"
         },
     }
 
