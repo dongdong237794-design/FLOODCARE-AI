@@ -51,7 +51,8 @@ from bot_config import (
     build_sos_summary_text, build_needs_summary_text,
     calculate_sos_priority,
     # Services
-    ask_gemini, ask_gemini_with_search, get_live_weather_scraper, get_live_weather_data, sheets_mgr,
+    ask_gemini, ask_gemini_with_search, get_live_weather_scraper, get_live_weather_data,
+    get_live_water_levels_from_api, sheets_mgr,
     assess_water_level_status, calculate_situation,
     # Legacy state
     USER_STATES, USER_DATA, update_legacy_state,
@@ -679,8 +680,18 @@ def _process_shelter_search(event, lat, lon, user_id):
 def _process_water_level(event, lat, lon, user_id, timestamp):
     session = sessions.get(user_id)
     show_loading_animation(user_id, loading_seconds=10)
-    
-    records = sheets_mgr.get_all_records("Water_Levels")
+
+    # Pull LIVE data from ThaiWater's API first — this was previously dead
+    # code that was never called, so the bot was always showing whatever
+    # was last manually imported into the 'Water_Levels' sheet (which can go
+    # stale for weeks). Only fall back to the sheet if the live call fails.
+    records = get_live_water_levels_from_api()
+    source_label = "live_api"
+    if not records:
+        Logger.info("WaterLevel", "Live ThaiWater API unavailable — falling back to Water_Levels sheet")
+        records = sheets_mgr.get_all_records("Water_Levels")
+        source_label = "sheets_fallback"
+
     stations = []
     
     for r in records:
@@ -708,7 +719,7 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
                 "situation": situation,
                 "trend": trend,
                 "measure_time": r.get("Time", "-"),
-                "source": "sheets"
+                "source": source_label
             })
         except (ValueError, TypeError):
             continue
@@ -916,6 +927,7 @@ def api_dashboard_data():
     # shows a real name instead of a raw LINE user_id. Newer rows already
     # store first_name/last_name/phone directly (written at submit time);
     # older rows fall back to joining against the 'users' sheet by user_id.
+    URGENCY_TH_TO_EN = {"ด่วนมาก": "CRITICAL", "ปานกลาง": "HIGH", "ไม่ด่วน": "NORMAL"}
     for rec in need_sorted:
         stored_first = (rec.get("first_name") or "").strip()
         stored_last = (rec.get("last_name") or "").strip()
@@ -928,6 +940,18 @@ def api_dashboard_data():
             last = u.get("last_name", "") or ""
             rec["reporter_name"] = f"{first} {last}".strip() or "ไม่ระบุชื่อ"
             rec["reporter_phone"] = u.get("phone", "-") or "-"
+
+        # The dashboard filters/labels by English enum (CRITICAL/HIGH/NORMAL);
+        # the sheet stores the Thai text the LIFF form sends. Keep the sheet
+        # value in 'urgency_text' and expose the normalized enum as 'urgency'.
+        raw_urgency = (rec.get("urgency") or "").strip()
+        rec["urgency_text"] = raw_urgency
+        rec["urgency"] = URGENCY_TH_TO_EN.get(raw_urgency, "NORMAL")
+
+        status_val = str(rec.get("status", "PENDING")).strip().upper()
+        if status_val not in ("PENDING", "IN_PROGRESS", "DELIVERED"):
+            status_val = "PENDING"
+        rec["status"] = status_val
 
     def _num(val, default=0):
         try:
@@ -988,6 +1012,7 @@ def api_dashboard_data():
             "name": s.get("Name", "ไม่ระบุชื่อ"),
             "province": s.get("Province", "-"),
             "district": s.get("District", "-"),
+            "subdistrict": s.get("Subdistrict", "-"),
             "latitude": s.get("Latitude", 0),
             "longitude": s.get("Longitude", 0),
             "capacity": capacity,
@@ -1086,6 +1111,7 @@ def api_dashboard_create_shelter():
         "Name": name,
         "Province": data.get("province", "-") or "-",
         "District": data.get("district", "-") or "-",
+        "Subdistrict": data.get("subdistrict", "-") or "-",
         "Latitude": latitude,
         "Longitude": longitude,
         "Capacity": capacity,
@@ -1102,6 +1128,43 @@ def api_dashboard_create_shelter():
         cache.sheets.delete("sheets:shelters:normalized")
 
     return jsonify({"success": success, "id": shelter_id})
+
+
+@app.route("/api/dashboard/needs/<need_id>/status", methods=["POST"])
+def api_dashboard_update_need_status(need_id):
+    if not _dashboard_api_authed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    new_status = str(data.get("status", "")).strip()
+    if not new_status:
+        return jsonify({"error": "invalid status"}), 400
+
+    record = sheets_mgr.update_need_status(need_id, new_status)
+    if not record:
+        return jsonify({"success": False, "error": "need_not_found_or_sheet_error"}), 404
+
+    return jsonify({"success": True, "need_id": need_id, "status": new_status})
+
+
+@app.route("/api/dashboard/shelters/<shelter_id>/occupancy", methods=["POST"])
+def api_dashboard_update_shelter_occupancy(shelter_id):
+    if not _dashboard_api_authed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    try:
+        new_occupancy = int(data.get("occupancy", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid occupancy"}), 400
+    if new_occupancy < 0:
+        new_occupancy = 0
+
+    record = sheets_mgr.update_shelter_occupancy(shelter_id, new_occupancy)
+    if not record:
+        return jsonify({"success": False, "error": "shelter_not_found_or_sheet_error"}), 404
+
+    return jsonify({"success": True, "id": shelter_id, "occupancy": new_occupancy})
 
 
 
