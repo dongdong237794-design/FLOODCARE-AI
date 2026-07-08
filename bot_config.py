@@ -430,7 +430,7 @@ class IntentClassifier:
             "ของที่ควรเตรียม", "checklist", "prepare for flood", "how to prepare", "เตรียมรับมือน้ำท่วม"
         ],
         "GREETING": [
-            "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า", "ดีคับ", "hello", "hi", "hey", 
+            "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า","hello", "hi", "hey", 
             "good morning", "good afternoon", "good evening", "เริ่ม", "start", "menu", "เมนู"
         ],
         "NEEDS": [
