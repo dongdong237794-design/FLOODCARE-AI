@@ -140,6 +140,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 }
 .pill.online { background: var(--accent-light); color: var(--accent-dark); }
 .pill.offline { background: var(--crit-bg); color: var(--crit-tx); }
+.pill.syncing { background: var(--info-bg); color: var(--info-tx); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse-accent 2s infinite; }
 
 .content { flex: 1; padding: 28px; overflow: auto; }
@@ -225,7 +226,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
   border-radius: 12px; padding: 8px 16px;
   display: flex; gap: 14px; flex-wrap: wrap;
   font-size: 11px; font-weight: 700;
-  box-shadow: var(--shadow-sm); color: #14181F; /* ล็อคสีข้อความของ Legend บนแผนที่ให้เด่นชัด */
+  box-shadow: var(--shadow-sm); color: #14181F;
 }
 .maplegend span { display: flex; align-items: center; gap: 5px; }
 .maplegend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
@@ -510,6 +511,12 @@ tbody tr:last-child td { border-bottom: none; }
 input:checked + .slider { background: var(--accent); }
 input:checked + .slider:before { transform: translateX(21px); }
 
+.google-sheets-section {
+  background: var(--surface); border-radius: var(--radius-sm); padding: 22px; margin-bottom: 16px; box-shadow: var(--shadow-sm); transition: background 0.3s;
+}
+.google-sheets-section h3 { font-size: 15px; font-weight: 800; color: var(--text); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.google-sheets-section h3 i { color: var(--accent); }
+
 .empty-msg { background: var(--line); border-radius: 14px; padding: 36px; text-align: center; font-size: 13px; color: var(--muted); transition: background 0.3s; }
 .empty-msg i { font-size: 32px; display: block; margin-bottom: 8px; color: var(--faint); }
 .bedtag { font-size: 9px; background: var(--crit-bg); color: var(--crit-tx); padding: 2px 6px; border-radius: 99px; font-weight: 800; }
@@ -751,8 +758,20 @@ input:checked + .slider:before { transform: translateX(21px); }
       <div class="page" id="page-needs">
         <div class="pagehead">
           <h2><span class="ph-icon-wrap" style="background:#FFFBEB;color:#D97706;"><i class="ph-fill ph-package"></i></span> จัดการคำขอสิ่งของ</h2>
-          <p id="needsSubhead">รายการขอความช่วยเหลือด้านสิ่งของจากผู้ประสบภัยทั้งหมด</p>
+          <p id="needsSubhead">แสดง 0 จาก 0 รายการ</p>
         </div>
+
+        <div class="sos-toolbar">
+          <div class="search">
+            <i class="ph ph-magnifying-glass ic"></i>
+            <input id="needsSearch" placeholder="ค้นหาชื่อผู้ร้องขอ, เบอร์โทร, หมวดหมู่ หรือ รหัสคำขอ...">
+          </div>
+          <div class="tabs-wrapper">
+            <div class="tabgroup" id="needsUrgTabs"></div>
+            <div class="tabgroup" id="needsStatTabs"></div>
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table>
             <thead>
@@ -793,8 +812,40 @@ input:checked + .slider:before { transform: translateX(21px); }
       <div class="page" id="page-settings">
         <div class="pagehead">
           <h2><span class="ph-icon-wrap"><i class="ph-fill ph-gear"></i></span> ตั้งค่าระบบ</h2>
-          <p>ปรับแต่งการแสดงผลและการทำงานของแดชบอร์ด</p>
+          <p>ปรับแต่งการแสดงผลและการเชื่อมต่อข้อมูลภายนอกแบบเรียลไทม์</p>
         </div>
+
+        <!-- โซน Google Sheets API Config -->
+        <div class="google-sheets-section">
+          <h3><i class="ph-fill ph-database"></i> เชื่อมต่อ Google Sheets (รูปแบบ Published CSV)</h3>
+          <p style="font-size:12px; color:var(--muted); margin-bottom:16px;">
+            เผยแพร่ Google Sheet ของคุณไปยังเว็บ เลือกแผ่นงานที่ต้องการ และเปลี่ยนรูปแบบเป็น <b>.csv</b> จากนั้นนำลิงก์มาวางในช่องด้านล่างนี้
+          </p>
+          
+          <div class="fgroup">
+            <label>Google Sheet SOS Cases CSV URL</label>
+            <input type="text" id="sheet_sos_url" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?gid=...&output=csv">
+          </div>
+          <div class="fgroup">
+            <label>Google Sheet Shelters CSV URL</label>
+            <input type="text" id="sheet_shelters_url" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?gid=...&output=csv">
+          </div>
+          <div class="fgroup">
+            <label>Google Sheet Needs CSV URL</label>
+            <input type="text" id="sheet_needs_url" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?gid=...&output=csv">
+          </div>
+          
+          <div style="display:flex; gap:10px; margin-top:8px;">
+            <button class="fullbtn dark" onclick="saveSheetUrlsAndSync()" style="flex:1;">
+              <i class="ph ph-arrows-clockwise"></i> บันทึกและดึงข้อมูลทันที
+            </button>
+            <button class="fullbtn light" onclick="clearSheetUrls()" style="width:120px; margin-bottom:0;">
+              ล้างค่าลิงก์
+            </button>
+          </div>
+          <div id="syncStatusMsg" style="margin-top:12px; font-size:12px; font-weight:700; text-align:center;"></div>
+        </div>
+
         <div class="settings-section">
           <div class="set-row">
             <div class="set-info">
@@ -953,7 +1004,7 @@ input:checked + .slider:before { transform: translateX(21px); }
 
 <script>
 /* ============================================================
-   FLOODCARE AI — STATE & SERVICES
+   FLOODCARE AI — STATE & SERVICES (ดึงข้อมูลแบบ Real Sheet)
 ============================================================ */
 const PRIORITY_COLOR = { CRITICAL:'#EF4444', HIGH:'#F59E0B', NORMAL:'#10B981' };
 const PRIORITY_LABEL = { CRITICAL:'วิกฤต', HIGH:'เร่งด่วน', NORMAL:'ปกติ' };
@@ -961,28 +1012,22 @@ const STATUS_LABEL   = { OPEN:'รอรับเคส', IN_PROGRESS:'กำล
 const SHELTER_COLORS = ['#22C55E','#16A34A','#4ADE80','#15803D','#86EFAC'];
 const FACILITIES = ['ไฟฟ้า','น้ำสะอาด','อินเทอร์เน็ต','รองรับผู้พิการ','รับสัตว์เลี้ยง','มีแพทย์ประจำ'];
 
-// ── ข้อมูลจำลองที่สมจริง (Mock Data) ──
-const MOCK_DATA = {
-  stats: {},
-  sos_cases: [
-    { request_id: 'SOS-001', first_name: 'สมชาย', last_name: 'ใจดี', phone: '081-234-5678', people_count: 3, water_level: '1.5m', bedridden: 'NO', pets: 'YES', priority: 'CRITICAL', status: 'OPEN', latitude: 13.82, longitude: 100.58, note: 'ต้องการเรือด่วน ระดับน้ำขึ้นสูงมาก' },
-    { request_id: 'SOS-002', first_name: 'สมหญิง', last_name: 'รักสงบ', phone: '089-876-5432', people_count: 1, water_level: '0.8m', bedridden: 'YES', pets: 'NO', priority: 'HIGH', status: 'IN_PROGRESS', latitude: 13.78, longitude: 100.61, note: 'ผู้ป่วยติดเตียง ขาดออกซิเจน' },
-    { request_id: 'SOS-003', first_name: 'ประเสริฐ', last_name: 'มีทรัพย์', phone: '082-333-4444', people_count: 5, water_level: '0.5m', bedridden: 'NO', pets: 'NO', priority: 'NORMAL', status: 'CLOSED', latitude: 13.74, longitude: 100.55, note: '' }
-  ],
-  shelters: [
-    { id: 'SH-001', name: 'โรงเรียนบ้านบางกะปิ', province: 'กรุงเทพมหานคร', district: 'บางกะปิ', subdistrict: 'คลองจั่น', latitude: 13.765, longitude: 100.645, capacity: 500, occupancy: 210, facilities: ['ไฟฟ้า', 'น้ำสะอาด', 'อินเทอร์เน็ต'] },
-    { id: 'SH-002', name: 'วัดพระศรีมหาธาตุ', province: 'กรุงเทพมหานคร', district: 'บางเขน', subdistrict: 'อนุสาวรีย์', latitude: 13.873, longitude: 100.596, capacity: 200, occupancy: 120, facilities: ['ไฟฟ้า', 'น้ำสะอาด'] }
-  ],
-  needs: [
-    { need_id: 'ND-001', reporter_name: 'วิชัย รุ่งเรือง', reporter_phone: '081-111-2222', timestamp: new Date(Date.now() - 3600000).toISOString(), categories: 'อาหาร, น้ำดื่ม', details: 'ข้าวกล่อง 50 กล่อง น้ำ 5 แพ็ค', halal_required: true, urgency: 'HIGH', status: 'PENDING', volunteer_name: '', delivered_at: null },
-    { need_id: 'ND-002', reporter_name: 'มาลี สวยงาม', reporter_phone: '082-222-3333', timestamp: new Date(Date.now() - 7200000).toISOString(), categories: 'ยาสามัญ', details: 'ยาแก้ปวด ยาน้ำกัดเท้า', halal_required: false, urgency: 'CRITICAL', status: 'DELIVERED', volunteer_name: 'กู้ภัยมูลนิธิร่วมกตัญญู', delivered_at: new Date(Date.now() - 1800000).toISOString() }
-  ]
-};
-
+// ดึงข้อมูลจริงเริ่มต้นจากความว่างเปล่า (ไม่มีข้อมูลทดสอบติดมา)
 let state = {
-  data: JSON.parse(JSON.stringify(MOCK_DATA)),
-  ok: true, selectedId: null,
-  sosSearch: '', sosPrio: 'ALL', sosStat: 'ALL',
+  data: {
+    stats: {},
+    sos_cases: [],
+    shelters: [],
+    needs: []
+  },
+  ok: true,
+  selectedId: null,
+  sosSearch: '', 
+  sosPrio: 'ALL', 
+  sosStat: 'ALL',
+  needsSearch: '',
+  needsUrg: 'ALL',
+  needsStat: 'ALL',
   pending: {},
   settings: { darkMode: false, hideClosed: false },
   facilities: new Set(['ไฟฟ้า','น้ำสะอาด'])
@@ -1006,6 +1051,198 @@ const addressData = {
 };
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+/* ── CSV Parser แบบ Robust รองรับการมี Comma ภายใน Double Quote ── */
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const headers = splitCSVRow(lines[0]);
+  const result = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const values = splitCSVRow(lines[i]);
+    const obj = {};
+    headers.forEach((h, idx) => {
+      const cleanHeader = h.trim().replace(/^["']|["']$/g, '');
+      const rawVal = values[idx] || '';
+      obj[cleanHeader] = rawVal.trim().replace(/^["']|["']$/g, '');
+    });
+    result.push(obj);
+  }
+  return result;
+}
+
+function splitCSVRow(row) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < row.length; i++) {
+    const char = row[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+/* ── ฟังก์ชันดึงข้อมูลจาก Google Sheets (Published CSV) ── */
+async function fetchGoogleSheetsData() {
+  const sosUrl = localStorage.getItem('sheet_sos_url') || '';
+  const sheltersUrl = localStorage.getItem('sheet_shelters_url') || '';
+  const needsUrl = localStorage.getItem('sheet_needs_url') || '';
+  
+  const statusPill = document.getElementById('statusPill');
+  const syncMsg = document.getElementById('syncStatusMsg');
+
+  if (!sosUrl && !sheltersUrl && !needsUrl) {
+    if (syncMsg) {
+      syncMsg.innerHTML = `<span style="color:var(--warn-tx);">⚠️ ยังไม่ได้กรอกข้อมูลลิงก์ Google Sheets ในหน้าตั้งค่า</span>`;
+    }
+    state.ok = false;
+    renderAll();
+    return;
+  }
+
+  if (statusPill) {
+    statusPill.className = 'pill syncing';
+    statusPill.innerHTML = '<i class="ph ph-arrows-clockwise" style="animation: spin 1.5s linear infinite;"></i> กำลังประสานงานข้อมูล...';
+  }
+  if (syncMsg) {
+    syncMsg.innerHTML = `<span style="color:var(--info-tx);">🔄 กำลังดึงข้อมูลล่าสุดจาก Google Sheets...</span>`;
+  }
+
+  try {
+    let syncedCount = 0;
+    
+    // 1. ดึงข้อมูล SOS Cases
+    if (sosUrl) {
+      const res = await fetch(sosUrl);
+      const csvText = await res.text();
+      const rawData = parseCSV(csvText);
+      state.data.sos_cases = rawData.map(item => ({
+        request_id: item.request_id || 'SOS-000',
+        first_name: item.first_name || '',
+        last_name: item.last_name || '',
+        phone: item.phone || '',
+        people_count: parseInt(item.people_count) || 1,
+        water_level: item.water_level || '0m',
+        bedridden: (item.bedridden || 'NO').toUpperCase(),
+        pets: (item.pets || 'NO').toUpperCase(),
+        priority: (item.priority || 'NORMAL').toUpperCase(),
+        status: (item.status || 'OPEN').toUpperCase(),
+        latitude: parseFloat(item.latitude) || 13.75,
+        longitude: parseFloat(item.longitude) || 100.5,
+        note: item.note || ''
+      }));
+      syncedCount++;
+    }
+
+    // 2. ดึงข้อมูล Shelters
+    if (sheltersUrl) {
+      const res = await fetch(sheltersUrl);
+      const csvText = await res.text();
+      const rawData = parseCSV(csvText);
+      state.data.shelters = rawData.map(item => ({
+        id: item.id || 'SH-000',
+        name: item.name || '',
+        province: item.province || '',
+        district: item.district || '',
+        subdistrict: item.subdistrict || '',
+        latitude: parseFloat(item.latitude) || 13.75,
+        longitude: parseFloat(item.longitude) || 100.5,
+        capacity: parseInt(item.capacity) || 100,
+        occupancy: parseInt(item.occupancy) || 0,
+        facilities: item.facilities ? item.facilities.split(',').map(f => f.trim()) : []
+      }));
+      syncedCount++;
+    }
+
+    // 3. ดึงข้อมูล Needs Request
+    if (needsUrl) {
+      const res = await fetch(needsUrl);
+      const csvText = await res.text();
+      const rawData = parseCSV(csvText);
+      state.data.needs = rawData.map(item => ({
+        need_id: item.need_id || 'ND-000',
+        reporter_name: item.reporter_name || '',
+        reporter_phone: item.reporter_phone || '',
+        timestamp: item.timestamp || new Date().toISOString(),
+        categories: item.categories || '',
+        details: item.details || '',
+        halal_required: (item.halal_required === 'true' || item.halal_required === 'YES'),
+        urgency: (item.urgency || 'NORMAL').toUpperCase(),
+        status: (item.status || 'PENDING').toUpperCase(),
+        volunteer_name: item.volunteer_name || '',
+        delivered_at: item.delivered_at || null
+      }));
+      syncedCount++;
+    }
+
+    state.ok = true;
+    if (syncMsg) {
+      syncMsg.innerHTML = `<span style="color:var(--green-dark);">✅ ดึงข้อมูลสำเร็จ (${syncedCount} รายการ) เมื่อ ${new Date().toLocaleTimeString()}</span>`;
+    }
+  } catch (error) {
+    console.error('Error syncing with Google Sheets:', error);
+    state.ok = false;
+    if (syncMsg) {
+      syncMsg.innerHTML = `<span style="color:var(--crit-tx);">❌ ดึงข้อมูลล้มเหลว กรุณาตรวจสอบสิทธิ์การแชร์ลิงก์ CSV</span>`;
+    }
+  }
+
+  renderAll();
+}
+
+/* ── ฟังก์ชันบันทึกลิงก์และซิงก์ใหม่จาก Settings ── */
+function saveSheetUrlsAndSync() {
+  const sos = document.getElementById('sheet_sos_url').value.trim();
+  const shelters = document.getElementById('sheet_shelters_url').value.trim();
+  const needs = document.getElementById('sheet_needs_url').value.trim();
+  
+  localStorage.setItem('sheet_sos_url', sos);
+  localStorage.setItem('sheet_shelters_url', shelters);
+  localStorage.setItem('sheet_needs_url', needs);
+  
+  fetchGoogleSheetsData();
+}
+
+/* ── ล้างลิงก์ Google Sheets ทั้งหมด ── */
+function clearSheetUrls() {
+  document.getElementById('sheet_sos_url').value = '';
+  document.getElementById('sheet_shelters_url').value = '';
+  document.getElementById('sheet_needs_url').value = '';
+  
+  localStorage.removeItem('sheet_sos_url');
+  localStorage.removeItem('sheet_shelters_url');
+  localStorage.removeItem('sheet_needs_url');
+  
+  state.data.sos_cases = [];
+  state.data.shelters = [];
+  state.data.needs = [];
+  
+  const syncMsg = document.getElementById('syncStatusMsg');
+  if (syncMsg) syncMsg.innerHTML = `<span style="color:var(--muted);">ล้างข้อมูลลิงก์เสร็จสิ้น ระบบกลับไปใช้ค่าเริ่มต้นว่างเปล่า</span>`;
+  
+  state.ok = false;
+  renderAll();
+}
+
+/* ── ดึงข้อมูลที่บันทึกไว้ใน LocalStorage ขึ้นมาโชว์ในช่องกรอก ── */
+function loadSavedUrlsToUI() {
+  const sos = localStorage.getItem('sheet_sos_url') || '';
+  const shelters = localStorage.getItem('sheet_shelters_url') || '';
+  const needs = localStorage.getItem('sheet_needs_url') || '';
+  
+  if (document.getElementById('sheet_sos_url')) document.getElementById('sheet_sos_url').value = sos;
+  if (document.getElementById('sheet_shelters_url')) document.getElementById('sheet_shelters_url').value = shelters;
+  if (document.getElementById('sheet_needs_url')) document.getElementById('sheet_needs_url').value = needs;
+}
 
 /* ── Maps init ── */
 function initMaps(){
@@ -1108,12 +1345,6 @@ function renderMapMarkers(map,layer,isDash){
 }
 
 /* ── Map detail panel ── */
-function dist(la1,lo1,la2,lo2){
-  const R=6371,dL=(la2-la1)*Math.PI/180,dO=(lo2-lo1)*Math.PI/180;
-  const a=Math.sin(dL/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dO/2)**2;
-  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-}
-
 let mdpActiveTab = 'info';
 let mdpCaseId = null;
 
@@ -1234,13 +1465,35 @@ function closeMapDetailPanel(){
 
 /* ── Needs page ── */
 function renderNeedsPage(){
-  const needs=state.data.needs||[];
+  renderTabsInto(document.getElementById('needsUrgTabs'),
+    [{key:'ALL',label:'ทั้งหมด'},{key:'CRITICAL',label:'วิกฤต'},{key:'HIGH',label:'เร่งด่วน'},{key:'NORMAL',label:'ปกติ'}],
+    state.needsUrg,(k)=>{ state.needsUrg=k; renderNeedsPage(); });
+  renderTabsInto(document.getElementById('needsStatTabs'),
+    [{key:'ALL',label:'ทั้งหมด'},{key:'PENDING',label:'รอดำเนินการ'},{key:'IN_PROGRESS',label:'กำลังจัดส่ง'},{key:'DELIVERED',label:'ส่งแล้ว'}],
+    state.needsStat,(k)=>{ state.needsStat=k; renderNeedsPage(); });
+
+  const allNeeds = state.data.needs || [];
+  const q = (state.needsSearch || '').toLowerCase();
+  
+  const filteredNeeds = allNeeds.filter(n => {
+    const matchQ = !q || 
+      (n.reporter_name || '').toLowerCase().includes(q) ||
+      (n.reporter_phone || '').toLowerCase().includes(q) ||
+      (n.categories || '').toLowerCase().includes(q) ||
+      (n.need_id || '').toLowerCase().includes(q);
+    const matchUrg = state.needsUrg === 'ALL' || n.urgency === state.needsUrg;
+    const matchStat = state.needsStat === 'ALL' || n.status === state.needsStat;
+    return matchQ && matchUrg && matchStat;
+  });
+
+  document.getElementById('needsSubhead').textContent = `แสดง ${filteredNeeds.length} จาก ${allNeeds.length} รายการ`;
+
   const body=document.getElementById('needsPageTableBody');
-  if(!needs.length){
-    body.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;"><div class="empty-msg" style="display:inline-block; border: none; box-shadow: none; background: transparent;"><i class="ph ph-package"></i>ไม่มีข้อมูลคำขอสิ่งของ</div></td></tr>`;
+  if(!filteredNeeds.length){
+    body.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;"><div class="empty-msg" style="display:inline-block; border: none; box-shadow: none; background: transparent;"><i class="ph ph-package"></i>ไม่พบข้อมูลคำขอสิ่งของที่ค้นหา</div></td></tr>`;
     return;
   }
-  body.innerHTML=needs.map(n=>{
+  body.innerHTML=filteredNeeds.map(n=>{
     const bc=n.urgency==='CRITICAL'?'crit':n.urgency==='HIGH'?'high':'norm';
     const urgLabel=n.urgency==='CRITICAL'?'วิกฤต':n.urgency==='HIGH'?'เร่งด่วน':'ปกติ';
     
@@ -1417,7 +1670,6 @@ document.querySelectorAll('[data-next]').forEach(b=>b.addEventListener('click',(
   const nextStep = Number(b.dataset.next);
   const err = document.getElementById('shelterFormErr');
   
-  // บังคับว่าขั้นตอนที่ 1 ต้องมีพิกัด (ละติจูด/ลองจิจูด) และชื่อสถานที่ ก่อนจะผ่านไปขั้นตอนถัดไป
   if(currentStep === 1) {
     const name = document.getElementById('f_name').value.trim();
     const lat = document.getElementById('f_lat').value;
@@ -1534,7 +1786,7 @@ function renderDashboardSosList(){
   document.getElementById('sosCountBadge').textContent=(state.data.sos_cases||[]).length;
   document.getElementById('shCountBadge').textContent=(state.data.shelters||[]).length;
   const el=document.getElementById('sosListDash');
-  if(!cases.length){ el.innerHTML=`<div class="empty-msg"><i class="ph ph-check-circle"></i>ไม่มีเคส SOS ในขณะนี้</div>`; return; }
+  if(!cases.length){ el.innerHTML=`<div class="empty-msg"><i class="ph ph-info"></i>ยังไม่มีเคส SOS ที่โหลดเข้ามา</div>`; return; }
   el.innerHTML=cases.map((c,i)=>sosCardHtml(c,i)).join('');
 }
 
@@ -1631,19 +1883,20 @@ function renderSosPage(){
   document.getElementById('sosSubhead').textContent=`แสดง ${filtered.length} จาก ${all.length} เคส`;
   const grid=document.getElementById('sosCardGrid');
   if(!filtered.length){
-    grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-siren"></i>ไม่พบเคสที่ค้นหา</div>`;
+    grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-siren"></i>ไม่พบเคสที่ค้นหา (หรือลิงก์ฐานข้อมูลว่างเปล่า)</div>`;
     return;
   }
   grid.innerHTML=filtered.map(c=>sosFullCardHtml(c)).join('');
 }
 document.getElementById('sosSearch').addEventListener('input',e=>{ state.sosSearch=e.target.value; renderSosPage(); });
+document.getElementById('needsSearch').addEventListener('input',e=>{ state.needsSearch=e.target.value; renderNeedsPage(); });
 
 /* ── Shelters ── */
 function renderShelters(){
   const shelters=state.data.shelters||[];
   document.getElementById('shSubhead').textContent=`${shelters.length} ศูนย์ — รองรับรวม ${shelters.reduce((a,s)=>a+s.capacity,0).toLocaleString()} คน`;
   const grid=document.getElementById('shelterGrid');
-  if(!shelters.length){ grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-tent"></i>ไม่มีข้อมูลศูนย์พักพิง</div>`; return; }
+  if(!shelters.length){ grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-tent"></i>ไม่มีข้อมูลศูนย์พักพิงในฐานข้อมูลขณะนี้</div>`; return; }
   grid.innerHTML=shelters.map(s=>{
     const pct=s.capacity>0?Math.round(s.occupancy/s.capacity*100):0;
     const barColor=pct>=100?'#EF4444':pct>=80?'#F59E0B':'#10B981';
@@ -1656,7 +1909,6 @@ function renderShelters(){
         <span class="occ-pct" style="color:${barColor};font-weight:800;">${pct}%</span>
       </div>
       
-      <!-- เพิ่มปุ่มปรับแก้จำนวนคนแบบ Interactive และกล่องกรอกข้อมูล -->
       <div class="occ-control-panel">
         <label>ปรับจำนวน:</label>
         <div class="occ-btn-group">
@@ -1684,7 +1936,6 @@ function renderDonut(){
   const arcs=segs.map(seg=>{ const len=(seg.v/denom)*circ; const vis=Math.max(0,len-gap); const off=circ/4-acc; acc+=len; return {...seg,vis,off}; });
   const svg=document.getElementById('donutSvg');
   
-  // ปรับสี Text ให้ปรับตาม Dark Mode ได้เหมาะสม
   const textColor = state.settings.darkMode ? '#FFFFFF' : '#111111';
   const subTextColor = state.settings.darkMode ? '#94A3B8' : '#6B7280';
   const capTextColor = state.settings.darkMode ? '#64748B' : '#9CA3AF';
@@ -1768,8 +2019,22 @@ function renderFullLegend(){
 function renderStatusPill(){
   const pill=document.getElementById('statusPill');
   const dot=document.getElementById('sideDot');
-  if(state.ok){ pill.className='pill online'; pill.innerHTML='<span class="dot"></span> Online Server'; if(dot) dot.classList.add('ok'); }
-  else { pill.className='pill offline'; pill.innerHTML='<i class="ph ph-warning-circle"></i> ขาดการเชื่อมต่อ'; if(dot) dot.classList.remove('ok'); }
+  if(state.ok){ 
+    pill.className='pill online'; 
+    pill.innerHTML='<span class="dot"></span> Online Database'; 
+    if(dot) dot.classList.add('ok'); 
+  } else { 
+    pill.className='pill offline'; 
+    pill.innerHTML='<i class="ph ph-warning-circle"></i> ขาดการเชื่อมต่อ'; 
+    if(dot) dot.classList.remove('ok'); 
+  }
+}
+
+/* ── Distance helper ── */
+function dist(la1,lo1,la2,lo2){
+  const R=6371,dL=(la2-la1)*Math.PI/180,dO=(lo2-lo1)*Math.PI/180;
+  const a=Math.sin(dL/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dO/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
 /* ── Analytics ── */
@@ -1864,7 +2129,8 @@ document.querySelectorAll('.navitem, .more, .bnav-item').forEach(el=>{
 
 /* ── Boot ── */
 initMaps();
-renderAll();
+loadSavedUrlsToUI();
+fetchGoogleSheetsData();
 </script>
 </body>
 </html>
