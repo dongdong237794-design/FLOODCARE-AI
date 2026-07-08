@@ -140,7 +140,6 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 }
 .pill.online { background: var(--accent-light); color: var(--accent-dark); }
 .pill.offline { background: var(--crit-bg); color: var(--crit-tx); }
-.pill.syncing { background: var(--info-bg); color: var(--info-tx); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse-accent 2s infinite; }
 
 .content { flex: 1; padding: 28px; overflow: auto; }
@@ -511,12 +510,6 @@ tbody tr:last-child td { border-bottom: none; }
 input:checked + .slider { background: var(--accent); }
 input:checked + .slider:before { transform: translateX(21px); }
 
-.google-sheets-section {
-  background: var(--surface); border-radius: var(--radius-sm); padding: 22px; margin-bottom: 16px; box-shadow: var(--shadow-sm); transition: background 0.3s;
-}
-.google-sheets-section h3 { font-size: 15px; font-weight: 800; color: var(--text); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-.google-sheets-section h3 i { color: var(--accent); }
-
 .empty-msg { background: var(--line); border-radius: 14px; padding: 36px; text-align: center; font-size: 13px; color: var(--muted); transition: background 0.3s; }
 .empty-msg i { font-size: 32px; display: block; margin-bottom: 8px; color: var(--faint); }
 .bedtag { font-size: 9px; background: var(--crit-bg); color: var(--crit-tx); padding: 2px 6px; border-radius: 99px; font-weight: 800; }
@@ -812,40 +805,8 @@ input:checked + .slider:before { transform: translateX(21px); }
       <div class="page" id="page-settings">
         <div class="pagehead">
           <h2><span class="ph-icon-wrap"><i class="ph-fill ph-gear"></i></span> ตั้งค่าระบบ</h2>
-          <p>ปรับแต่งการแสดงผลและการเชื่อมต่อข้อมูลภายนอกแบบเรียลไทม์</p>
+          <p>ปรับแต่งการแสดงผลและการทำงานของแดชบอร์ด</p>
         </div>
-
-        <!-- โซน Google Sheets API Config -->
-        <div class="google-sheets-section">
-          <h3><i class="ph-fill ph-database"></i> เชื่อมต่อ Google Sheets (รูปแบบ Published CSV)</h3>
-          <p style="font-size:12px; color:var(--muted); margin-bottom:16px;">
-            เผยแพร่ Google Sheet ของคุณไปยังเว็บ เลือกแผ่นงานที่ต้องการ และเปลี่ยนรูปแบบเป็น <b>.csv</b> จากนั้นนำลิงก์มาวางในช่องด้านล่างนี้
-          </p>
-          
-          <div class="fgroup">
-            <label>Google Sheet SOS Cases CSV URL</label>
-            <input type="text" id="sheet_sos_url" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?gid=...&output=csv">
-          </div>
-          <div class="fgroup">
-            <label>Google Sheet Shelters CSV URL</label>
-            <input type="text" id="sheet_shelters_url" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?gid=...&output=csv">
-          </div>
-          <div class="fgroup">
-            <label>Google Sheet Needs CSV URL</label>
-            <input type="text" id="sheet_needs_url" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?gid=...&output=csv">
-          </div>
-          
-          <div style="display:flex; gap:10px; margin-top:8px;">
-            <button class="fullbtn dark" onclick="saveSheetUrlsAndSync()" style="flex:1;">
-              <i class="ph ph-arrows-clockwise"></i> บันทึกและดึงข้อมูลทันที
-            </button>
-            <button class="fullbtn light" onclick="clearSheetUrls()" style="width:120px; margin-bottom:0;">
-              ล้างค่าลิงก์
-            </button>
-          </div>
-          <div id="syncStatusMsg" style="margin-top:12px; font-size:12px; font-weight:700; text-align:center;"></div>
-        </div>
-
         <div class="settings-section">
           <div class="set-row">
             <div class="set-info">
@@ -935,7 +896,30 @@ input:checked + .slider:before { transform: translateX(21px); }
 
       <!-- STEP 1 -->
       <div class="shstep" data-step="1">
-        <div class="step-label">ขั้นตอน 1 จาก 3 — ข้อมูลพื้นฐานและปักหมุดพิกัดในแผนที่ก่อน</div>
+        <div class="step-label">ขั้นตอน 1 จาก 3 — ปักหมุดพิกัดบนแผนที่ก่อนเพื่อค้นหาที่อยู่อัตโนมัติ</div>
+
+        <!-- 1. Map pinned on top first as requested -->
+        <div class="fgroup" style="margin-top:4px;">
+          <label style="color: var(--accent); font-weight: 800; display: flex; align-items: center; gap: 4px;">
+            <i class="ph-bold ph-map-pin"></i> 1. ปักหมุดตำแหน่ง (คลิกบนแผนที่ด้านล่าง หรือลากหมุดเพื่อค้นหาที่อยู่) *
+          </label>
+          <div id="modalMap"></div>
+        </div>
+
+        <button class="fullbtn geo" id="f_geoBtn" style="margin-bottom: 12px;"><i class="ph ph-crosshair"></i> ใช้ตำแหน่งปัจจุบันของฉัน</button>
+
+        <div class="map-coord-row" style="margin-bottom: 16px;">
+          <div class="coord-field"><label>ละติจูด *</label><input id="f_lat" placeholder="ยังไม่ได้ปักหมุด" readonly></div>
+          <div class="coord-divider"></div>
+          <div class="coord-field"><label>ลองจิจูด *</label><input id="f_lon" placeholder="ยังไม่ได้ปักหมุด" readonly></div>
+        </div>
+
+        <!-- Separator -->
+        <div style="border-top: 1px dashed var(--border); padding-top: 16px; margin-top: 16px; margin-bottom: 12px;">
+          <label style="font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: block;">
+            2. ตรวจสอบข้อมูลสถานที่และชื่อศูนย์อพยพ
+          </label>
+        </div>
 
         <div class="fgrid">
           <div class="fgroup">
@@ -943,39 +927,27 @@ input:checked + .slider:before { transform: translateX(21px); }
             <input id="f_id" placeholder="รันจากระบบ" readonly>
           </div>
           <div class="fgroup">
-            <label>ชื่อสถานที่ *</label>
-            <input id="f_name" placeholder="เช่น โรงเรียน...">
+            <label>ชื่อสถานที่พักพิง *</label>
+            <input id="f_name" placeholder="เช่น โรงเรียนกีฬา, วัดประจำตำบล...">
           </div>
         </div>
 
         <div class="fgrid">
           <div class="fgroup">
-            <label>จังหวัด</label>
-            <select id="f_province" onchange="updateDistricts()"><option value="">เลือกจังหวัด</option></select>
+            <label>จังหวัด (ดึงพิกัดจากหมุด)</label>
+            <select id="f_province" onchange="updateDistricts()"><option value="">ปักหมุดเพื่อระบุจังหวัด</option></select>
           </div>
           <div class="fgroup">
-            <label>อำเภอ / เขต</label>
-            <select id="f_district" onchange="updateSubDistricts()"><option value="">เลือกอำเภอ</option></select>
+            <label>อำเภอ / เขต (ดึงพิกัดจากหมุด)</label>
+            <select id="f_district" onchange="updateSubDistricts()"><option value="">ปักหมุดเพื่อระบุอำเภอ</option></select>
           </div>
         </div>
         <div class="fgroup">
-          <label>ตำบล / แขวง</label>
-          <select id="f_subdistrict"><option value="">เลือกตำบล</option></select>
+          <label>ตำบล / แขวง (ดึงพิกัดจากหมุด)</label>
+          <select id="f_subdistrict"><option value="">ปักหมุดเพื่อระบุตำบล</option></select>
         </div>
 
-        <div class="fgroup" style="margin-top:4px;">
-          <label>ปักหมุดบนแผนที่ (คลิกที่แผนที่เพื่อเลือกตำแหน่ง) *</label>
-          <div id="modalMap"></div>
-        </div>
-
-        <div class="map-coord-row">
-          <div class="coord-field"><label>ละติจูด *</label><input id="f_lat" placeholder="ยังไม่ได้ปักหมุด" readonly></div>
-          <div class="coord-divider"></div>
-          <div class="coord-field"><label>ลองจิจูด *</label><input id="f_lon" placeholder="ยังไม่ได้ปักหมุด" readonly></div>
-        </div>
-
-        <button class="fullbtn geo" id="f_geoBtn"><i class="ph ph-crosshair"></i> ใช้ตำแหน่งปัจจุบันของฉัน</button>
-        <button class="fullbtn dark" data-next="2">ถัดไป (ต้องการพิกัดตำแหน่ง) <i class="ph ph-arrow-right"></i></button>
+        <button class="fullbtn dark" data-next="2" style="margin-top: 12px;">ถัดไป (ต้องการพิกัดตำแหน่ง) <i class="ph ph-arrow-right"></i></button>
       </div>
 
       <!-- STEP 2 -->
@@ -1004,32 +976,22 @@ input:checked + .slider:before { transform: translateX(21px); }
 
 <script>
 /* ============================================================
-   FLOODCARE AI — STATE & SERVICES (ดึงข้อมูลแบบ Real Sheet)
+   FLOODCARE AI — STATE & SERVICES (BACKEND API DRIVEN)
 ============================================================ */
 const PRIORITY_COLOR = { CRITICAL:'#EF4444', HIGH:'#F59E0B', NORMAL:'#10B981' };
 const PRIORITY_LABEL = { CRITICAL:'วิกฤต', HIGH:'เร่งด่วน', NORMAL:'ปกติ' };
 const STATUS_LABEL   = { OPEN:'รอรับเคส', IN_PROGRESS:'กำลังช่วย', CLOSED:'เสร็จสิ้น' };
+const NEEDS_URGENCY_LABEL = { CRITICAL:'ด่วนวิกฤต', HIGH:'ปานกลาง', NORMAL:'ไม่ด่วน' };
 const SHELTER_COLORS = ['#22C55E','#16A34A','#4ADE80','#15803D','#86EFAC'];
 const FACILITIES = ['ไฟฟ้า','น้ำสะอาด','อินเทอร์เน็ต','รองรับผู้พิการ','รับสัตว์เลี้ยง','มีแพทย์ประจำ'];
 
-// ดึงข้อมูลจริงเริ่มต้นจากความว่างเปล่า (ไม่มีข้อมูลทดสอบติดมา)
 let state = {
-  data: {
-    stats: {},
-    sos_cases: [],
-    shelters: [],
-    needs: []
-  },
-  ok: true,
-  selectedId: null,
-  sosSearch: '', 
-  sosPrio: 'ALL', 
-  sosStat: 'ALL',
-  needsSearch: '',
-  needsUrg: 'ALL',
-  needsStat: 'ALL',
+  data: { stats:{}, sos_cases:[], shelters:[], needs:[] },
+  ok: false, selectedId: null,
+  sosSearch: '', sosPrio: 'ALL', sosStat: 'ALL',
+  needsSearch: '', needsUrg: 'ALL', needsStat: 'ALL',
   pending: {},
-  settings: { darkMode: false, hideClosed: false },
+  settings: { darkMode:false, hideClosed:false },
   facilities: new Set(['ไฟฟ้า','น้ำสะอาด'])
 };
 
@@ -1040,9 +1002,9 @@ let dashTileLayer, fullTileLayer;
 
 const addressData = {
   "กรุงเทพมหานคร": {
-    "บางกะปิ":  ["คลองจั่น","หัวหมาก"],
-    "บางเขน":  ["อนุสาวรีย์","ท่าแร้ง"],
-    "ปทุมวัน": ["ปทุมวัน","ลุมพินี","รองเมือง"]
+    "เขตปทุมวัน": ["ปทุมวัน","ลุมพินี","รองเมือง"],
+    "เขตบางกะปิ":  ["คลองจั่น","หัวหมาก"],
+    "เขตบางเขน":  ["อนุสาวรีย์","ท่าแร้ง"]
   },
   "เชียงใหม่": {
     "เมืองเชียงใหม่": ["ศรีภูมิ","พระสิงห์","หายยา"],
@@ -1051,198 +1013,6 @@ const addressData = {
 };
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-
-/* ── CSV Parser แบบ Robust รองรับการมี Comma ภายใน Double Quote ── */
-function parseCSV(text) {
-  const lines = text.split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = splitCSVRow(lines[0]);
-  const result = [];
-  for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    const values = splitCSVRow(lines[i]);
-    const obj = {};
-    headers.forEach((h, idx) => {
-      const cleanHeader = h.trim().replace(/^["']|["']$/g, '');
-      const rawVal = values[idx] || '';
-      obj[cleanHeader] = rawVal.trim().replace(/^["']|["']$/g, '');
-    });
-    result.push(obj);
-  }
-  return result;
-}
-
-function splitCSVRow(row) {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < row.length; i++) {
-    const char = row[i];
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === ',' && !inQuotes) {
-      result.push(current);
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  result.push(current);
-  return result;
-}
-
-/* ── ฟังก์ชันดึงข้อมูลจาก Google Sheets (Published CSV) ── */
-async function fetchGoogleSheetsData() {
-  const sosUrl = localStorage.getItem('sheet_sos_url') || '';
-  const sheltersUrl = localStorage.getItem('sheet_shelters_url') || '';
-  const needsUrl = localStorage.getItem('sheet_needs_url') || '';
-  
-  const statusPill = document.getElementById('statusPill');
-  const syncMsg = document.getElementById('syncStatusMsg');
-
-  if (!sosUrl && !sheltersUrl && !needsUrl) {
-    if (syncMsg) {
-      syncMsg.innerHTML = `<span style="color:var(--warn-tx);">⚠️ ยังไม่ได้กรอกข้อมูลลิงก์ Google Sheets ในหน้าตั้งค่า</span>`;
-    }
-    state.ok = false;
-    renderAll();
-    return;
-  }
-
-  if (statusPill) {
-    statusPill.className = 'pill syncing';
-    statusPill.innerHTML = '<i class="ph ph-arrows-clockwise" style="animation: spin 1.5s linear infinite;"></i> กำลังประสานงานข้อมูล...';
-  }
-  if (syncMsg) {
-    syncMsg.innerHTML = `<span style="color:var(--info-tx);">🔄 กำลังดึงข้อมูลล่าสุดจาก Google Sheets...</span>`;
-  }
-
-  try {
-    let syncedCount = 0;
-    
-    // 1. ดึงข้อมูล SOS Cases
-    if (sosUrl) {
-      const res = await fetch(sosUrl);
-      const csvText = await res.text();
-      const rawData = parseCSV(csvText);
-      state.data.sos_cases = rawData.map(item => ({
-        request_id: item.request_id || 'SOS-000',
-        first_name: item.first_name || '',
-        last_name: item.last_name || '',
-        phone: item.phone || '',
-        people_count: parseInt(item.people_count) || 1,
-        water_level: item.water_level || '0m',
-        bedridden: (item.bedridden || 'NO').toUpperCase(),
-        pets: (item.pets || 'NO').toUpperCase(),
-        priority: (item.priority || 'NORMAL').toUpperCase(),
-        status: (item.status || 'OPEN').toUpperCase(),
-        latitude: parseFloat(item.latitude) || 13.75,
-        longitude: parseFloat(item.longitude) || 100.5,
-        note: item.note || ''
-      }));
-      syncedCount++;
-    }
-
-    // 2. ดึงข้อมูล Shelters
-    if (sheltersUrl) {
-      const res = await fetch(sheltersUrl);
-      const csvText = await res.text();
-      const rawData = parseCSV(csvText);
-      state.data.shelters = rawData.map(item => ({
-        id: item.id || 'SH-000',
-        name: item.name || '',
-        province: item.province || '',
-        district: item.district || '',
-        subdistrict: item.subdistrict || '',
-        latitude: parseFloat(item.latitude) || 13.75,
-        longitude: parseFloat(item.longitude) || 100.5,
-        capacity: parseInt(item.capacity) || 100,
-        occupancy: parseInt(item.occupancy) || 0,
-        facilities: item.facilities ? item.facilities.split(',').map(f => f.trim()) : []
-      }));
-      syncedCount++;
-    }
-
-    // 3. ดึงข้อมูล Needs Request
-    if (needsUrl) {
-      const res = await fetch(needsUrl);
-      const csvText = await res.text();
-      const rawData = parseCSV(csvText);
-      state.data.needs = rawData.map(item => ({
-        need_id: item.need_id || 'ND-000',
-        reporter_name: item.reporter_name || '',
-        reporter_phone: item.reporter_phone || '',
-        timestamp: item.timestamp || new Date().toISOString(),
-        categories: item.categories || '',
-        details: item.details || '',
-        halal_required: (item.halal_required === 'true' || item.halal_required === 'YES'),
-        urgency: (item.urgency || 'NORMAL').toUpperCase(),
-        status: (item.status || 'PENDING').toUpperCase(),
-        volunteer_name: item.volunteer_name || '',
-        delivered_at: item.delivered_at || null
-      }));
-      syncedCount++;
-    }
-
-    state.ok = true;
-    if (syncMsg) {
-      syncMsg.innerHTML = `<span style="color:var(--green-dark);">✅ ดึงข้อมูลสำเร็จ (${syncedCount} รายการ) เมื่อ ${new Date().toLocaleTimeString()}</span>`;
-    }
-  } catch (error) {
-    console.error('Error syncing with Google Sheets:', error);
-    state.ok = false;
-    if (syncMsg) {
-      syncMsg.innerHTML = `<span style="color:var(--crit-tx);">❌ ดึงข้อมูลล้มเหลว กรุณาตรวจสอบสิทธิ์การแชร์ลิงก์ CSV</span>`;
-    }
-  }
-
-  renderAll();
-}
-
-/* ── ฟังก์ชันบันทึกลิงก์และซิงก์ใหม่จาก Settings ── */
-function saveSheetUrlsAndSync() {
-  const sos = document.getElementById('sheet_sos_url').value.trim();
-  const shelters = document.getElementById('sheet_shelters_url').value.trim();
-  const needs = document.getElementById('sheet_needs_url').value.trim();
-  
-  localStorage.setItem('sheet_sos_url', sos);
-  localStorage.setItem('sheet_shelters_url', shelters);
-  localStorage.setItem('sheet_needs_url', needs);
-  
-  fetchGoogleSheetsData();
-}
-
-/* ── ล้างลิงก์ Google Sheets ทั้งหมด ── */
-function clearSheetUrls() {
-  document.getElementById('sheet_sos_url').value = '';
-  document.getElementById('sheet_shelters_url').value = '';
-  document.getElementById('sheet_needs_url').value = '';
-  
-  localStorage.removeItem('sheet_sos_url');
-  localStorage.removeItem('sheet_shelters_url');
-  localStorage.removeItem('sheet_needs_url');
-  
-  state.data.sos_cases = [];
-  state.data.shelters = [];
-  state.data.needs = [];
-  
-  const syncMsg = document.getElementById('syncStatusMsg');
-  if (syncMsg) syncMsg.innerHTML = `<span style="color:var(--muted);">ล้างข้อมูลลิงก์เสร็จสิ้น ระบบกลับไปใช้ค่าเริ่มต้นว่างเปล่า</span>`;
-  
-  state.ok = false;
-  renderAll();
-}
-
-/* ── ดึงข้อมูลที่บันทึกไว้ใน LocalStorage ขึ้นมาโชว์ในช่องกรอก ── */
-function loadSavedUrlsToUI() {
-  const sos = localStorage.getItem('sheet_sos_url') || '';
-  const shelters = localStorage.getItem('sheet_shelters_url') || '';
-  const needs = localStorage.getItem('sheet_needs_url') || '';
-  
-  if (document.getElementById('sheet_sos_url')) document.getElementById('sheet_sos_url').value = sos;
-  if (document.getElementById('sheet_shelters_url')) document.getElementById('sheet_shelters_url').value = shelters;
-  if (document.getElementById('sheet_needs_url')) document.getElementById('sheet_needs_url').value = needs;
-}
 
 /* ── Maps init ── */
 function initMaps(){
@@ -1463,10 +1233,17 @@ function closeMapDetailPanel(){
   renderMapMarkers(fullMap,fullLayer,false);
 }
 
+/* ── Helper: Render Tabs Generator ── */
+function renderTabsInto(el,tabs,activeKey,onClick){
+  if (!el) return;
+  el.innerHTML=tabs.map(t=>`<button class="tabbtn ${t.key===activeKey?'active':''}" data-key="${t.key}">${t.label}</button>`).join('');
+  [...el.children].forEach(btn=>btn.addEventListener('click',()=>onClick(btn.dataset.key)));
+}
+
 /* ── Needs page ── */
 function renderNeedsPage(){
   renderTabsInto(document.getElementById('needsUrgTabs'),
-    [{key:'ALL',label:'ทั้งหมด'},{key:'CRITICAL',label:'วิกฤต'},{key:'HIGH',label:'เร่งด่วน'},{key:'NORMAL',label:'ปกติ'}],
+    [{key:'ALL',label:'ทั้งหมด'},{key:'CRITICAL',label:'ด่วนวิกฤต'},{key:'HIGH',label:'ปานกลาง'},{key:'NORMAL',label:'ไม่ด่วน'}],
     state.needsUrg,(k)=>{ state.needsUrg=k; renderNeedsPage(); });
   renderTabsInto(document.getElementById('needsStatTabs'),
     [{key:'ALL',label:'ทั้งหมด'},{key:'PENDING',label:'รอดำเนินการ'},{key:'IN_PROGRESS',label:'กำลังจัดส่ง'},{key:'DELIVERED',label:'ส่งแล้ว'}],
@@ -1495,7 +1272,7 @@ function renderNeedsPage(){
   }
   body.innerHTML=filteredNeeds.map(n=>{
     const bc=n.urgency==='CRITICAL'?'crit':n.urgency==='HIGH'?'high':'norm';
-    const urgLabel=n.urgency==='CRITICAL'?'วิกฤต':n.urgency==='HIGH'?'เร่งด่วน':'ปกติ';
+    const urgLabel=NEEDS_URGENCY_LABEL[n.urgency] || 'ไม่ระบุ';
     
     let stHtml = '';
     if(n.status === 'DELIVERED') stHtml = `<span class="tblst" style="background:var(--ok-bg);color:var(--ok-tx);"><i class="ph-bold ph-check"></i> ส่งแล้ว</span>`;
@@ -1505,10 +1282,11 @@ function renderNeedsPage(){
     const ts = n.timestamp ? new Date(n.timestamp).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'}) : '—';
     const dlv = n.delivered_at ? new Date(n.delivered_at).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'}) : `<span style="color:var(--warn);font-weight:700;">รอจัดส่ง</span>`;
     
+    const isPending = !!state.pending[n.need_id];
     const actionHtml = n.status === 'PENDING'
-      ? `<button onclick="updateNeedStatus('${n.need_id}', 'IN_PROGRESS')" style="background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;width:100%;"><i class="ph-bold ph-play-circle"></i> ดำเนินการ</button>`
+      ? `<button onclick="updateNeedStatus('${n.need_id}', 'IN_PROGRESS')" style="background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;width:100%;"><i class="ph-bold ph-play-circle"></i> ${isPending?'กำลังบันทึก..':'ดำเนินการ'}</button>`
       : n.status === 'IN_PROGRESS'
-      ? `<button onclick="updateNeedStatus('${n.need_id}', 'DELIVERED')" style="background:var(--green-dark);color:#fff;border:none;padding:8px 12px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;width:100%;"><i class="ph-bold ph-check-circle"></i> ปิดเคส</button>`
+      ? `<button onclick="updateNeedStatus('${n.need_id}', 'DELIVERED')" style="background:var(--green-dark);color:#fff;border:none;padding:8px 12px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;width:100%;"><i class="ph-bold ph-check-circle"></i> ${isPending?'กำลังบันทึก..':'ปิดเคส'}</button>`
       : `<span style="color:var(--muted);font-size:11px;display:flex;align-items:center;justify-content:center;gap:4px;"><i class="ph-bold ph-check"></i> เสร็จสิ้น</span>`;
 
     return `<tr>
@@ -1520,7 +1298,7 @@ function renderNeedsPage(){
       <td style="white-space:nowrap;font-size:12px;color:var(--faint);">${ts}</td>
       <td style="font-weight:700; color:var(--accent-dark);">${esc(n.categories)}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.details)}</td>
-      <td style="text-align:center;">${(n.halal_required===true||n.halal_required==='YES')?'<span style="color:var(--green);font-weight:800;">✓ ฮาลาล</span>':'—'}</td>
+      <td style="text-align:center;">${(n.halal_required===true||n.halal_required==='YES'||n.halal_required===1)?'<span style="color:var(--green);font-weight:800;">✓ ฮาลาล</span>':'—'}</td>
       <td><span class="badge ${bc}">${urgLabel}</span></td>
       <td>${stHtml}</td>
       <td><span style="color:${n.volunteer_name?'var(--text)':'var(--faint)'}; font-weight: 600;">${esc(n.volunteer_name)||'—'}</span></td>
@@ -1530,57 +1308,116 @@ function renderNeedsPage(){
   }).join('');
 }
 
-function updateNeedStatus(id, newStatus) {
-  const need = state.data.needs.find(n => n.need_id === id);
-  if(need) {
-    need.status = newStatus;
-    if(newStatus === 'IN_PROGRESS') {
-      need.volunteer_name = 'ทีมกู้ภัยส่วนกลาง';
-    } else if (newStatus === 'DELIVERED') {
-      need.delivered_at = new Date().toISOString();
-    }
-    renderAll();
+/* ── Modal Map & Address Parsing ── */
+function cleanThaiAddressComponent(val, type) {
+  if (!val) return '';
+  let s = String(val).trim();
+  if (type === 'province') {
+    s = s.replace(/^จังหวัด/, '').trim();
+    if (s.toLowerCase() === 'bangkok') s = 'กรุงเทพมหานคร';
+    return s;
   }
+  if (type === 'district') {
+    s = s.replace(/^(อำเภอ|เขต|เมือง|กิ่งอำเภอ)/, '').trim();
+    return s;
+  }
+  if (type === 'subdistrict') {
+    s = s.replace(/^(ตำบล|แขวง)/, '').trim();
+    return s;
+  }
+  return s;
 }
 
-/* ── Modal Map ── */
-let modalMap, modalMarker;
 async function reverseGeocodeAndFill(lat, lon){
+  const provinceSelect = document.getElementById('f_province');
+  const districtSelect = document.getElementById('f_district');
+  const subdistrictSelect = document.getElementById('f_subdistrict');
+  
+  provinceSelect.innerHTML = '<option value="">กำลังวิเคราะห์จังหวัด...</option>';
+  districtSelect.innerHTML = '<option value="">กำลังวิเคราะห์อำเภอ...</option>';
+  subdistrictSelect.innerHTML = '<option value="">กำลังวิเคราะห์ตำบล...</option>';
+  
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=th&zoom=10`,
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=th&zoom=14`,
       { headers: { 'Accept-Language': 'th' } }
     );
     const data = await res.json();
     const addr = data.address || {};
-    const rawState = (addr.state || addr.county || '').replace(/^จังหวัด/,'').trim();
-    const allProvinces = Object.keys(addressData);
-    const province = allProvinces.find(p => p === rawState || p.includes(rawState) || rawState.includes(p));
-    if (!province) return;
-    document.getElementById('f_province').value = province;
-    updateDistricts();
-    const rawDistrict = (addr.county || addr.suburb || addr.city_district || '').replace(/^(อำเภอ|เขต|เมือง)/,'').trim();
-    const allDistricts = Object.keys(addressData[province] || {});
-    const district = allDistricts.find(d => d === rawDistrict || d.includes(rawDistrict) || rawDistrict.includes(d));
-    if (!district) return;
-    document.getElementById('f_district').value = district;
-    updateSubDistricts();
-  } catch(e) {}
+    
+    const rawProv = addr.state || addr.province || addr.region || '';
+    const rawDist = addr.county || addr.city_district || addr.district || addr.city || '';
+    const rawSubdist = addr.subdistrict || addr.suburb || addr.village || addr.town || addr.neighbourhood || '';
+    
+    const cleanProv = cleanThaiAddressComponent(rawProv, 'province');
+    const cleanDist = cleanThaiAddressComponent(rawDist, 'district');
+    const cleanSubdist = cleanThaiAddressComponent(rawSubdist, 'subdistrict');
+    
+    if (cleanProv) {
+      if (!addressData[cleanProv]) {
+        addressData[cleanProv] = {};
+      }
+      
+      initDropdowns(); 
+      provinceSelect.value = cleanProv;
+      
+      if (cleanDist) {
+        if (!addressData[cleanProv][cleanDist]) {
+          addressData[cleanProv][cleanDist] = [];
+        }
+        updateDistricts();
+        districtSelect.value = cleanDist;
+        
+        if (cleanSubdist) {
+          if (!addressData[cleanProv][cleanDist].includes(cleanSubdist)) {
+            addressData[cleanProv][cleanDist].push(cleanSubdist);
+          }
+          updateSubDistricts();
+          subdistrictSelect.value = cleanSubdist;
+        } else {
+          updateSubDistricts();
+        }
+      } else {
+        updateDistricts();
+      }
+    } else {
+      initDropdowns();
+    }
+  } catch(e) {
+    console.error("Geocoding analysis failed:", e);
+    initDropdowns();
+  }
 }
 
+let modalMap, modalMarker;
 function initModalMap(){
   if(!modalMap){
-    modalMap = L.map('modalMap',{attributionControl:false}).setView([13.75,100.5],10);
+    modalMap = L.map('modalMap',{attributionControl:false}).setView([13.75,100.5],6);
     L.tileLayer(lightTile,{maxZoom:19}).addTo(modalMap);
-    modalMarker = L.marker([13.75,100.5],{draggable:true}).addTo(modalMap);
+    
+    modalMarker = null;
 
     const updateCoords = (latlng)=>{
       document.getElementById('f_lat').value = latlng.lat.toFixed(6);
       document.getElementById('f_lon').value = latlng.lng.toFixed(6);
       reverseGeocodeAndFill(latlng.lat, latlng.lng);
     };
-    modalMarker.on('dragend',()=>updateCoords(modalMarker.getLatLng()));
-    modalMap.on('click',e=>{ modalMarker.setLatLng(e.latlng); updateCoords(e.latlng); });
+
+    modalMap.on('click',e=>{
+      if(!modalMarker){
+        modalMarker = L.marker(e.latlng,{draggable:true}).addTo(modalMap);
+        modalMarker.on('dragend',()=>updateCoords(modalMarker.getLatLng()));
+      } else {
+        modalMarker.setLatLng(e.latlng);
+      }
+      updateCoords(e.latlng);
+    });
+  } else {
+    if(modalMarker) {
+      modalMap.removeLayer(modalMarker);
+      modalMarker = null;
+    }
+    modalMap.setView([13.75,100.5], 6);
   }
   setTimeout(()=>modalMap.invalidateSize(),250);
 }
@@ -1630,17 +1467,40 @@ document.getElementById('closeShelterModal').addEventListener('click',()=>shelte
 shelterModal.addEventListener('click',e=>{ if(e.target===shelterModal) shelterModal.classList.remove('show'); });
 
 document.getElementById('f_geoBtn').addEventListener('click',()=>{
-  if(!navigator.geolocation){ alert('เบราว์เซอร์ไม่รองรับ Geolocation'); return; }
+  const err=document.getElementById('shelterFormErr');
+  err.innerHTML = '';
+  if(!navigator.geolocation){ 
+    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>เบราว์เซอร์ของคุณไม่รองรับการดึงพิกัด GPS ปัจจุบัน</div>`;
+    return; 
+  }
   const btn=document.getElementById('f_geoBtn');
   btn.innerHTML = '<i class="ph ph-spinner"></i> กำลังค้นหาตำแหน่ง...'; btn.disabled=true;
+  
   navigator.geolocation.getCurrentPosition(pos=>{
     const lat=pos.coords.latitude, lon=pos.coords.longitude;
     document.getElementById('f_lat').value=lat.toFixed(6);
     document.getElementById('f_lon').value=lon.toFixed(6);
-    if(modalMarker&&modalMap){ modalMarker.setLatLng([lat,lon]); modalMap.flyTo([lat,lon],14); }
+    
+    if(modalMap){ 
+      if(!modalMarker){
+        modalMarker = L.marker([lat,lon],{draggable:true}).addTo(modalMap);
+        modalMarker.on('dragend',()=>{
+          const latlng = modalMarker.getLatLng();
+          document.getElementById('f_lat').value = latlng.lat.toFixed(6);
+          document.getElementById('f_lon').value = latlng.lng.toFixed(6);
+          reverseGeocodeAndFill(latlng.lat, latlng.lng);
+        });
+      } else {
+        modalMarker.setLatLng([lat,lon]);
+      }
+      modalMap.flyTo([lat,lon],14); 
+    }
     btn.innerHTML='<i class="ph ph-crosshair"></i> ใช้ตำแหน่งปัจจุบันของฉัน'; btn.disabled=false;
     reverseGeocodeAndFill(lat, lon);
-  },()=>{ btn.innerHTML='<i class="ph ph-crosshair"></i> ใช้ตำแหน่งปัจจุบันของฉัน'; btn.disabled=false; alert('ไม่สามารถดึงพิกัดได้'); });
+  },()=>{ 
+    btn.innerHTML='<i class="ph ph-crosshair"></i> ใช้ตำแหน่งปัจจุบันของฉัน'; btn.disabled=false; 
+    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>ไม่สามารถดึงพิกัดตำแหน่งของคุณได้ในขณะนี้ กรุณาคลิกปักหมุดเองบนแผนที่</div>`;
+  });
 });
 
 function renderFacilityOptions(){
@@ -1674,9 +1534,18 @@ document.querySelectorAll('[data-next]').forEach(b=>b.addEventListener('click',(
     const name = document.getElementById('f_name').value.trim();
     const lat = document.getElementById('f_lat').value;
     const lon = document.getElementById('f_lon').value;
-    if(!name) { err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>กรุณาระบุชื่อสถานที่พักพิง</div>`; return; }
+    const prov = document.getElementById('f_province').value;
+    
     if(!lat || !lon || lat === '' || lon === '') { 
-      err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>คุณจำเป็นต้องเลือกพิกัดก่อนดำเนินการต่อ (ลากหมุด ค้นหาพิกัด หรือคลิกแผนที่)</div>`; 
+      err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>กรุณาปักหมุดตำแหน่งหรือปุ่ม GPS ก่อนเพื่อให้ระบบได้พิกัดละติจูดและที่อยู่อัตโนมัติ</div>`; 
+      return; 
+    }
+    if(!name) { 
+      err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>กรุณาระบุชื่อสถานที่พักพิงใหม่</div>`; 
+      return; 
+    }
+    if(!prov) { 
+      err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>ระบบตรวจไม่พบจังหวัด กรุณาปักหมุดใหม่อีกครั้ง หรือเลือกพื้นที่อื่นที่ระบุที่อยู่ได้</div>`; 
       return; 
     }
   }
@@ -1685,65 +1554,6 @@ document.querySelectorAll('[data-next]').forEach(b=>b.addEventListener('click',(
   goToStep(nextStep);
 }));
 document.querySelectorAll('[data-prev]').forEach(b=>b.addEventListener('click',()=>goToStep(Number(b.dataset.prev))));
-
-document.getElementById('f_submit').addEventListener('click',()=>{
-  const btn=document.getElementById('f_submit');
-  const err=document.getElementById('shelterFormErr');
-  const id=document.getElementById('f_id').value.trim();
-  const name=document.getElementById('f_name').value.trim();
-  const lat = document.getElementById('f_lat').value;
-  const lon = document.getElementById('f_lon').value;
-  
-  if(!id||!name){
-    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>กรุณาระบุรหัสศูนย์และชื่อสถานที่</div>`;
-    goToStep(1); return;
-  }
-  if(!lat || !lon || lat === '' || lon === '') {
-    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>คุณต้องบันทึกพิกัดก่อน</div>`;
-    goToStep(1); return;
-  }
-  
-  btn.innerHTML='<i class="ph ph-spinner"></i> กำลังบันทึก...'; btn.disabled=true;
-  
-  setTimeout(() => {
-    state.data.shelters.push({
-      id, name,
-      province: document.getElementById('f_province').value||'-',
-      district: document.getElementById('f_district').value||'-',
-      subdistrict: document.getElementById('f_subdistrict').value||'-',
-      latitude: parseFloat(document.getElementById('f_lat').value)||0,
-      longitude: parseFloat(document.getElementById('f_lon').value)||0,
-      capacity: parseInt(document.getElementById('f_capacity').value)||100,
-      occupancy: parseInt(document.getElementById('f_occupancy').value)||0,
-      facilities: [...state.facilities],
-    });
-    shelterModal.classList.remove('show');
-    btn.innerHTML='<i class="ph ph-floppy-disk"></i> บันทึก'; btn.disabled=false;
-    renderAll();
-  }, 600);
-});
-
-/* ── Shelter Occupancy Interactive Edit ── */
-function adjustOccupancy(shelterId, val) {
-  const s = state.data.shelters.find(x => x.id === shelterId);
-  if (s) {
-    const newVal = Math.max(0, s.occupancy + val);
-    s.occupancy = newVal;
-    renderAll();
-  }
-}
-
-function handleOccupancyInput(shelterId, inputElement) {
-  const s = state.data.shelters.find(x => x.id === shelterId);
-  if (s) {
-    let newVal = parseInt(inputElement.value);
-    if (isNaN(newVal) || newVal < 0) {
-      newVal = 0;
-    }
-    s.occupancy = newVal;
-    renderAll();
-  }
-}
 
 /* ── Render dashboard SOS ── */
 function sosCardHtml(c,i){
@@ -1786,14 +1596,9 @@ function renderDashboardSosList(){
   document.getElementById('sosCountBadge').textContent=(state.data.sos_cases||[]).length;
   document.getElementById('shCountBadge').textContent=(state.data.shelters||[]).length;
   const el=document.getElementById('sosListDash');
-  if(!cases.length){ el.innerHTML=`<div class="empty-msg"><i class="ph ph-info"></i>ยังไม่มีเคส SOS ที่โหลดเข้ามา</div>`; return; }
+  if(!state.ok && !cases.length){ el.innerHTML=`<div class="empty-msg">กำลังโหลดข้อมูล...</div>`; return; }
+  if(!cases.length){ el.innerHTML=`<div class="empty-msg"><i class="ph ph-check-circle"></i>ไม่มีเคส SOS ในขณะนี้</div>`; return; }
   el.innerHTML=cases.map((c,i)=>sosCardHtml(c,i)).join('');
-}
-
-/* ── SOS Card Grid (full page) ── */
-function renderTabsInto(el,tabs,activeKey,onClick){
-  el.innerHTML=tabs.map(t=>`<button class="tabbtn ${t.key===activeKey?'active':''}" data-key="${t.key}">${t.label}</button>`).join('');
-  [...el.children].forEach(btn=>btn.addEventListener('click',()=>onClick(btn.dataset.key)));
 }
 
 function sosFullCardHtml(c){
@@ -1883,7 +1688,7 @@ function renderSosPage(){
   document.getElementById('sosSubhead').textContent=`แสดง ${filtered.length} จาก ${all.length} เคส`;
   const grid=document.getElementById('sosCardGrid');
   if(!filtered.length){
-    grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-siren"></i>ไม่พบเคสที่ค้นหา (หรือลิงก์ฐานข้อมูลว่างเปล่า)</div>`;
+    grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-siren"></i>${state.ok?'ไม่พบเคสที่ค้นหา':'กำลังโหลดข้อมูล...'}</div>`;
     return;
   }
   grid.innerHTML=filtered.map(c=>sosFullCardHtml(c)).join('');
@@ -1896,7 +1701,7 @@ function renderShelters(){
   const shelters=state.data.shelters||[];
   document.getElementById('shSubhead').textContent=`${shelters.length} ศูนย์ — รองรับรวม ${shelters.reduce((a,s)=>a+s.capacity,0).toLocaleString()} คน`;
   const grid=document.getElementById('shelterGrid');
-  if(!shelters.length){ grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-tent"></i>ไม่มีข้อมูลศูนย์พักพิงในฐานข้อมูลขณะนี้</div>`; return; }
+  if(!shelters.length){ grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-tent"></i>ไม่มีข้อมูลศูนย์พักพิง</div>`; return; }
   grid.innerHTML=shelters.map(s=>{
     const pct=s.capacity>0?Math.round(s.occupancy/s.capacity*100):0;
     const barColor=pct>=100?'#EF4444':pct>=80?'#F59E0B':'#10B981';
@@ -2021,20 +1826,13 @@ function renderStatusPill(){
   const dot=document.getElementById('sideDot');
   if(state.ok){ 
     pill.className='pill online'; 
-    pill.innerHTML='<span class="dot"></span> Online Database'; 
+    pill.innerHTML='<span class="dot"></span> Online Server'; 
     if(dot) dot.classList.add('ok'); 
   } else { 
     pill.className='pill offline'; 
     pill.innerHTML='<i class="ph ph-warning-circle"></i> ขาดการเชื่อมต่อ'; 
     if(dot) dot.classList.remove('ok'); 
   }
-}
-
-/* ── Distance helper ── */
-function dist(la1,lo1,la2,lo2){
-  const R=6371,dL=(la2-la1)*Math.PI/180,dO=(lo2-lo1)*Math.PI/180;
-  const a=Math.sin(dL/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dO/2)**2;
-  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
 /* ── Analytics ── */
@@ -2085,20 +1883,128 @@ function renderAnalytics(){
   }).join('');
 }
 
-/* ── จำลองการอัปเดตสถานะจากฝั่ง Client ── */
-function updateSosStatus(id,status){
-  state.pending[id]=true; renderAll();
-  
-  setTimeout(() => {
-    const caseIndex = state.data.sos_cases.findIndex(c => c.request_id === id);
-    if(caseIndex !== -1) {
-      state.data.sos_cases[caseIndex].status = status;
-    }
-    delete state.pending[id];
-    renderAll();
-  }, 500);
+
+/* ============================================================
+   API INTEGRATION (การเรียกใช้งาน Backend)
+============================================================ */
+
+/* ── 1. ดึงข้อมูลทั้งหมดจากเซิร์ฟเวอร์ (อัปเดตออโต้) ── */
+async function loadData(){
+  try{
+    const res=await fetch('/api/dashboard/data',{credentials:'same-origin'});
+    if(res.status===401){ window.location.href='/dashboard/login'; return; }
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const json=await res.json();
+    state.data={stats:json.stats||{},sos_cases:json.sos_cases||[],shelters:json.shelters||[],needs:json.needs||[]};
+    state.ok=true;
+  }catch(e){ state.ok=false; }
+  renderAll();
 }
 
+/* ── 2. เปลี่ยนสถานะ SOS ── */
+async function updateSosStatus(id,status){
+  state.pending[id]=true; renderAll();
+  try{
+    const res=await fetch(`/api/dashboard/sos/${encodeURIComponent(id)}/status`,{
+      method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({status})
+    });
+    if(!res.ok) throw new Error('update failed');
+    await loadData();
+  }catch(e){ 
+    const err=document.getElementById('shelterFormErr');
+    if(err) err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>อัปเดตสถานะ SOS ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</div>`;
+  }
+  finally{ delete state.pending[id]; renderAll(); }
+}
+
+/* ── 3. บันทึกข้อมูลศูนย์พักพิงใหม่ ── */
+document.getElementById('f_submit').addEventListener('click',async()=>{
+  const btn=document.getElementById('f_submit');
+  const err=document.getElementById('shelterFormErr');
+  const id=document.getElementById('f_id').value.trim();
+  const name=document.getElementById('f_name').value.trim();
+  if(!id||!name){
+    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>กรุณาระบุรหัสศูนย์และชื่อสถานที่พักพิง</div>`;
+    goToStep(1); return;
+  }
+  btn.innerHTML='<i class="ph ph-spinner"></i> กำลังบันทึก...'; btn.disabled=true;
+  try{
+    const res=await fetch('/api/dashboard/shelters',{
+      method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        id,name,
+        province:document.getElementById('f_province').value||'-',
+        district:document.getElementById('f_district').value||'-',
+        subdistrict:document.getElementById('f_subdistrict').value||'-',
+        latitude:parseFloat(document.getElementById('f_lat').value)||0,
+        longitude:parseFloat(document.getElementById('f_lon').value)||0,
+        capacity:parseInt(document.getElementById('f_capacity').value)||100,
+        occupancy:parseInt(document.getElementById('f_occupancy').value)||0,
+        facilities:[...state.facilities],
+      })
+    });
+    const json=await res.json();
+    if(!res.ok||!json.success) throw new Error(json.error||'บันทึกไม่สำเร็จ');
+    shelterModal.classList.remove('show');
+    await loadData();
+  }catch(e){
+    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>${esc(e.message||'บันทึกไม่สำเร็จ กรุณาลองใหม่')}</div>`;
+    goToStep(1);
+  }finally{
+    btn.innerHTML='<i class="ph ph-floppy-disk"></i> บันทึก'; btn.disabled=false;
+  }
+});
+
+/* ── 4. อัปเดตสถานะการส่งสิ่งของ (Needs) ── */
+async function updateNeedStatus(id, status) {
+  state.pending[id] = true; renderAll();
+  try{
+    const res=await fetch(`/api/dashboard/needs/${encodeURIComponent(id)}/status`,{
+      method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({status})
+    });
+    if(!res.ok) throw new Error('update failed');
+    await loadData();
+  }catch(e){ 
+    const err=document.getElementById('shelterFormErr');
+    if(err) err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>อัปเดตสถานะการส่งสิ่งของไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</div>`;
+  }
+  finally{ delete state.pending[id]; renderAll(); }
+}
+
+/* ── 5. ปรับจำนวนผู้เข้าพักในศูนย์ (Shelters Occupancy) ── */
+async function adjustOccupancy(shelterId, val) {
+  const s = state.data.shelters.find(x => x.id === shelterId);
+  if (!s) return;
+  const newVal = Math.max(0, s.occupancy + val);
+  s.occupancy = newVal; 
+  renderAll();
+  await syncOccupancyToServer(shelterId, newVal);
+}
+
+function handleOccupancyInput(shelterId, inputElement) {
+  const s = state.data.shelters.find(x => x.id === shelterId);
+  if (!s) return;
+  let newVal = parseInt(inputElement.value);
+  if (isNaN(newVal) || newVal < 0) newVal = 0;
+  s.occupancy = newVal; 
+  renderAll();
+  syncOccupancyToServer(shelterId, newVal);
+}
+
+async function syncOccupancyToServer(shelterId, newOccupancy) {
+  try {
+    await fetch(`/api/dashboard/shelters/${encodeURIComponent(shelterId)}/occupancy`, {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ occupancy: newOccupancy })
+    });
+  } catch(e) {
+    console.error("Failed to sync occupancy:", e);
+  }
+}
+
+/* ── Render ทั้งระบบ ── */
 function renderAll(){
   renderStatusPill();
   renderStatStrip();
@@ -2129,8 +2035,9 @@ document.querySelectorAll('.navitem, .more, .bnav-item').forEach(el=>{
 
 /* ── Boot ── */
 initMaps();
-loadSavedUrlsToUI();
-fetchGoogleSheetsData();
+loadData();
+setInterval(loadData,30000); 
+
 </script>
 </body>
 </html>
