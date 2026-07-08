@@ -877,7 +877,7 @@ class SheetsManager:
                 "user_needs": ["need_id", "timestamp", "user_id", "first_name", "last_name", "phone",
                               "latitude", "longitude", "categories", "details", "urgency", "status",
                               "halal_required", "volunteer_name", "delivered_at"],
-                "Shelters": ["ShelterID", "Name", "Province", "District", "Latitude",
+                "Shelters": ["ShelterID", "Name", "Province", "District", "Subdistrict", "Latitude",
                             "Longitude", "Capacity", "Occupancy", "Status",
                             "Beds", "Toilets", "Parking", "Facilities"],
                 "Water_Levels": ["StationCode", "Name", "River", "Location", "Lat", "Lon",
@@ -1133,6 +1133,83 @@ class SheetsManager:
             return matched_record
         except Exception as e:
             Logger.error("Sheets", f"update_sos_status error: {e}")
+            return None
+
+    def update_need_status(self, need_id: str, new_status: str) -> Optional[dict]:
+        """Updates a user_needs row's status by need_id — used by the dashboard's
+        need-fulfillment actions. Stamps delivered_at when marked delivered/done."""
+        client = self.get_client()
+        if not client:
+            return None
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet("user_needs")
+            records = ws.get_all_records()
+            row_number, matched_record = None, None
+            for idx, rec in enumerate(records, start=2):
+                if str(rec.get("need_id", "")) == need_id:
+                    row_number, matched_record = idx, rec
+                    break
+            if not row_number:
+                return None
+
+            updates = {"status": new_status}
+            if new_status.upper() in ("DELIVERED", "DONE", "COMPLETED"):
+                updates["delivered_at"] = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
+
+            header = ws.row_values(1)
+            col_map = {name: i + 1 for i, name in enumerate(header)}
+            cells = [
+                gspread.Cell(row_number, col_map[name], str(value))
+                for name, value in updates.items() if name in col_map
+            ]
+            if cells:
+                ws.update_cells(cells, value_input_option='RAW')
+            cache.sheets.delete("sheets:user_needs")
+            return matched_record
+        except Exception as e:
+            Logger.error("Sheets", f"update_need_status error: {e}")
+            return None
+
+    def update_shelter_occupancy(self, shelter_id: str, new_occupancy: int) -> Optional[dict]:
+        """Updates a Shelters row's Occupancy (and recomputed Status label) by ShelterID —
+        used by the dashboard's +/- occupancy counter."""
+        client = self.get_client()
+        if not client:
+            return None
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet("Shelters")
+            records = ws.get_all_records()
+            row_number, matched_record = None, None
+            for idx, rec in enumerate(records, start=2):
+                if str(rec.get("ShelterID", "")) == shelter_id:
+                    row_number, matched_record = idx, rec
+                    break
+            if not row_number:
+                return None
+
+            try:
+                capacity = int(float(matched_record.get("Capacity", 0) or 0))
+            except (TypeError, ValueError):
+                capacity = 0
+            pct = (new_occupancy / capacity * 100) if capacity > 0 else 0
+            status_label = "เต็ม" if pct >= 100 else "ใกล้เต็ม" if pct >= 80 else "ว่าง"
+
+            updates = {"Occupancy": new_occupancy, "Status": status_label}
+            header = ws.row_values(1)
+            col_map = {name: i + 1 for i, name in enumerate(header)}
+            cells = [
+                gspread.Cell(row_number, col_map[name], str(value))
+                for name, value in updates.items() if name in col_map
+            ]
+            if cells:
+                ws.update_cells(cells, value_input_option='RAW')
+            cache.sheets.delete("sheets:Shelters")
+            cache.sheets.delete("sheets:shelters:normalized")
+            return matched_record
+        except Exception as e:
+            Logger.error("Sheets", f"update_shelter_occupancy error: {e}")
             return None
 
 sheets_mgr = SheetsManager()
