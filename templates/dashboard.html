@@ -2,18 +2,22 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>FLOODCARE AI — Command Center</title>
 
+<!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<!-- Leaflet MarkerCluster CSS for resolving overlapping pins -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
+
+<!-- Google Fonts & Phosphor Icons -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
 
 <style>
-/* ──────────────────────────────────────────
-   DESIGN TOKENS — Oripio Style
-────────────────────────────────────────── */
 :root {
   --accent:       #F97316;
   --accent-light: #FFF7ED;
@@ -26,12 +30,14 @@
   --green-dark:  #16A34A;
 
   --blue:        #3B82F6;
+  --blue-light:  #EFF6FF;
+  --blue-dark:   #1D4ED8;
 
   --bg-start:    #C2DCE8;
   --bg-end:      #EDD9C0;
   --surface:     #FFFFFF;
   --sidebar-bg:  #FFFFFF;
-  --nav-bg:      rgba(255,255,255,.92);
+  --nav-bg:      rgba(255,255,255,.94);
 
   --text:        #14181F;
   --muted:       #6B7280;
@@ -54,9 +60,6 @@
   --shadow-lg: 0 20px 60px rgba(0,0,0,.14);
 }
 
-/* ──────────────────────────────────────────
-   RESET & BASE
-────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -65,6 +68,7 @@ body {
   min-height: 100vh; overflow-x: hidden;
   font-size: 14px; line-height: 1.5;
   transition: background 0.3s, color 0.3s;
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 a { text-decoration: none; color: inherit; }
 button { font-family: inherit; cursor: pointer; border: none; background: transparent; transition: all .15s; }
@@ -74,9 +78,6 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.12); border-radius: 99px; }
 
-/* ──────────────────────────────────────────
-   LAYOUT
-────────────────────────────────────────── */
 .app { display: flex; min-height: 100vh; }
 
 .sidebar {
@@ -167,9 +168,6 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 }
 .card-pad { padding: 22px; }
 
-/* ──────────────────────────────────────────
-   STAT STRIP
-────────────────────────────────────────── */
 .stats {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -202,14 +200,11 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .stat .vl { font-size: 28px; font-weight: 900; color: var(--text); line-height: 1; }
 .stat .vl small { font-size: 12px; font-weight: 600; color: var(--muted); }
 
-/* ──────────────────────────────────────────
-   MAP
-────────────────────────────────────────── */
 .mapwrap {
   position: relative; border-radius: var(--radius);
   overflow: hidden; box-shadow: var(--shadow-sm); margin-bottom: 24px;
 }
-#dashMap { height: 280px; width: 100%; z-index: 10; }
+#dashMap { height: 320px; width: 100%; z-index: 10; border-radius: var(--radius); }
 #fullMap { width: 100%; height: 100%; z-index: 10; }
 
 .map-container-relative {
@@ -240,14 +235,19 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .expand-map-btn:hover { background: var(--accent); color: #fff; box-shadow: 0 4px 12px rgba(249,115,22,.3); }
 
 .fleet-marker {
-  background: #222; color: #fff;
+  background: #111; color: #fff;
   padding: 5px 9px; border-radius: 10px;
   font-size: 12px; font-weight: 700;
   display: flex; align-items: center; gap: 6px;
-  box-shadow: 0 2px 8px rgba(0,0,0,.3); border: 1.5px solid rgba(255,255,255,.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,.35); border: 2.5px solid #fff;
   white-space: nowrap; cursor: pointer; transition: all .2s;
 }
-.fleet-marker.active { background: var(--accent); border-color: var(--accent-mid); box-shadow: 0 6px 16px rgba(249,115,22,.4); }
+.fleet-marker.active { 
+  background: var(--accent); 
+  border-color: #fff; 
+  box-shadow: 0 0 15px rgba(249,115,22,.65); 
+  transform: scale(1.1);
+}
 .fleet-marker .mk-icn { color: #888; font-size: 14px; }
 .fleet-marker.active .mk-icn { color: #fff; }
 .mk-badge {
@@ -258,6 +258,48 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .mk-badge.CRITICAL { background: #FEE2E2; color: #991B1B; }
 .mk-badge.HIGH { background: #FEF3C7; color: #92400E; }
 .mk-badge.NORMAL { background: #D1FAE5; color: #065F46; }
+
+.custom-cluster-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.custom-cluster-inner {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.3);
+  border: 2px solid #fff;
+  transition: transform .2s;
+}
+.custom-cluster-inner span {
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+.custom-cluster-inner:hover {
+  transform: scale(1.1);
+}
+.cluster-critical {
+  background: linear-gradient(135deg, #EF4444 0%, #991B1B 100%);
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.7);
+}
+.cluster-high {
+  background: linear-gradient(135deg, #F59E0B 0%, #B45309 100%);
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.7);
+}
+.cluster-normal {
+  background: linear-gradient(135deg, #10B981 0%, #047857 100%);
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.7);
+}
+.cluster-mixed {
+  background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.7);
+}
 
 .leaflet-popup-content-wrapper { border-radius: 16px !important; box-shadow: var(--shadow-lg) !important; padding: 0 !important; overflow: hidden; background: var(--surface) !important; color: var(--text) !important; }
 .leaflet-popup-content { margin: 0 !important; width: 100% !important; min-width: 200px; }
@@ -321,9 +363,6 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .md-nb-name { font-size: 13px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 6px; }
 .md-nb-dist { font-size: 11px; color: var(--faint); font-weight: 600; }
 
-/* ──────────────────────────────────────────
-   DASHBOARD COLS
-────────────────────────────────────────── */
 .cols { display: grid; grid-template-columns: 1.6fr 1fr; gap: 20px; align-items: start; }
 @media (max-width: 960px) { .cols { grid-template-columns: 1fr; } }
 
@@ -367,9 +406,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .legrow .pct { font-size: 11px; font-weight: 700; color: var(--muted); width: 30px; text-align: right; }
 .legrow .cnt { font-size: 10px; color: var(--faint); margin-top: 2px; }
 
-/* ──────────────────────────────────────────
-   SOS CASES PAGE (Card Grid)
-────────────────────────────────────────── */
+/* SOS CASES PAGE (Card Grid) */
 .sos-toolbar { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; background: var(--surface); border-radius: var(--radius-sm); padding: 16px 20px; margin-bottom: 20px; box-shadow: var(--shadow-sm); transition: background 0.3s; }
 .search { position: relative; flex: 1; min-width: 240px; }
 .search input { width: 100%; padding: 10px 14px 10px 40px; background: var(--line); border: 2px solid transparent; border-radius: 12px; font-size: 13px; transition: .15s; color: var(--text); }
@@ -422,9 +459,6 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .sos-full-card.HIGH     { border-left: 4px solid var(--warn); }
 .sos-full-card.NORMAL   { border-left: 4px solid var(--green); }
 
-/* ──────────────────────────────────────────
-   NEEDS TABLE
-────────────────────────────────────────── */
 .table-responsive {
   overflow-x: auto;
   border-radius: var(--radius-sm);
@@ -432,6 +466,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border);
   transition: background 0.3s, border 0.3s;
+  -webkit-overflow-scrolling: touch; /* Butter-smooth scrolling on mobile */
 }
 table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); transition: background 0.3s; }
 th, td { padding: 14px 18px; text-align: left; vertical-align: middle; white-space: nowrap; }
@@ -444,9 +479,7 @@ tbody tr:last-child td { border-bottom: none; }
 .tblname { font-weight: 800; font-size: 13px; color: var(--text); }
 .tblst { padding: 5px 10px; border-radius: 8px; font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 
-/* ──────────────────────────────────────────
-   SHELTERS
-────────────────────────────────────────── */
+/* SHELTERS */
 .shgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .shcard { background: var(--surface); border-radius: var(--radius-sm); padding: 20px; box-shadow: var(--shadow-sm); transition: box-shadow .15s, transform .15s, background 0.3s; }
 .shcard:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
@@ -466,22 +499,20 @@ tbody tr:last-child td { border-bottom: none; }
 .occ-control-panel label { font-size: 11px; font-weight: 700; color: var(--muted); }
 .occ-btn-group { display: flex; align-items: center; gap: 4px; }
 .occ-btn {
-  width: 28px; height: 28px; border-radius: 8px;
+  width: 32px; height: 32px; border-radius: 8px;
   background: var(--line); display: flex; align-items: center; justify-content: center;
-  color: var(--text); font-size: 14px; border: none; cursor: pointer; transition: background .15s;
+  color: var(--text); font-size: 16px; border: none; cursor: pointer; transition: background .15s;
 }
 .occ-btn:hover { background: var(--accent); color: #fff; }
 .occ-input-box {
-  width: 50px; height: 28px; border-radius: 8px;
+  width: 55px; height: 32px; border-radius: 8px;
   background: var(--line); border: 1.5px solid transparent;
   text-align: center; font-size: 12px; font-weight: 800; color: var(--text);
   transition: .15s;
 }
 .occ-input-box:focus { background: var(--surface); border-color: var(--accent); }
 
-/* ──────────────────────────────────────────
-   ANALYTICS
-────────────────────────────────────────── */
+/* ANALYTICS */
 .agrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 900px) { .agrid { grid-template-columns: 1fr; } }
 .abar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -495,9 +526,7 @@ tbody tr:last-child td { border-bottom: none; }
 .minicard .mu { font-size: 11px; font-weight: 700; margin-top: 1px; }
 .minicard .ml { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
-/* ──────────────────────────────────────────
-   SETTINGS
-────────────────────────────────────────── */
+/* SETTINGS */
 .settings-section { background: var(--surface); border-radius: var(--radius-sm); padding: 22px; margin-bottom: 16px; box-shadow: var(--shadow-sm); transition: background 0.3s; }
 .set-row { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid rgba(0,0,0,.06); }
 .set-row:last-child { border-bottom: none; padding-bottom: 0; }
@@ -514,9 +543,6 @@ input:checked + .slider:before { transform: translateX(21px); }
 .empty-msg i { font-size: 32px; display: block; margin-bottom: 8px; color: var(--faint); }
 .bedtag { font-size: 9px; background: var(--crit-bg); color: var(--crit-tx); padding: 2px 6px; border-radius: 99px; font-weight: 800; }
 
-/* ──────────────────────────────────────────
-   MODAL
-────────────────────────────────────────── */
 .modal-bg { display: none; position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.35); backdrop-filter: blur(6px); align-items: center; justify-content: center; padding: 20px; }
 .modal-bg.show { display: flex; }
 .modal { background: var(--surface); border-radius: 24px; width: 100%; max-width: 560px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); transition: background 0.3s; }
@@ -563,36 +589,63 @@ input:checked + .slider:before { transform: translateX(21px); }
 
 .form-err { background: var(--crit-bg); color: var(--crit-tx); font-size: 12px; font-weight: 700; padding: 10px 14px; border-radius: 12px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
 
-/* ──────────────────────────────────────────
-   MOBILE BOTTOM NAVIGATION
-────────────────────────────────────────── */
+#customToast {
+  position: fixed; bottom: 84px; right: 24px; z-index: 1000;
+  background: #1e2d3d; color: #fff; padding: 12px 20px; border-radius: 16px;
+  box-shadow: var(--shadow-lg); display: none; align-items: center; gap: 10px;
+  font-weight: 600; font-size: 13px; border: 1px solid rgba(255,255,255,0.1);
+  animation: slide-up .3s cubic-bezier(.16, 1, .3, 1) forwards;
+}
+@keyframes slide-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
 .bottom-nav {
   display: none;
   position: fixed; bottom: 0; left: 0; right: 0;
-  height: 68px; z-index: 300;
+  height: calc(68px + env(safe-area-inset-bottom, 0px)); z-index: 300;
   background: var(--nav-bg);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border-top: 1px solid rgba(0,0,0,.07);
-  padding: 0 8px env(safe-area-inset-bottom,0);
-  box-shadow: 0 -4px 24px rgba(0,0,0,.08);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-shadow: 0 -8px 30px rgba(0,0,0,.08);
 }
-.bottom-nav-inner { display: flex; align-items: center; justify-content: space-around; height: 100%; }
+.bottom-nav-inner { 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-around; 
+  height: 100%; 
+  width: 100% !important; /* CRITICAL FIX: Ensure full responsive width across all viewport sizes */
+  max-width: 100%;
+  padding: 0 8px;
+}
 .bnav-item {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px; height: 52px; border-radius: 14px; cursor: pointer; position: relative;
-  color: var(--faint); font-size: 20px; transition: all .18s; padding: 0 2px;
+  gap: 3px; height: 100%; cursor: pointer; position: relative;
+  color: var(--faint); font-size: 20px; transition: all .2s ease;
   -webkit-tap-highlight-color: transparent; user-select: none;
 }
-.bnav-item .bnav-label { font-size: 8.5px; font-weight: 700; letter-spacing: .01em; color: var(--faint); transition: color .18s; line-height: 1; white-space: nowrap; }
+.bnav-item i {
+  font-size: 22px;
+  transition: transform 0.2s ease;
+}
+.bnav-item .bnav-label { 
+  font-size: 9px; 
+  font-weight: 700; 
+  letter-spacing: .01em; 
+  color: var(--faint); 
+  transition: color .2s ease; 
+  line-height: 1.1; 
+  white-space: nowrap; 
+}
 .bnav-item:hover { color: var(--muted); }
 .bnav-item:hover .bnav-label { color: var(--muted); }
-.bnav-item.active { color: var(--accent); background: var(--accent-light); border-radius: 16px; }
-.bnav-item.active .bnav-label { color: var(--accent); }
+.bnav-item.active { color: var(--accent); }
+.bnav-item.active i {
+  transform: translateY(-2px);
+  color: var(--accent);
+}
+.bnav-item.active .bnav-label { color: var(--accent); font-weight: 800; }
 
-/* ──────────────────────────────────────────
-   RESPONSIVE
-────────────────────────────────────────── */
 @media (max-width: 768px) {
   .sidebar { display: none; }
   .bottom-nav { display: flex; }
@@ -600,18 +653,64 @@ input:checked + .slider:before { transform: translateX(21px); }
   .topbar { padding: 0 16px; height: 56px; }
   .topbar-title { font-size: 14px; }
   .topbar-sub { display: none; }
-  .content { padding: 16px 14px 88px; }
+  
+  /* Adjusted responsive margin to prevent overlap with bottom navigation bar & notches */
+  .content { padding: 16px 12px calc(80px + env(safe-area-inset-bottom, 16px)); }
+  
+  /* Flexible Map sizes for mobile screen limits */
   .mapwrap { height: 240px; min-height: 0; }
+  #dashMap { height: 100% !important; }
+  
+  /* Compact stats strip grid layout on phone screen sizes */
   .stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .stat { padding: 16px 14px 14px; }
-  .stat .vl { font-size: 26px; }
-  .cols { grid-template-columns: 1fr; }
-  .sos-grid { grid-template-columns: 1fr; }
-  .agrid { grid-template-columns: 1fr; }
-  .map-detail-panel { width: calc(100vw - 28px); right: calc(-(100vw)); }
-  .map-detail-panel.open { right: 14px; }
+  .stat { padding: 14px 12px; gap: 8px; border-radius: 16px; }
+  .stat .vl { font-size: 22px; }
+  .stat .vl small { font-size: 10px; }
+  .stat .ic { width: 36px; height: 36px; font-size: 18px; border-radius: 10px; }
+  
+  .cols { grid-template-columns: 1fr; gap: 16px; }
+  .sos-grid { grid-template-columns: 1fr; gap: 12px; }
+  .agrid { grid-template-columns: 1fr; gap: 12px; }
+  
+  /* Side slide detailed panel adapts to 100% phone width */
+  .map-container-relative {
+    height: calc(100vh - 180px);
+    min-height: 400px;
+    border-radius: 16px;
+  }
+  .map-detail-panel { 
+    width: calc(100vw - 24px); 
+    right: calc(-100vw); 
+    border-radius: 16px;
+    top: 12px;
+    bottom: 12px;
+  }
+  .map-detail-panel.open { right: 12px; }
+  
   .pagehead h2 { font-size: 18px; }
-  .pagehead p { margin-left: 0; }
+  .pagehead p { margin-left: 0; font-size: 12px; }
+  
+  .sectionhead h3 { font-size: 13px; }
+  
+  #customToast {
+    bottom: calc(82px + env(safe-area-inset-bottom, 0px));
+    right: 12px;
+    left: 12px;
+    justify-content: center;
+  }
+  
+  /* Responsive modal scaling with robust scrolling mechanics on mobile */
+  .modal {
+    max-height: 92vh;
+    border-radius: 20px;
+  }
+  .mbody {
+    padding: 16px;
+  }
+  .fgrid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
 }
 @media (min-width: 769px) and (max-width: 1024px) {
   .stats { grid-template-columns: repeat(3, 1fr); }
@@ -621,7 +720,7 @@ input:checked + .slider:before { transform: translateX(21px); }
 <body>
 
 <div class="app">
-  <!-- ── SIDEBAR ── -->
+  <!-- SIDEBAR (Desktop) -->
   <div class="sidebar">
     <div class="brand"><i class="ph-fill ph-shield-check"></i></div>
     <div class="navlist">
@@ -637,7 +736,7 @@ input:checked + .slider:before { transform: translateX(21px); }
     <div class="statusdot" id="sideDot"></div>
   </div>
 
-  <!-- ── MOBILE BOTTOM NAV ── -->
+  <!-- PREMIUM MOBILE BOTTOM NAVIGATION (CRITICAL ALIGNMENT REPAIR) -->
   <nav class="bottom-nav" id="bottomNav">
     <div class="bottom-nav-inner">
       <div class="bnav-item active" data-page="dash">
@@ -668,7 +767,7 @@ input:checked + .slider:before { transform: translateX(21px); }
   </nav>
 
   <div class="main">
-    <!-- ── TOPBAR ── -->
+    <!-- TOPBAR -->
     <div class="topbar">
       <div class="topbar-left">
         <div class="topbar-sub">ศูนย์ประสานงาน</div>
@@ -681,7 +780,7 @@ input:checked + .slider:before { transform: translateX(21px); }
 
     <div class="content">
 
-      <!-- ══════════ DASHBOARD ══════════ -->
+      <!-- DASHBOARD PAGE -->
       <div class="page active" id="page-dash">
         <div class="mapwrap">
           <div class="maplegend" id="dashLegend"></div>
@@ -716,11 +815,11 @@ input:checked + .slider:before { transform: translateX(21px); }
         </div>
       </div>
 
-      <!-- ══════════ MAP PAGE ══════════ -->
+      <!-- MAP PAGE -->
       <div class="page" id="page-map">
         <div class="pagehead">
           <h2><span class="ph-icon-wrap"><i class="ph-fill ph-map-trifold"></i></span> แผนที่กู้ภัยภูมิสารสนเทศ</h2>
-          <p>แสดงพิกัดเคส SOS และศูนย์อพยพแบบเรียลไทม์</p>
+          <p>แสดงพิกัดเคส SOS และศูนย์อพยพแบบเรียลไทม์ พร้อมระบบช่วยการซ้อนทับอัจฉริยะ</p>
         </div>
         <div class="map-container-relative">
           <div class="maplegend" id="fullLegend"></div>
@@ -747,7 +846,7 @@ input:checked + .slider:before { transform: translateX(21px); }
         </div>
       </div>
 
-      <!-- ══════════ NEEDS PAGE (ตารางสิ่งของ) ══════════ -->
+      <!-- NEEDS PAGE (คำขอสิ่งของ) -->
       <div class="page" id="page-needs">
         <div class="pagehead">
           <h2><span class="ph-icon-wrap" style="background:#FFFBEB;color:#D97706;"><i class="ph-fill ph-package"></i></span> จัดการคำขอสิ่งของ</h2>
@@ -787,7 +886,7 @@ input:checked + .slider:before { transform: translateX(21px); }
         </div>
       </div>
 
-      <!-- ══════════ SHELTERS PAGE ══════════ -->
+      <!-- SHELTERS PAGE -->
       <div class="page" id="page-shelters">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px;flex-wrap:wrap;">
           <div class="pagehead" style="margin-bottom:0;">
@@ -801,7 +900,7 @@ input:checked + .slider:before { transform: translateX(21px); }
         <div class="shgrid" id="shelterGrid"></div>
       </div>
 
-      <!-- ══════════ SETTINGS PAGE ══════════ -->
+      <!-- SETTINGS PAGE -->
       <div class="page" id="page-settings">
         <div class="pagehead">
           <h2><span class="ph-icon-wrap"><i class="ph-fill ph-gear"></i></span> ตั้งค่าระบบ</h2>
@@ -831,7 +930,7 @@ input:checked + .slider:before { transform: translateX(21px); }
         </div>
       </div>
 
-      <!-- ══════════ SOS CASES PAGE (Card Grid) ══════════ -->
+      <!-- SOS CASES PAGE -->
       <div class="page" id="page-sos">
         <div class="pagehead">
           <h2><span class="ph-icon-wrap" style="background:var(--crit-bg);color:var(--crit);"><i class="ph-fill ph-siren"></i></span> รายการขอรับช่วยเหลือ SOS</h2>
@@ -850,7 +949,7 @@ input:checked + .slider:before { transform: translateX(21px); }
         <div class="sos-grid" id="sosCardGrid"></div>
       </div>
 
-      <!-- ══════════ ANALYTICS ══════════ -->
+      <!-- ANALYTICS PAGE -->
       <div class="page" id="page-analytics">
         <div class="pagehead">
           <h2><span class="ph-icon-wrap" style="background:var(--info-bg);color:var(--info);"><i class="ph-fill ph-chart-line-up"></i></span> สถิติและการวิเคราะห์</h2>
@@ -883,7 +982,13 @@ input:checked + .slider:before { transform: translateX(21px); }
   </div><!-- /main -->
 </div><!-- /app -->
 
-<!-- ══════════ SHELTER MODAL ══════════ -->
+<!-- CUSTOM NOTIFICATION TOAST -->
+<div id="customToast">
+  <i class="ph-bold ph-bell-ringing" style="color: var(--accent);"></i>
+  <span id="toastMsg">บันทึกข้อมูลเสร็จสิ้น</span>
+</div>
+
+<!-- SHELTER MODAL -->
 <div class="modal-bg" id="shelterModalBg">
   <div class="modal">
     <div class="mhead">
@@ -898,7 +1003,6 @@ input:checked + .slider:before { transform: translateX(21px); }
       <div class="shstep" data-step="1">
         <div class="step-label">ขั้นตอน 1 จาก 3 — ปักหมุดพิกัดบนแผนที่ก่อนเพื่อค้นหาที่อยู่อัตโนมัติ</div>
 
-        <!-- 1. Map pinned on top first as requested -->
         <div class="fgroup" style="margin-top:4px;">
           <label style="color: var(--accent); font-weight: 800; display: flex; align-items: center; gap: 4px;">
             <i class="ph-bold ph-map-pin"></i> 1. ปักหมุดตำแหน่ง (คลิกบนแผนที่ด้านล่าง หรือลากหมุดเพื่อค้นหาที่อยู่) *
@@ -914,7 +1018,6 @@ input:checked + .slider:before { transform: translateX(21px); }
           <div class="coord-field"><label>ลองจิจูด *</label><input id="f_lon" placeholder="ยังไม่ได้ปักหมุด" readonly></div>
         </div>
 
-        <!-- Separator -->
         <div style="border-top: 1px dashed var(--border); padding-top: 16px; margin-top: 16px; margin-bottom: 12px;">
           <label style="font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: block;">
             2. ตรวจสอบข้อมูลสถานที่และชื่อศูนย์อพยพ
@@ -975,9 +1078,6 @@ input:checked + .slider:before { transform: translateX(21px); }
 </div>
 
 <script>
-/* ============================================================
-   FLOODCARE AI — STATE & SERVICES (BACKEND API DRIVEN)
-============================================================ */
 const PRIORITY_COLOR = { CRITICAL:'#EF4444', HIGH:'#F59E0B', NORMAL:'#10B981' };
 const PRIORITY_LABEL = { CRITICAL:'วิกฤต', HIGH:'เร่งด่วน', NORMAL:'ปกติ' };
 const STATUS_LABEL   = { OPEN:'รอรับเคส', IN_PROGRESS:'กำลังช่วย', CLOSED:'เสร็จสิ้น' };
@@ -995,7 +1095,13 @@ let state = {
   facilities: new Set(['ไฟฟ้า','น้ำสะอาด'])
 };
 
-let dashMap, fullMap, dashLayer, fullLayer;
+let dashMap, fullMap;
+// Using MarkerClusterGroup dynamically on both maps to cluster multiple overlapping pins cleanly
+let dashClusterGroup, fullClusterGroup;
+
+let dashRouteLine = null;
+let fullRouteLine = null;
+
 const lightTile = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 const darkTile  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
 let dashTileLayer, fullTileLayer;
@@ -1014,18 +1120,73 @@ const addressData = {
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-/* ── Maps init ── */
+function dist(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km radius
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+function showToast(msg) {
+  const t = document.getElementById('customToast');
+  const txt = document.getElementById('toastMsg');
+  if (t && txt) {
+    txt.textContent = msg;
+    t.style.display = 'flex';
+    setTimeout(() => { t.style.display = 'none'; }, 3500);
+  }
+}
+
 function initMaps(){
+  const clusterOptions = {
+    maxClusterRadius: 40,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    zoomToBoundsOnClick: true,
+    iconCreateFunction: function(cluster) {
+      const markers = cluster.getAllChildMarkers();
+      const count = markers.length;
+      
+      let criticals = 0;
+      let highs = 0;
+      let normals = 0;
+      let shelters = 0;
+
+      markers.forEach(m => {
+        if (m.options.isShelter) shelters++;
+        else if (m.options.priority === 'CRITICAL') criticals++;
+        else if (m.options.priority === 'HIGH') highs++;
+        else if (m.options.priority === 'NORMAL') normals++;
+      });
+
+      let clusterClass = 'cluster-normal';
+      if (criticals > 0) clusterClass = 'cluster-critical';
+      else if (highs > 0) clusterClass = 'cluster-high';
+      else if (shelters > 0) clusterClass = 'cluster-mixed';
+
+      return L.divIcon({
+        html: `<div class="custom-cluster-inner ${clusterClass}">
+                 <span>${count}</span>
+               </div>`,
+        className: 'custom-cluster-wrapper',
+        iconSize: L.point(40, 40)
+      });
+    }
+  };
+
   dashMap = L.map('dashMap',{zoomControl:false,attributionControl:false}).setView([13.8,100.6],11);
   dashTileLayer = L.tileLayer(lightTile,{maxZoom:19}).addTo(dashMap);
-  dashLayer = L.layerGroup().addTo(dashMap);
+  dashClusterGroup = L.markerClusterGroup(clusterOptions).addTo(dashMap);
 
   fullMap = L.map('fullMap',{attributionControl:false}).setView([13.8,100.6],11);
   fullTileLayer = L.tileLayer(lightTile,{maxZoom:19}).addTo(fullMap);
-  fullLayer = L.layerGroup().addTo(fullMap);
+  fullClusterGroup = L.markerClusterGroup(clusterOptions).addTo(fullMap);
 }
 
-/* ── Dark mode ── */
 function toggleDarkMode(isDark){
   state.settings.darkMode = isDark;
   const root = document.documentElement;
@@ -1044,7 +1205,7 @@ function toggleDarkMode(isDark){
     root.style.setProperty('--faint','#64748B');
     root.style.setProperty('--border','rgba(255,255,255,.1)');
     root.style.setProperty('--line','#334155');
-    root.style.setProperty('--nav-bg','rgba(30,41,59,.92)');
+    root.style.setProperty('--nav-bg','rgba(30,41,59,.94)');
     if(dashTileLayer) dashTileLayer.setUrl(darkTile);
     if(fullTileLayer) fullTileLayer.setUrl(darkTile);
   } else {
@@ -1065,56 +1226,119 @@ function toggleDarkMode(isDark){
 
 function toggleFilterMap(hide){
   state.settings.hideClosed = hide;
-  renderMapMarkers(dashMap,dashLayer,true);
-  renderMapMarkers(fullMap,fullLayer,false);
+  renderMapMarkers(dashMap,dashClusterGroup,true);
+  renderMapMarkers(fullMap,fullClusterGroup,false);
 }
 
-/* ── Map markers ── */
-function renderMapMarkers(map,layer,isDash){
-  if (!map || !layer) return;
-  layer.clearLayers();
+function drawRescuePath(map, caseLat, caseLon, isDash) {
+  if (isDash && dashRouteLine) { dashMap.removeLayer(dashRouteLine); dashRouteLine = null; }
+  if (!isDash && fullRouteLine) { fullMap.removeLayer(fullRouteLine); fullRouteLine = null; }
+
+  const shelters = state.data.shelters || [];
+  if (!shelters.length) return;
+
+  let nearestShelter = null;
+  let minDist = Infinity;
+  shelters.forEach(s => {
+    if (s.latitude && s.longitude) {
+      const d = dist(caseLat, caseLon, s.latitude, s.longitude);
+      if (d < minDist) {
+        minDist = d;
+        nearestShelter = s;
+      }
+    }
+  });
+
+  if (nearestShelter) {
+    const coords = [
+      [caseLat, caseLon],
+      [nearestShelter.latitude, nearestShelter.longitude]
+    ];
+    // Dynamic tracing line connecting incident with the nearest shelter, inspired by IMG_8451.jpeg
+    const route = L.polyline(coords, {
+      color: '#3B82F6',
+      weight: 4,
+      opacity: 0.85,
+      dashArray: '8, 8',
+      lineCap: 'round',
+      lineJoin: 'round'
+    }).addTo(map);
+
+    if (isDash) dashRouteLine = route;
+    else fullRouteLine = route;
+  }
+}
+
+function renderMapMarkers(map, clusterGroup, isDash){
+  if (!map || !clusterGroup) return;
+  clusterGroup.clearLayers();
   
+  if (isDash && dashRouteLine) { dashMap.removeLayer(dashRouteLine); dashRouteLine = null; }
+  if (!isDash && fullRouteLine) { fullMap.removeLayer(fullRouteLine); fullRouteLine = null; }
+
+  // 1. SOS Incident Pin Markers
   (state.data.sos_cases||[]).forEach(c=>{
     if(!c.latitude||!c.longitude) return;
     if(state.settings.hideClosed&&c.status==='CLOSED') return;
+    
     const isActive = state.selectedId===c.request_id;
     const iconStr = c.status==='CLOSED'?'ph-check-circle':(c.priority==='CRITICAL'?'ph-warning':'ph-siren');
+    
     const html=`<div class="fleet-marker ${isActive?'active':''}">
       <i class="ph-fill ${iconStr} mk-icn"></i>
       <span>${esc(c.request_id)}</span>
       ${c.status!=='CLOSED'?`<span class="mk-badge ${c.priority}">${PRIORITY_LABEL[c.priority]}</span>`:''}
     </div>`;
-    const icon = L.divIcon({className:'',iconSize:null,html});
-    const marker = L.marker([c.latitude,c.longitude],{icon});
+    
+    const marker = L.marker([c.latitude,c.longitude], {
+      icon: L.divIcon({className:'',iconSize:null,html}),
+      priority: c.priority,
+      isShelter: false
+    });
+
     if(isDash){
       marker.bindPopup(`<div class="custom-popup"><div class="p-title">${esc(c.first_name)} ${esc(c.last_name)}</div><div class="p-meta">${PRIORITY_LABEL[c.priority]} · ${c.people_count} คน</div></div>`);
-      marker.on('click',()=>{ if(dashMap) dashMap.flyTo([c.latitude,c.longitude],14,{animate:true,duration:.6}); });
+      marker.on('click',()=>{ 
+        state.selectedId = c.request_id;
+        dashMap.flyTo([c.latitude,c.longitude],15,{animate:true,duration:.6});
+        drawRescuePath(dashMap, c.latitude, c.longitude, true);
+      });
     } else {
       marker.on('click',()=>{
         state.selectedId=c.request_id;
-        renderMapMarkers(fullMap,fullLayer,false);
+        renderMapMarkers(fullMap,fullClusterGroup,false);
         showMapDetailPanel(c.request_id);
+        drawRescuePath(fullMap, c.latitude, c.longitude, false);
       });
     }
-    marker.addTo(layer);
+    clusterGroup.addLayer(marker);
   });
 
+  // 2. Shelter Pin Markers
   (state.data.shelters||[]).forEach(s=>{
     if(!s.latitude||!s.longitude) return;
     const isFull = s.occupancy>=s.capacity;
+    
     const html=`<div class="fleet-marker" style="background:#111;border-color:rgba(255,255,255,.1);">
       <i class="ph-fill ph-tent" style="color:${isFull?'#EF4444':'#22C55E'};font-size:14px;"></i>
       <span>${esc(s.name).slice(0,10)}</span>
       <span class="mk-badge" style="background:${isFull?'#FEE2E2':'#D1FAE5'};color:${isFull?'#991B1B':'#065F46'};">${isFull?'เต็ม': s.occupancy + '/' + s.capacity}</span>
     </div>`;
-    const icon = L.divIcon({className:'',iconSize:null,html});
-    const marker = L.marker([s.latitude,s.longitude],{icon});
-    if(isDash) marker.bindPopup(`<div class="custom-popup"><div class="p-title">${esc(s.name)}</div><div class="p-meta">${s.occupancy}/${s.capacity} คน</div></div>`);
-    marker.addTo(layer);
+    
+    const marker = L.marker([s.latitude,s.longitude], {
+      icon: L.divIcon({className:'',iconSize:null,html}),
+      isShelter: true
+    });
+    
+    if(isDash) {
+      marker.bindPopup(`<div class="custom-popup"><div class="p-title">${esc(s.name)}</div><div class="p-meta">${s.occupancy}/${s.capacity} คน</div></div>`);
+    } else {
+      marker.bindPopup(`<div class="custom-popup"><div class="p-title">${esc(s.name)}</div><div class="p-meta">ศูนย์พักพิง: ${s.occupancy}/${s.capacity} คน</div></div>`);
+    }
+    clusterGroup.addLayer(marker);
   });
 }
 
-/* ── Map detail panel ── */
 let mdpActiveTab = 'info';
 let mdpCaseId = null;
 
@@ -1178,7 +1402,7 @@ function mdpTabContent(c, tab){
     if(!nearby.length) return `<div style="text-align:center;padding:30px;color:var(--faint);font-size:13px;"><i class="ph ph-radar" style="font-size:32px;display:block;margin-bottom:8px;"></i>ไม่มีเคสใกล้เคียง</div>`;
     return `<div>
       <div class="md-nearby-head"><i class="ph-fill ph-radar"></i> เคสใกล้เคียง (${nearby.length})</div>
-      ${nearby.map(n=>`<div class="md-nearby-item" onclick="showMapDetailPanel('${n.request_id}')">
+      ${nearby.map(n=>`<div class="md-nearby-item" onclick="showMapDetailPanel('${n.request_id}'); drawRescuePath(fullMap, ${n.latitude}, ${n.longitude}, false);">
         <div class="md-nb-name"><i class="ph-fill ph-warning-circle" style="color:${PRIORITY_COLOR[n.priority]}"></i>${esc(n.first_name)} ${esc(n.last_name)}</div>
         <div>
           <div class="md-nb-dist">${n.distance.toFixed(1)} กม.</div>
@@ -1230,17 +1454,16 @@ function closeMapDetailPanel(){
   document.getElementById('mapDetailPanel').classList.remove('open');
   state.selectedId=null;
   mdpCaseId=null;
-  renderMapMarkers(fullMap,fullLayer,false);
+  if (fullRouteLine) { fullMap.removeLayer(fullRouteLine); fullRouteLine = null; }
+  renderMapMarkers(fullMap,fullClusterGroup,false);
 }
 
-/* ── Helper: Render Tabs Generator ── */
 function renderTabsInto(el,tabs,activeKey,onClick){
   if (!el) return;
   el.innerHTML=tabs.map(t=>`<button class="tabbtn ${t.key===activeKey?'active':''}" data-key="${t.key}">${t.label}</button>`).join('');
   [...el.children].forEach(btn=>btn.addEventListener('click',()=>onClick(btn.dataset.key)));
 }
 
-/* ── Needs page ── */
 function renderNeedsPage(){
   renderTabsInto(document.getElementById('needsUrgTabs'),
     [{key:'ALL',label:'ทั้งหมด'},{key:'CRITICAL',label:'ด่วนวิกฤต'},{key:'HIGH',label:'ปานกลาง'},{key:'NORMAL',label:'ไม่ด่วน'}],
@@ -1308,7 +1531,6 @@ function renderNeedsPage(){
   }).join('');
 }
 
-/* ── Modal Map & Address Parsing ── */
 function cleanThaiAddressComponent(val, type) {
   if (!val) return '';
   let s = String(val).trim();
@@ -1422,7 +1644,6 @@ function initModalMap(){
   setTimeout(()=>modalMap.invalidateSize(),250);
 }
 
-/* ── Dropdowns ── */
 function initDropdowns(){
   const p=document.getElementById('f_province');
   p.innerHTML='<option value="">เลือกจังหวัด</option>';
@@ -1446,7 +1667,6 @@ function updateSubDistricts(){
   if(prov&&dist&&addressData[prov][dist]) addressData[prov][dist].forEach(sub=>{ s.innerHTML+=`<option value="${sub}">${sub}</option>`; });
 }
 
-/* ── Shelter modal open/close ── */
 const shelterModal=document.getElementById('shelterModalBg');
 document.getElementById('openShelterModal').addEventListener('click',()=>{
   document.getElementById('f_name').value='';
@@ -1555,7 +1775,6 @@ document.querySelectorAll('[data-next]').forEach(b=>b.addEventListener('click',(
 }));
 document.querySelectorAll('[data-prev]').forEach(b=>b.addEventListener('click',()=>goToStep(Number(b.dataset.prev))));
 
-/* ── Render dashboard SOS ── */
 function sosCardHtml(c,i){
   const isSel=state.selectedId===c.request_id;
   const isBed=c.bedridden==='YES';
@@ -1564,7 +1783,7 @@ function sosCardHtml(c,i){
   const isDone=c.status==='CLOSED';
   const isPending=!!state.pending[c.request_id];
   const bc=c.priority==='CRITICAL'?'crit':c.priority==='HIGH'?'high':'norm';
-  return `<div class="soscard ${isSel?'sel':''}" onclick="state.selectedId='${c.request_id}';renderDashboardSosList();">
+  return `<div class="soscard ${isSel?'sel':''}" onclick="state.selectedId='${c.request_id}';renderDashboardSosList(); drawRescuePath(dashMap, ${c.latitude}, ${c.longitude}, true); dashMap.flyTo([${c.latitude}, ${c.longitude}], 15);">
     <div class="top">
       <div class="num" style="background:${PRIORITY_COLOR[c.priority]}">${i+1}</div>
       <div style="flex:1;min-width:0;">
@@ -1696,7 +1915,6 @@ function renderSosPage(){
 document.getElementById('sosSearch').addEventListener('input',e=>{ state.sosSearch=e.target.value; renderSosPage(); });
 document.getElementById('needsSearch').addEventListener('input',e=>{ state.needsSearch=e.target.value; renderNeedsPage(); });
 
-/* ── Shelters ── */
 function renderShelters(){
   const shelters=state.data.shelters||[];
   document.getElementById('shSubhead').textContent=`${shelters.length} ศูนย์ — รองรับรวม ${shelters.reduce((a,s)=>a+s.capacity,0).toLocaleString()} คน`;
@@ -1726,7 +1944,6 @@ function renderShelters(){
   }).join('');
 }
 
-/* ── Donut ── */
 function renderDonut(){
   const shelters=state.data.shelters||[];
   const totalCap=shelters.reduce((a,s)=>a+s.capacity,0);
@@ -1778,7 +1995,6 @@ function renderDonut(){
   </div>`;
 }
 
-/* ── Stat strip ── */
 function renderStatStrip(){
   const cases=state.data.sos_cases||[];
   const totalPeople=cases.reduce((a,c)=>a+(c.people_count||0),0);
@@ -1803,7 +2019,6 @@ function renderStatStrip(){
     </div>`).join('');
 }
 
-/* ── Legend ── */
 function renderDashLegend(){
   document.getElementById('dashLegend').innerHTML=`
     <span><i style="background:#EF4444"></i>วิกฤต</span>
@@ -1820,7 +2035,6 @@ function renderFullLegend(){
     <span><i style="background:#111111"></i>ศูนย์อพยพ (${(state.data.shelters||[]).length})</span>`;
 }
 
-/* ── Status pill ── */
 function renderStatusPill(){
   const pill=document.getElementById('statusPill');
   const dot=document.getElementById('sideDot');
@@ -1835,7 +2049,6 @@ function renderStatusPill(){
   }
 }
 
-/* ── Analytics ── */
 function abarHtml(label,val,max,color){
   const pct=max>0?Math.round(val/max*100):0;
   return `<div class="abar-row"><span class="albl">${label}</span><div class="atrack"><i style="width:${pct}%;background:${color}"></i></div><span class="aval">${val}</span></div>`;
@@ -1885,7 +2098,7 @@ function renderAnalytics(){
 
 
 /* ============================================================
-   API INTEGRATION (การเรียกใช้งาน Backend)
+   API INTEGRATION (การเรียกใช้งาน Backend ร่วมกับ UI)
 ============================================================ */
 
 /* ── 1. ดึงข้อมูลทั้งหมดจากเซิร์ฟเวอร์ (อัปเดตออโต้) ── */
@@ -1910,6 +2123,7 @@ async function updateSosStatus(id,status){
       body:JSON.stringify({status})
     });
     if(!res.ok) throw new Error('update failed');
+    showToast(`อัปเดตรหัส #${id} เป็น ${STATUS_LABEL[status]} สำเร็จ`);
     await loadData();
   }catch(e){ 
     const err=document.getElementById('shelterFormErr');
@@ -1947,6 +2161,7 @@ document.getElementById('f_submit').addEventListener('click',async()=>{
     const json=await res.json();
     if(!res.ok||!json.success) throw new Error(json.error||'บันทึกไม่สำเร็จ');
     shelterModal.classList.remove('show');
+    showToast(`เพิ่มศูนย์พักพิง "${name}" ลงฐานระบบสำเร็จ`);
     await loadData();
   }catch(e){
     err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>${esc(e.message||'บันทึกไม่สำเร็จ กรุณาลองใหม่')}</div>`;
@@ -1965,6 +2180,7 @@ async function updateNeedStatus(id, status) {
       body:JSON.stringify({status})
     });
     if(!res.ok) throw new Error('update failed');
+    showToast(`อัปเดตคำร้องขอส่งของสำเร็จ`);
     await loadData();
   }catch(e){ 
     const err=document.getElementById('shelterFormErr');
@@ -2008,8 +2224,11 @@ async function syncOccupancyToServer(shelterId, newOccupancy) {
 function renderAll(){
   renderStatusPill();
   renderStatStrip();
-  renderMapMarkers(dashMap,dashLayer,true);
-  renderMapMarkers(fullMap,fullLayer,false);
+  
+  // Render MarkerCluster elements for resolving overlapping pins smoothly
+  renderMapMarkers(dashMap,dashClusterGroup,true);
+  renderMapMarkers(fullMap,fullClusterGroup,false);
+  
   renderDashLegend();
   renderFullLegend();
   renderDonut();
