@@ -1221,6 +1221,15 @@
                     document.getElementById('step5').classList.add('hidden');
                     document.getElementById('successScreen').classList.remove('hidden');
                     document.getElementById('successScreen').classList.add('fade-in');
+                } else if (result.need_register) {
+                    showCustomAlert('กรุณาลงทะเบียนข้อมูลส่วนตัวก่อนขอความช่วยเหลือครับ กำลังพาไปหน้าลงทะเบียน...', 'error');
+                    setTimeout(() => {
+                        const registerLiffId = '{{ register_liff_id }}';
+                        if (registerLiffId) {
+                            window.location.href = 'https://liff.line.me/' + registerLiffId;
+                        }
+                    }, 2200);
+                    return;
                 } else {
                     throw new Error(result.error || 'ระบบขัดข้องชั่วคราว');
                 }
