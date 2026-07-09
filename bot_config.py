@@ -419,8 +419,12 @@ class IntentClassifier:
             "กำลังจม", "ติดอยู่", "ขอความช่วยเหลือด่วน", "น้ำเข้าบ้าน", "น้ำกำลังเข้าบ้าน", 
             "ติดอยู่บนหลังคา", "ติดหลังคา", "น้ำเชี่ยว", "คนจมน้ำ", "รถติดกลางน้ำ", "น้ำเข้ารถ"
         ],
+        "ACCIDENT": [
+            "อุบัติเหตุ", "รถชน", "รถคว่ำ", "ตกใจ", "เลือดออก", "ขาหัก", "แขนหัก", "แผลฉกรรจ์",
+            "หัวแตก", "สลบ", "ไม่รู้สึกตัว", "คนเจ็บ", "ผู้บาดเจ็บ", "อุบัติเหตุรถยนต์"
+        ],
         "SOS": [
-            "sos", "🆘", "ขอความช่วยเหลือ", "แจ้งเหตุ", "กู้ภัย", "ติดน้ำท่วม", "จมน้ำ", "ช่วย"
+            "sos", "ขอความช่วยเหลือ", "แจ้งเหตุ", "กู้ภัย", "ติดน้ำท่วม", "จมน้ำ", "ช่วย"
         ],
         "SNAKE_BITE": [
             "งูกัด", "ถูกงูกัด", "โดนงูกัด", "งูกัดครับ", "งูกัดค่ะ", "ถูกงู", "โดนงู", "งูฉก", "ถูกสัตว์มีพิษกัด"
@@ -603,17 +607,19 @@ gemini_model = None
 _gemini_initialized = False
 
 FLOODCARE_SYSTEM_INSTRUCTION = (
-    "คุณคือ FLOODCARE AI น้องบอทผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินในประเทศไทย\n"
-    "บุคลิกภาพ: เป็นกันเอง อบอุ่น สุภาพ และพร้อมช่วยเหลือผู้ใช้เหมือนเพื่อนแท้ คุยเข้าใจง่าย สบายตา\n"
-    "ใช้สรรพนามแทนตนเองว่า 'น้องบอท' หรือ 'ผม' เสนอตัวช่วยเสมอ ห้ามแทนตัวเองด้วยคำว่า 'ฉัน' หรือคุยเป็นทางการแบบบอทหุ่นยนต์เด็ดขาด\n\n"
+    "คุณคือ FLOODCARE AI ผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินในประเทศไทย\n"
+    "บุคลิกภาพ: สุภาพ มืออาชีพ กระชับ และจริงใจ เน้นการให้ข้อมูลที่รวดเร็วและปลอดภัย\n"
+    "ใช้สรรพนามแทนตนเองว่า 'ผม' หรือ 'น้องบอท' ห้ามใช้คำว่า 'ฉัน' และห้ามใช้อีโมจิในข้อความตอบกลับทุกกรณี\n\n"
     "ข้อจำกัดด้านขอบเขตการตอบคำถามอย่างเข้มงวด (STRICT SCOPE LOCK):\n"
-    "1. ตอบเฉพาะคำถามที่เกี่ยวข้องกับ: 1) อุทกภัย/ภัยพิบัติน้ำท่วม 2) ความปลอดภัย/การกู้ภัย/เบอร์ฉุกเฉิน 3) สุขภาพกาย/อาการเจ็บป่วยจากน้ำท่วม/การปฐมพยาบาล 4) สุขภาพจิต/ความเครียดของผู้ประสบภัย เท่านั้น!\n"
-    "2. หากมีคำถามใดๆ ที่อยู่นอกเหนือจากขอบเขตความปลอดภัยและน้ำท่วมด้านบนนี้ (เช่น กีฬา บันเทิง เกม ข่าวสังคม การทำอาหารทั่วไป แฟชั่น) คุณต้องปฏิเสธอย่างมีมารยาทและอบอุ่นทันที เช่น:\n"
-    "   'เรื่องนี้ผมอาจจะยังไม่เชี่ยวชาญเท่าไหร่ครับ น้องบอทอยากเน้นช่วยพี่ๆ เรื่องน้ำท่วม ความปลอดภัย และการดูแลสุขภาพในช่วงนี้มากกว่าครับ มีอะไรเกี่ยวกับระดับน้ำหรืออาการป่วยไม่สบายให้ช่วยดูแลไหมครับ?'\n\n"
-    "กฎการตอบคำถามเพื่อความเป็นระเบียบเรียบร้อยและเข้าใจง่าย (CRITICAL FORMATTING RULES):\n"
-    "1. ตอบเป็นข้อๆ เสมอ โดยขึ้นต้นแต่ละประเด็นด้วยเลขข้อ (1. 2. 3. ...) แล้วเว้นบรรทัดระหว่างข้อ ห้ามเขียนเป็นย่อหน้ายาวติดกัน ยกเว้นคำตอบสั้นมากที่มีประเด็นเดียวจริงๆ ให้ตอบเป็นประโยคปกติได้โดยไม่ต้องใส่เลขข้อ\n"
-    "2. **เน้นความกระชับเป็นสำคัญ** ตอบเฉพาะประเด็นที่จำเป็นต่อผู้ใช้จริงๆ ไม่ต้องอธิบายพื้นหลังหรือรายละเอียดปลีกย่อยที่ไม่ถูกถาม สูงสุดไม่เกิน 4-5 ข้อ แต่ละข้อยาวไม่เกิน 1-2 บรรทัด ความยาวคำตอบทั้งหมดไม่ควรเกินประมาณ 60-80 คำ เว้นแต่คำถามนั้นจำเป็นต้องใช้ข้อมูลมากกว่านั้นจริงๆ (เช่น ขั้นตอนปฐมพยาบาลที่ต้องครบทุกขั้น) จึงตอบยาวกว่านี้ได้เท่าที่จำเป็น\n"
-    "3. **ห้ามระบุแหล่งที่มา/อ้างอิงไว้ในเนื้อความคำตอบเด็ดขาด** (เช่น ห้ามเขียน '(ที่มา: ...)' หรือ '(ข้อมูลจาก: ...)' แทรกในข้อความ) เพราะระบบจะแสดงแหล่งอ้างอิงแยกไว้ด้านล่างของข้อความให้เองโดยอัตโนมัติ ให้เนื้อหาคำตอบเป็นเนื้อข้อมูลล้วนๆ\n"
+    "1. ตอบเฉพาะเรื่อง: 1) อุทกภัย 2) ความปลอดภัย/กู้ภัย 3) อุบัติเหตุ/การบาดเจ็บ/การปฐมพยาบาล 4) สุขภาพกายและใจจากภัยพิบัติ\n"
+    "2. หากเป็นเรื่องอื่นนอกเหนือจากนี้ ให้ปฏิเสธอย่างสุภาพและมินิมอล เช่น:\n"
+    "   'ขออภัยครับ ผมถูกออกแบบมาเพื่อช่วยเหลือด้านน้ำท่วม ความปลอดภัย และอุบัติเหตุเท่านั้น หากมีคำถามด้านนี้ผมยินดีตอบครับ'\n\n"
+    "กฎการตอบคำถาม (CRITICAL FORMATTING RULES):\n"
+    "1. **ห้ามใช้อีโมจิเด็ดขาด**\n"
+    "2. ตอบเป็นข้อๆ (1. 2. 3.) และเว้นบรรทัดให้ชัดเจน\n"
+    "3. **เน้นความปลอดภัยสูงสุด:** หากสถานการณ์ดูอันตราย ให้ขึ้นต้นด้วยคำเตือนและแนะนำขั้นตอนการเอาตัวรอดหรือเบอร์ฉุกเฉินทันที\n"
+    "4. **ความกระชับ:** สูงสุดไม่เกิน 3-4 ข้อ แต่ละข้อไม่เกิน 1 บรรทัด\n"
+    "5. **ห้ามระบุแหล่งที่มาในเนื้อความ** (เช่น 'อ้างอิงจาก...') เด็ดขาด\n"(ที่มา: ...)' หรือ '(ข้อมูลจาก: ...)' แทรกในข้อความ) เพราะระบบจะแสดงแหล่งอ้างอิงแยกไว้ด้านล่างของข้อความให้เองโดยอัตโนมัติ ให้เนื้อหาคำตอบเป็นเนื้อข้อมูลล้วนๆ\n"
     "4. ห้ามใช้เครื่องหมายดอกจันสองตัว (**) หรือดอกจันตัวเดียว (*) ในข้อความอย่างเด็ดขาด เพราะทำให้ข้อความรกบนระบบ LINE ให้เว้นบรรทัดและเขียนข้อความให้อ่านง่ายแทน\n"
     "5. คำตอบทุกข้อความต้องจบประโยคอย่างสมบูรณ์เสมอ ห้ามหยุดหรือตัดจบกลางประโยค กลางคำ หรือกลางรายการเด็ดขาด — แต่ความสมบูรณ์นี้หมายถึง 'จบประโยคให้ครบ' ไม่ใช่ข้ออ้างให้ตอบยืดยาวเกินความจำเป็น ให้ตัดสินใจล่วงหน้าว่าจะพูดกี่ประเด็นแล้วจบให้ครบตามข้อ 2\n"
     "6. หากมีลิงก์อ้างอิงให้จัดเก็บไว้ในโครงสร้างส่วนท้ายของการ์ดหรือแสดงผลเป็นรูปแบบปุ่มกดให้เรียบร้อยสวยงาม ไม่เขียนลิงก์ยาวเปลือยในตัวข้อความหลัก\n"
@@ -1601,36 +1607,36 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
     status_map = {
         "น้อยวิกฤต": {
             "status": "น้อยวิกฤต",
-            "bg": "#D67B27",
-            "text": "#FFFFFF",
+            "bg": "#FFF7ED",
+            "text": "#C2410C",
             "advice": "เฝ้าระวังภัยแล้ง/น้ำลดขีดอันตราย",
             "label_pill": "น้อยวิกฤต"
         },
         "น้อย": {
             "status": "น้อย",
-            "bg": "#FFC000",
-            "text": "#FFFFFF",
+            "bg": "#FEFCE8",
+            "text": "#A16207",
             "advice": "ระดับน้ำน้อย",
             "label_pill": "น้อย"
         },
         "ปกติ": {
             "status": "ปกติ",
-            "bg": "#00B050",
-            "text": "#FFFFFF",
+            "bg": "#F0FDF4",
+            "text": "#15803D",
             "advice": "ระดับน้ำปกติ ปลอดภัยดี",
             "label_pill": "ปกติ"
         },
         "มาก": {
             "status": "มาก",
-            "bg": "#0000FF",
-            "text": "#FFFFFF",
+            "bg": "#EFF6FF",
+            "text": "#1D4ED8",
             "advice": "ระดับน้ำค่อนข้างสูง",
             "label_pill": "มาก"
         },
         "ล้นตลิ่ง": {
             "status": "ล้นตลิ่ง",
-            "bg": "#FF0000",
-            "text": "#FFFFFF",
+            "bg": "#FEF2F2",
+            "text": "#B91C1C",
             "advice": "ระดับน้ำล้นตลิ่ง วิกฤติ",
             "label_pill": "ล้นตลิ่ง"
         },
@@ -2059,10 +2065,11 @@ def _metric_row(icon_file: str, label: str, value: str):
     )
     return BoxComponent(
         layout="horizontal", margin="md", spacing="md",
+        padding_start="md", padding_end="md",
         contents=[
             icon_component,
             TextComponent(text=label, size="sm", color="#6B7280", flex=3, gravity="center"),
-            TextComponent(text=value, size="sm", weight="bold", color="#1F2937", flex=3, align="end", gravity="center"),
+            TextComponent(text=value, size="sm", weight="bold", color="#111827", flex=3, align="end", gravity="center"),
         ]
     )
 
@@ -2090,16 +2097,17 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
             ("icon_wind.jpg", "ความเร็วลม", f"{wind} m/s"),
         ]
         body_contents = [
-            TextComponent(text="รายงานสภาพอากาศปัจจุบัน", weight="bold", size="lg", color="#1F2937"),
-            TextComponent(text=f"{lat:.4f}, {lon:.4f}   ·   {timestamp}", size="xxs", color="#9CA3AF", wrap=True),
-            SeparatorComponent(margin="md"),
+            TextComponent(text="รายงานสภาพอากาศ", weight="bold", size="lg", color="#1F2937"),
+            _icon_text("icon_pin.jpg", f"พิกัด : {lat:.4f}, {lon:.4f}"),
+            _icon_text("icon_clock.jpg", f"เวลา: {timestamp}"),
+            SeparatorComponent(margin="md", color="#F3F4F6"),
         ]
         for icon_file, label, value in rows:
             body_contents.append(_metric_row(icon_file, label, value))
         body_contents.append(
             TextComponent(
-                text="ข้อมูลพยากรณ์เบื้องต้น โปรดสังเกตท้องฟ้าจริงประกอบการตัดสินใจ",
-                size="xxs", color="#9CA3AF", wrap=True, margin="lg"
+                text="หมายเหตุ: ข้อมูลพยากรณ์เบื้องต้น โปรดพิจารณาสภาพอากาศจริงประกอบ",
+                size="xs", color="#9CA3AF", wrap=True, margin="lg"
             )
         )
 
@@ -2114,20 +2122,22 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
         )
 
     return FlexSendMessage(
-        alt_text="🌦️ รายงานสภาพอากาศ",
+        alt_text="รายงานสภาพอากาศ",
         contents=BubbleContainer(
             hero=hero,
             body=BoxComponent(layout="vertical", contents=body_contents),
             footer=BoxComponent(
                 layout="vertical",
+                spacing="sm",
+                padding_all="md",
                 contents=[
                     ButtonComponent(
-                        action=URIAction(label="🔗 ดูพยากรณ์อากาศเต็มรูปแบบ (กรมอุตุฯ)", uri=TMD_SOURCE_URL),
-                        style="secondary", color="#F3F4F6", height="sm"
+                        action=URIAction(label="ดูข้อมูลเพิ่มเติม (กรมอุตุนิยมวิทยา)", uri=TMD_SOURCE_URL),
+                        style="secondary", color="#F9FAFB", height="sm"
                     ),
                     TextComponent(
-                        text="ข้อมูลอ้างอิง: กรมอุตุนิยมวิทยา (TMD Open Data API) - tmd.go.th",
-                        size="xxs", color="#9CA3AF", align="center", margin="sm", wrap=True
+                        text="ที่มา: กรมอุตุนิยมวิทยา",
+                        size="xxs", color="#9CA3AF", align="center", wrap=True
                     )
                 ]
             )
@@ -2146,17 +2156,18 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
         layout="vertical",
         spacing="xs",
         contents=[
-            TextComponent(text="ระดับน้ำใกล้คุณ", weight="bold", size="md", color="#1F2937"),
-            _icon_text("icon_pin.jpg", f"{user_lat:.4f}, {user_lon:.4f}"),
-            _icon_text("icon_clock.jpg", timestamp),
+            TextComponent(text="รายงานระดับน้ำ", weight="bold", size="lg", color="#1F2937"),
+            _icon_text("icon_pin.jpg", f"พิกัด : {user_lat:.4f}, {user_lon:.4f}"),
+            _icon_text("icon_clock.jpg", f"เวลา: {timestamp}"),
         ]
     )
 
     stations_box = BoxComponent(layout="vertical", spacing="md", margin="lg", contents=[])
 
+    is_critical_any = False
     if not stations:
         stations_box.contents.append(
-            TextComponent(text="⚠️ ไม่พบสถานีวัดระดับน้ำในพื้นที่ใกล้คุณ", size="sm", color="#EF4444", align="center")
+            TextComponent(text="ไม่พบสถานีวัดระดับน้ำในพื้นที่ใกล้เคียง", size="sm", color="#EF4444", align="center")
         )
     else:
         def _stat_cell(label: str, value: str, value_color: str = "#111827"):
@@ -2165,8 +2176,8 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                 flex=1,
                 spacing="xs",
                 contents=[
-                    TextComponent(text=label, size="xxs", color="#9CA3AF"),
-                    TextComponent(text=value, size="sm", weight="bold", color=value_color, wrap=True),
+                    TextComponent(text=label, size="xxs", color="#9CA3AF", align="center"),
+                    TextComponent(text=value, size="sm", weight="bold", color=value_color, wrap=True, align="center"),
                 ]
             )
 
@@ -2187,6 +2198,8 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
 
             bl_val = st.get("bank_level", "-")
             lbl_pill = assessment.get("label_pill", "ปกติ")
+            if lbl_pill in ["ล้นตลิ่ง", "วิกฤต"]:
+                is_critical_any = True
 
             # Safe parsing for diff calculation
             diff_label = "ต่างจากตลิ่ง"
@@ -2222,20 +2235,14 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                 flex=1,
                 spacing="sm",
                 contents=[
-                    # Row 1 — Station name + distance, status pill aligned right
+                    # Row 1 — Station name
+                    TextComponent(text=st['stationName'], weight="bold", size="sm", color="#111827", wrap=True),
+                    # Row 2 — distance and status pill
                     BoxComponent(
                         layout="horizontal",
                         spacing="sm",
                         contents=[
-                            BoxComponent(
-                                layout="vertical",
-                                flex=1,
-                                spacing="none",
-                                contents=[
-                                    TextComponent(text=st['stationName'], weight="bold", size="sm", color="#111827", wrap=True),
-                                    TextComponent(text=f"ห่าง {dist:.2f} กม.", size="xxs", color="#9CA3AF"),
-                                ]
-                            ),
+                            TextComponent(text=f"ห่าง {dist:.2f} กม.", size="xs", color="#6B7280", flex=1, gravity="center"),
                             BoxComponent(
                                 layout="vertical",
                                 flex=0,
@@ -2256,7 +2263,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                             ),
                         ]
                     ),
-                    SeparatorComponent(margin="sm", color="#EEF0F2"),
+                    SeparatorComponent(margin="sm", color="#F3F4F6"),
                     # Row 2 — Clean 3-column stat grid
                     BoxComponent(
                         layout="horizontal",
@@ -2294,21 +2301,39 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
             card = BoxComponent(
                 layout="vertical",
                 spacing="sm",
-                background_color="#F9FAFB",
-                corner_radius="lg",
                 padding_all="md",
                 contents=card_contents
             )
             stations_box.contents.append(card)
 
+    body_contents = [header]
+    if is_critical_any:
+        body_contents.append(
+            BoxComponent(
+                layout="vertical",
+                margin="md",
+                padding_all="md",
+                background_color="#FEF2F2",
+                corner_radius="md",
+                contents=[
+                    TextComponent(text="คำแนะนำความปลอดภัย", weight="bold", size="sm", color="#B91C1C"),
+                    TextComponent(text="1. ตัดกระแสไฟฟ้าในจุดที่น้ำท่วมถึง", size="xs", color="#B91C1C", margin="xs"),
+                    TextComponent(text="2. เคลื่อนย้ายคนและสิ่งของขึ้นที่สูง", size="xs", color="#B91C1C"),
+                    TextComponent(text="3. ติดตามสถานการณ์อย่างใกล้ชิด", size="xs", color="#B91C1C"),
+                    ButtonComponent(
+                        action=URIAction(label="โทรสายด่วน 1784", uri="tel:1784"),
+                        style="primary", color="#DC2626", height="sm", margin="md"
+                    )
+                ]
+            )
+        )
+    body_contents.append(stations_box)
+
     bubble = BubbleContainer(
         body=BoxComponent(
             layout="vertical",
             spacing="md",
-            contents=[
-                header,
-                stations_box,
-            ]
+            contents=body_contents
         ),
         footer=BoxComponent(
             layout="vertical",
@@ -2358,9 +2383,9 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
         layout="vertical",
         spacing="xs",
         contents=[
-            TextComponent(text="ศูนย์พักพิงใกล้คุณ", weight="bold", size="md", color="#1F2937"),
-            _icon_text("icon_pin.jpg", f"{user_lat:.4f}, {user_lon:.4f}"),
-            _icon_text("icon_clock.jpg", f"อัปเดตวันนี้ {get_bangkok_time().strftime('%H:%M')} น."),
+            TextComponent(text="ข้อมูลศูนย์พักพิง", weight="bold", size="lg", color="#1F2937"),
+            _icon_text("icon_pin.jpg", f"พิกัด : {user_lat:.4f}, {user_lon:.4f}"),
+            _icon_text("icon_clock.jpg", f"เวลา: {get_bangkok_time().strftime('%d %b %Y %H:%M')} น."),
         ]
     )
 
@@ -2368,7 +2393,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
 
     if not shelters:
         shelters_box.contents.append(
-            TextComponent(text="ไม่พบศูนย์พักพิงในพื้นที่ใกล้คุณ", size="sm", color="#EF4444", align="center")
+            TextComponent(text="ไม่พบข้อมูลศูนย์พักพิงในพื้นที่ใกล้เคียง", size="sm", color="#EF4444", align="center")
         )
     else:
         for sh in shelters:
@@ -2386,61 +2411,79 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
             card = BoxComponent(
                 layout="vertical",
                 spacing="xs",
+                padding_all="md",
                 contents=[
-                    # Name & Distance
+                    # Name
+                    TextComponent(text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold",
+                                size="sm", color="#111827", wrap=True),
+                    # Distance & Status Pill
                     BoxComponent(
                         layout="horizontal",
+                        spacing="sm",
                         contents=[
-                            TextComponent(text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold",
-                                        size="sm", color="#111827", flex=1, wrap=True),
-                            TextComponent(text=f"{dist:.1f} กม.", size="xs", color="#6B7280",
-                                        align="end", flex=0)
+                            TextComponent(text=f"ห่าง {dist:.1f} กม.", size="xs", color="#6B7280", flex=1, gravity="center"),
+                            BoxComponent(
+                                layout="vertical",
+                                flex=0,
+                                gravity="center",
+                                background_color=assessment.get("bg", "#F0FDF4") if status_key == "เปิดรับ" else assessment.get("bg", "#FEF2F2"),
+                                corner_radius="xxl",
+                                padding_start="md",
+                                padding_end="md",
+                                padding_top="xs",
+                                padding_bottom="xs",
+                                contents=[
+                                    TextComponent(
+                                        text=assessment.get("label", status_key),
+                                        size="xs",
+                                        color=assessment.get("text", "#15803D") if status_key == "เปิดรับ" else assessment.get("text", "#B91C1C"),
+                                        weight="bold",
+                                        align="center"
+                                    )
+                                ]
+                            ),
                         ]
                     ),
                     TextComponent(
                         text=f"{sh.get('District', '')} {sh.get('Province', '')}".strip(),
                         size="xs", color="#6B7280"
                     ),
-                    # Status Pill Layout
+                    # Capacity Info
+                    TextComponent(
+                        text=capacity_text,
+                        size="xs",
+                        color="#4B5563",
+                        margin="xs",
+                        align="center"
+                    ),
+                    SeparatorComponent(margin="sm", color="#F3F4F6"),
+                    # Amenities Grid (Symmetrical 3-column)
                     BoxComponent(
                         layout="horizontal",
                         spacing="md",
+                        margin="sm",
                         contents=[
                             BoxComponent(
-                                layout="vertical",
-                                background_color=assessment.get("bg", "#E5E7EB"),
-                                corner_radius="xxl",
-                                padding_start="md",
-                                padding_end="md",
-                                padding_top="xs",
-                                padding_bottom="xs",
-                                flex=0,
+                                layout="vertical", flex=1, spacing="xs",
                                 contents=[
-                                    TextComponent(
-                                        text=assessment.get("label", status_key),
-                                        size="xs",
-                                        color=assessment.get("text", "#1F2937"),
-                                        weight="bold",
-                                        align="center"
-                                    )
+                                    TextComponent(text="เตียง", size="xxs", color="#9CA3AF", align="center"),
+                                    TextComponent(text=str(sh.get("Beds", "-")), size="sm", weight="bold", color="#111827", align="center"),
                                 ]
                             ),
-                            TextComponent(
-                                text=capacity_text,
-                                size="xs",
-                                color="#4B5563",
-                                gravity="center"
-                            )
-                        ]
-                    ),
-                    BoxComponent(
-                        layout="horizontal",
-                        spacing="md",
-                        margin="xs",
-                        contents=[
-                            _icon_text("icon_bed.png", str(sh.get("Beds", "-")), size="xs", color="#4B5563"),
-                            _icon_text("icon_toilet.png", str(sh.get("Toilets", "-")), size="xs", color="#4B5563"),
-                            _icon_text("icon_parking.png", str(sh.get("Parking", "-")), size="xs", color="#4B5563"),
+                            BoxComponent(
+                                layout="vertical", flex=1, spacing="xs",
+                                contents=[
+                                    TextComponent(text="ห้องน้ำ", size="xxs", color="#9CA3AF", align="center"),
+                                    TextComponent(text=str(sh.get("Toilets", "-")), size="sm", weight="bold", color="#111827", align="center"),
+                                ]
+                            ),
+                            BoxComponent(
+                                layout="vertical", flex=1, spacing="xs",
+                                contents=[
+                                    TextComponent(text="ที่จอดรถ", size="xxs", color="#9CA3AF", align="center"),
+                                    TextComponent(text=str(sh.get("Parking", "-")), size="sm", weight="bold", color="#111827", align="center"),
+                                ]
+                            ),
                         ]
                     ),
                     ButtonComponent(
@@ -2448,7 +2491,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                             label="นำทางไปศูนย์พักพิง",
                             uri=f"https://www.google.com/maps/search/?api=1&query={sh.get('Latitude')},{sh.get('Longitude')}"
                         ),
-                        style="secondary", color="#F3F4F6", height="sm", margin="sm"
+                        style="secondary", color="#F9FAFB", height="sm", margin="sm"
                     )
                 ]
             )
@@ -2475,7 +2518,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
             ]
         )
     )
-    return FlexSendMessage(alt_text="ศูนย์พักพิงใกล้คุณ", contents=bubble)
+    return FlexSendMessage(alt_text="ข้อมูลศูนย์พักพิง", contents=bubble)
 
 
 # =============================================================================
@@ -2499,32 +2542,70 @@ def get_greeting_message(user_name="คุณ"):
     
     text = (
         f"{time_greeting} คุณ {user_name}\n"
-        "ผมคือ FLOODCARE AI\n"
-        "น้องบอทผู้ช่วยอัจฉริยะสำหรับติดตามสถานการณ์น้ำ แจ้งเหตุฉุกเฉิน และช่วยเหลือผู้ประสบภัยครับ\n\n"
-        "🔍 ผมช่วยคุณได้ดังนี้ครับ:\n"
-        "1. 📞 เบอร์โทรฉุกเฉิน\n"
-        "2. 🚨 SOS แจ้งเหตุกู้ภัย\n"
-        "3. 🏠 ค้นหาศูนย์อพยพ\n"
-        "4. 🌊 ตรวจสอบระดับน้ำจริง\n"
-        "5. 📦 ขอความช่วยเหลือสิ่งของ\n"
-        "6. 🎒 วิธีเตรียมตัวรับมือน้ำท่วม\n"
-        "7. 🤖 สอบถามข้อมูลภัยพิบัติ สภาพอากาศ หรืออาการเจ็บป่วย\n\n"
-        "ยินดีช่วยเหลือเคียงข้างคุณตลอด 24 ชั่วโมงครับ 💧"
+        "ผมคือ FLOODCARE AI ผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินครับ\n\n"
+        "รายการบริการที่ผมช่วยคุณได้:\n"
+        "1. เบอร์โทรฉุกเฉินและสายด่วน\n"
+        "2. SOS แจ้งเหตุขอความช่วยเหลือกู้ภัย\n"
+        "3. ค้นหาศูนย์พักพิงและจุดอพยพ\n"
+        "4. ตรวจสอบระดับน้ำและสภาพอากาศ\n"
+        "5. แจ้งความต้องการสิ่งของบรรเทาทุกข์\n"
+        "6. คู่มือเตรียมความพร้อมและปฐมพยาบาล\n"
+        "7. สอบถามข้อมูลภัยพิบัติผ่านระบบ AI\n\n"
+        "ยินดีช่วยเหลือคุณตลอด 24 ชั่วโมงครับ"
     )
     return TextSendMessage(text=text)
 
 
+def build_accident_flex_message() -> FlexSendMessage:
+    """Symmetrical, minimal Flex Message for accident/injury response."""
+    bubble = BubbleContainer(
+        body=BoxComponent(
+            layout="vertical",
+            spacing="md",
+            contents=[
+                TextComponent(text="คำแนะนำกรณีอุบัติเหตุ", weight="bold", size="lg", color="#1F2937"),
+                BoxComponent(
+                    layout="vertical",
+                    padding_all="md",
+                    background_color="#FEF2F2",
+                    corner_radius="md",
+                    contents=[
+                        TextComponent(text="ขั้นตอนการช่วยเหลือเบื้องต้น", weight="bold", size="sm", color="#B91C1C"),
+                        TextComponent(text="1. ประเมินความปลอดภัยของสถานที่", size="xs", color="#B91C1C", margin="xs"),
+                        TextComponent(text="2. ตรวจสอบการตอบสนองของผู้บาดเจ็บ", size="xs", color="#B91C1C"),
+                        TextComponent(text="3. ห้ามเคลื่อนย้ายหากสงสัยว่ากระดูกหัก", size="xs", color="#B91C1C"),
+                        TextComponent(text="4. โทรแจ้งสายด่วนกู้ชีพทันที", size="xs", color="#B91C1C"),
+                    ]
+                ),
+                BoxComponent(
+                    layout="vertical",
+                    spacing="sm",
+                    contents=[
+                        ButtonComponent(
+                            action=URIAction(label="โทรสายด่วนกู้ชีพ 1669", uri="tel:1669"),
+                            style="primary", color="#DC2626", height="sm"
+                        ),
+                        ButtonComponent(
+                            action=URIAction(label="แจ้งเหตุด่วนเหตุร้าย 191", uri="tel:191"),
+                            style="secondary", color="#F9FAFB", height="sm"
+                        )
+                    ]
+                )
+            ]
+        )
+    )
+    return FlexSendMessage(alt_text="คำแนะนำกรณีอุบัติเหตุ", contents=bubble)
+
+
 def handle_emergency_response(user_id: str, event=None) -> TextSendMessage:
     emergency_text = (
-        "🚨 ตั้งสติไว้ก่อนนะครับ น้องบอทอยู่กับคุณ ทำตามขั้นตอนนี้ทันที:\n\n"
-        "1️⃣ ยกเบรกเกอร์ไฟฟ้าทันที\n"
-        "2️⃣ ขึ้นที่สูงที่สุดเท่าที่ทำได้\n"
-        "3️⃣ โทยแจ้งเจ้าหน้าที่:\n"
-        "   📞 ปภ. 1784\n"
-        "   📞 สพฉ. 1669\n"
-        "   📞 ตำรวจทางหลวง 1193\n\n"
-        "⚠️ อย่าตกใจ ประหยัดแบตมือถือ\n"
-        "รอความช่วยเหลืออยู่ที่จุดปลอดภัย"
+        "คำแนะนำกรณีฉุกเฉิน\n\n"
+        "1. ตัดกระแสไฟฟ้าทันที\n"
+        "2. เคลื่อนย้ายขึ้นที่สูง\n"
+        "3. ติดต่อเจ้าหน้าที่:\n"
+        "   ปภ. 1784\n"
+        "   กู้ชีพ 1669\n\n"
+        "รักษาสติและรอในจุดที่ปลอดภัย"
     )
     return TextSendMessage(text=emergency_text)
 
