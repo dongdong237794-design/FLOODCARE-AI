@@ -1212,6 +1212,32 @@ class SheetsManager:
             Logger.error("Sheets", f"update_shelter_occupancy error: {e}")
             return None
 
+    def overwrite_water_levels(self, stations: list) -> bool:
+        """
+        Replaces the entire 'Water_Levels' sheet with fresh station data in
+        one batch call (clear + single update), instead of appending —
+        station rows get updated in place on every refresh rather than
+        piling up duplicates. Used by the 10-minute background refresh job
+        so 'Water_Levels' always holds live ThaiWater data other tools/views
+        can read directly, without each request hitting the ThaiWater API.
+        """
+        client = self.get_client()
+        if not client or not stations:
+            return False
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet("Water_Levels")
+            header = ["StationCode", "Name", "River", "Location", "Lat", "Lon",
+                      "WaterLevel", "BankLevel", "Situation", "Trend", "Time"]
+            rows = [[s.get(h, "") for h in header] for s in stations]
+            ws.clear()
+            ws.update([header] + rows, value_input_option='RAW')
+            cache.sheets.delete("sheets:Water_Levels")
+            return True
+        except Exception as e:
+            Logger.error("Sheets", f"overwrite_water_levels error: {e}")
+            return False
+
 sheets_mgr = SheetsManager()
 
 
@@ -2568,10 +2594,37 @@ def start_background_tasks():
                     Logger.info("Cleanup", f"Removed {session_count} sessions, {cache_count} cache entries")
             except Exception as e:
                 Logger.error("Cleanup", f"Loop error: {e}")
-    
+
+    def water_level_refresh_loop():
+        # Runs once immediately on startup, then every 10 minutes — pulls
+        # live data straight from ThaiWater's API (bypassing the 15-min
+        # in-memory cache) and persists it into the 'Water_Levels' sheet, so
+        # the sheet itself always holds current data other tools can read,
+        # and per-request bot replies can just read the sheet directly
+        # instead of calling ThaiWater on every single user request.
+        while True:
+            try:
+                cache.water.delete("thaiwater:water_levels_live")
+                stations = get_live_water_levels_from_api()
+                if stations:
+                    ok = sheets_mgr.overwrite_water_levels(stations)
+                    if ok:
+                        Logger.info("WaterLevelRefresh", f"Updated {len(stations)} stations in Water_Levels sheet")
+                    else:
+                        Logger.error("WaterLevelRefresh", "Failed to write stations to sheet")
+                else:
+                    Logger.error("WaterLevelRefresh", "ThaiWater API returned no stations — sheet left unchanged")
+            except Exception as e:
+                Logger.error("WaterLevelRefresh", f"Loop error: {e}")
+            time.sleep(600)
+
     thread = threading.Thread(target=cleanup_loop, daemon=True)
     thread.start()
-    Logger.info("System", "Background cleanup started")
+
+    water_thread = threading.Thread(target=water_level_refresh_loop, daemon=True)
+    water_thread.start()
+
+    Logger.info("System", "Background cleanup + water-level refresh started")
 
 start_background_tasks()
 Logger.info("System", "FLOODCARE AI Bot Config v2.5.1 Initialized Successfully")
