@@ -681,16 +681,18 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
     session = sessions.get(user_id)
     show_loading_animation(user_id, loading_seconds=10)
 
-    # Pull LIVE data from ThaiWater's API first — this was previously dead
-    # code that was never called, so the bot was always showing whatever
-    # was last manually imported into the 'Water_Levels' sheet (which can go
-    # stale for weeks). Only fall back to the sheet if the live call fails.
-    records = get_live_water_levels_from_api()
-    source_label = "live_api"
+    # 'Water_Levels' is now kept fresh automatically by a background job that
+    # pulls from ThaiWater's API every 10 minutes (see water_level_refresh_loop
+    # in bot_config.py), so normal requests just read the sheet directly —
+    # fast, and doesn't hit ThaiWater on every single user request. Only if
+    # the sheet is unexpectedly empty (e.g. right at first boot before the
+    # background job has run once) do we fall back to a direct live call.
+    records = sheets_mgr.get_all_records("Water_Levels")
+    source_label = "sheets"
     if not records:
-        Logger.info("WaterLevel", "Live ThaiWater API unavailable — falling back to Water_Levels sheet")
-        records = sheets_mgr.get_all_records("Water_Levels")
-        source_label = "sheets_fallback"
+        Logger.info("WaterLevel", "Water_Levels sheet empty — falling back to direct ThaiWater API call")
+        records = get_live_water_levels_from_api()
+        source_label = "live_api_fallback"
 
     stations = []
     
@@ -1219,11 +1221,13 @@ def api_sos_submit():
 
         timestamp = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Look up this reporter's household (only active once a 'household_id'
-        # column exists in both 'users' and 'sos_requests' — safely inert
-        # otherwise) so SOS reports fired by different members of the same
-        # household within a short window get merged into a single case.
+        # Force a fresh (uncached) registration check for SOS specifically —
+        # this is the highest-stakes gate in the app, so we don't want a
+        # stale 5-minute cache of the 'users' sheet to be able to affect it
+        # either way.
+        cache.sheets.delete("sheets:users")
         user_record = sheets_mgr.get_user_record(user_id)
+        Logger.info("SOS_API", f"Registration check for user_id={user_id}: {'FOUND' if user_record else 'NOT FOUND'}")
 
         if not user_record:
             Logger.info("SOS_API", f"Blocked unregistered SOS submission from {user_id}")
@@ -1320,7 +1324,7 @@ def api_sos_submit():
             "status": "OPEN",
         })
         
-        Logger.info("SOS_API", f"Submitted case {case_id}")
+        Logger.info("SOS_API", f"Submitted case {case_id} for user_id={user_id}")
 
         if success:
             _push_save_confirmation(
