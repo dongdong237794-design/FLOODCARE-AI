@@ -1509,8 +1509,8 @@ def calculate_situation(water_level, bank_level):
 
 def get_live_water_levels_from_api() -> list:
     """
-    Directly pulls real-time water levels from ThaiWater V3 API as an automatic fallback
-    when Google Sheets is empty.
+    Directly pulls real-time water levels from ThaiWater V3 API.
+    Updated to match V3 Schema and official situation mapping.
     """
     start_time = time.time()
     cache_key = "thaiwater:water_levels_live"
@@ -1523,41 +1523,53 @@ def get_live_water_levels_from_api() -> list:
         Logger.error("WaterLevelAPI", "Requests library is not installed.")
         return []
 
+    # Mapping based on situation_level (V3 Standard)
+    STATUS_MAP = {
+        1: "น้อยวิกฤต",
+        2: "น้อย",
+        3: "ปกติ",
+        4: "มาก",
+        5: "ล้นตลิ่ง"
+    }
+
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         }
-        resp = requests.get(THAIWATER_V3_API, headers=headers, timeout=12)
+        resp = requests.get(THAIWATER_V3_API, headers=headers, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         
-        raw_stations = data.get("data", [])
+        # V3 data structure: data["waterlevel_data"]["data"]
+        raw_stations = data.get("waterlevel_data", {}).get("data", [])
         parsed_stations = []
         
         for item in raw_stations:
             station = item.get("station", {})
-            geocode = station.get("geocode", {})
+            geocode = item.get("geocode", {})
             
-            lat_val = geocode.get("lat")
-            lon_val = geocode.get("lng") or geocode.get("lon")
+            lat_val = station.get("tele_station_lat")
+            lon_val = station.get("tele_station_long")
             if lat_val is None or lon_val is None:
                 continue
                 
-            wl_val = item.get("water_level")
-            bl_val = item.get("ground_level") or item.get("bank_high")
-            if bl_val is None:
-                bl_val = station.get("bank_high") or "-"
+            # Use waterlevel_msl as primary, fallback to waterlevel_m
+            wl_val = item.get("waterlevel_msl") or item.get("waterlevel_m")
+            # Use min_bank as primary for bank level
+            bl_val = station.get("min_bank") or station.get("left_bank") or "-"
                 
-            situation = item.get("water_situation", {}).get("name", "ปกติ")
-            trend = item.get("water_trend", {}).get("name", "คงที่")
-            measure_time = item.get("datetime", "-")
+            # Get situation from situation_level mapping
+            sit_level = item.get("situation_level")
+            situation = STATUS_MAP.get(sit_level, "ปกติ")
             
-            # Formats exactly matching the sheet headers schema to preserve code portability
+            trend = item.get("water_trend", {}).get("name", "คงที่") if isinstance(item.get("water_trend"), dict) else "คงที่"
+            measure_time = item.get("waterlevel_datetime", "-")
+            
             parsed_stations.append({
-                "StationCode": station.get("code", ""),
-                "Name": station.get("name", {}).get("th", "ไม่ระบุ"),
-                "River": station.get("river", {}).get("th", "ไม่ระบุ"),
-                "Location": geocode.get("province", {}).get("name", {}).get("th", ""),
+                "StationCode": station.get("tele_station_oldcode") or str(station.get("id", "")),
+                "Name": station.get("tele_station_name", {}).get("th", "ไม่ระบุ"),
+                "River": item.get("river_name", "ไม่ระบุ"),
+                "Location": geocode.get("province_name", {}).get("th", ""),
                 "Lat": float(lat_val),
                 "Lon": float(lon_val),
                 "WaterLevel": wl_val if wl_val is not None else "-",
@@ -1567,7 +1579,7 @@ def get_live_water_levels_from_api() -> list:
                 "Time": measure_time
             })
             
-        cache.water.set(cache_key, parsed_stations, ttl=900)  # Cached for 15 minutes
+        cache.water.set(cache_key, parsed_stations, ttl=900)
         Logger.perf("WaterLevelAPI", "fetched_live", (time.time() - start_time) * 1000, {"count": len(parsed_stations)})
         return parsed_stations
     except Exception as e:
@@ -1577,33 +1589,14 @@ def get_live_water_levels_from_api() -> list:
 
 def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"):
     """
-    Assess water level status.
-    Directly extracts the situation tag string and maps it to the custom specifications.
-    Uses .copy() to secure from memory mutation corruption across array rendering.
+    Assess water level status using Thaiwater official tags and specified HEX codes.
     - 🟧 น้อยวิกฤต: #D67B27
-    - 🟨 น้อย: #FFC000 (UI Specs: Background: #FFF3CD, Text: #856404)
-    - 🟩 ปกติ: #00B050 (UI Specs: Background: #D4EDDA, Text: #155724)
-    - 🟦 มาก: #0000FF (UI Specs: Background: #CCE5FF, Text: #004085)
-    - 🟥 ล้นตลิ่ง: #FF0000 (UI Specs: Background: #F8D7DA, Text: #721C24)
+    - 🟨 น้อย: #FFC000
+    - 🟩 ปกติ: #00B050
+    - 🟦 มาก: #0000FF
+    - 🟥 ล้นตลิ่ง: #FF0000
     """
-    sit_str = str(situation or "").strip()
-
-    if "ล้นตลิ่ง" in sit_str or ("วิกฤต" in sit_str and ("สูง" in sit_str or "มาก" in sit_str or "ล้น" in sit_str)):
-        status_key = "ล้นตลิ่ง"
-    elif "น้อยวิกฤต" in sit_str or ("วิกฤต" in sit_str and ("น้อย" in sit_str or "ต่ำ" in sit_str or "แห้ง" in sit_str)):
-        status_key = "น้อยวิกฤต"
-    elif "มาก" in sit_str:
-        status_key = "มาก"
-    elif "น้อย" in sit_str:
-        status_key = "น้อย"
-    elif "ปกติ" in sit_str:
-        status_key = "ปกติ"
-    else:
-        # No situation tag from ThaiWater for this station — we deliberately do
-        # NOT compute our own threshold from wl/bank level here, since
-        # ThaiWater's own classification criteria differ from any ratio we'd
-        # invent. Default to "ปกติ" (neutral) rather than guessing a severity.
-        status_key = "ปกติ"
+    status_key = str(situation or "ปกติ").strip()
 
     status_map = {
         "น้อยวิกฤต": {
@@ -1631,14 +1624,14 @@ def assess_water_level_status(wl_value, bl_value=None, situation=None, lang="TH"
             "status": "มาก",
             "bg": "#0000FF",
             "text": "#FFFFFF",
-            "advice": "ค่อนข้างสูง",
+            "advice": "ระดับน้ำค่อนข้างสูง",
             "label_pill": "มาก"
         },
         "ล้นตลิ่ง": {
             "status": "ล้นตลิ่ง",
             "bg": "#FF0000",
             "text": "#FFFFFF",
-            "advice": "ระดับน้ำล้นตลิ่ง",
+            "advice": "ระดับน้ำล้นตลิ่ง วิกฤติ",
             "label_pill": "ล้นตลิ่ง"
         },
     }
