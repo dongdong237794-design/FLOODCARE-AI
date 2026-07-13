@@ -322,58 +322,69 @@ def handle_text_message(event):
     Logger.info("Intent", f"Classified as {intent} (confidence: {confidence})",
                {"user": bot_config.hash_user_id(user_id)})
     
-    # 1. EMERGENCY / SOS
-    if intent in ["EMERGENCY", "SOS"]:
+    # SNAKE BITE (First aid)
+    if intent == "SNAKE_BITE":
+        line_bot_api.reply_message(event.reply_token, build_snake_bite_flex())
+        return
+
+    # PREP GUIDE (วิธีเตรียมตัวก่อนน้ำท่วม)
+    if intent == "PREP_GUIDE":
+        _handle_prep_guide_request(event, user_id)
+        return
+
+    # EMERGENCY
+    if intent == "EMERGENCY":
         emergency_msg = handle_emergency_response(user_id)
         line_bot_api.reply_message(event.reply_token, emergency_msg)
         return
-
-    # 2. NEARBY LOCATION REQUESTS (Requires Location)
-    if intent == "NEARBY_WATER":
-        session.update(state="waiting_water_location")
-        update_legacy_state(user_id, "waiting_water_location")
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="📍 รบกวนแชร์ตำแหน่ง (Location) ของคุณให้น้องบอทหน่อยครับ เพื่อที่ผมจะได้ตรวจสอบระดับน้ำที่สถานีใกล้ที่สุดให้คุณได้อย่างแม่นยำครับ",
-                quick_reply=QuickReply(items=[QuickReplyButton(action=LocationAction(label="แชร์ตำแหน่ง"))])
-            )
-        )
-        return
-
-    if intent == "NEARBY_SHELTER":
-        session.update(state="waiting_shelter_location")
-        update_legacy_state(user_id, "waiting_shelter_location")
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text="📍 รบกวนแชร์ตำแหน่ง (Location) ของคุณให้น้องบอทหน่อยครับ เพื่อที่ผมจะได้ค้นหาศูนย์พักพิงที่อยู่ใกล้คุณที่สุดให้ครับ",
-                quick_reply=QuickReply(items=[QuickReplyButton(action=LocationAction(label="แชร์ตำแหน่ง"))])
-            )
-        )
-        return
-
-    # 3. GENERAL INFO REQUESTS (No Location Required)
-    if intent in ["GENERAL_WATER", "GENERAL_SHELTER", "FAQ", "PREP_GUIDE", "SNAKE_BITE"]:
-        _handle_ai_query(event, user_id, user_text, timestamp)
-        return
-
-    # 4. WEATHER (Keyword matching - No change in behavior)
-    if intent == "WEATHER":
-        _handle_weather_request(event, user_id)
-        return
-
-    # 5. GREETING / HELP
+    
+    # GREETING
     if intent == "GREETING":
         greeting_msg = get_greeting_message("คุณ")
         line_bot_api.reply_message(event.reply_token, greeting_msg)
         return
-    
+
+    # HELP / CAPABILITIES MENU
     if intent == "HELP":
         line_bot_api.reply_message(event.reply_token, build_help_flex())
         return
 
-    # 6. SYSTEM COMMANDS
+    # FAQ (Google search with grounding)
+    if intent == "FAQ":
+        _handle_faq_query(event, user_id, user_text, timestamp)
+        return
+    
+    # CONTACT
+    if intent == "CONTACT":
+        _handle_contact_request(event)
+        return
+    
+    # SHELTER
+    if intent == "SHELTER":
+        _handle_shelter_request(event, user_id)
+        return
+    
+    # WATER LEVEL
+    if intent == "WATER_LEVEL":
+        _handle_water_level_request(event, user_id)
+        return
+    
+    # WEATHER
+    if intent == "WEATHER":
+        _handle_weather_request(event, user_id)
+        return
+    
+    # SOS -> Trigger LIFF Form Flex Message directly
+    if intent == "SOS":
+        _start_sos_flow(event, user_id)
+        return
+    
+    # NEEDS -> Trigger LIFF Form Flex Message directly
+    if intent == "NEEDS":
+        _start_needs_flow(event, user_id)
+        return
+    
+    # CANCEL
     if intent == "CANCEL":
         session.reset()
         update_legacy_state(user_id, "IDLE", {})
@@ -383,12 +394,18 @@ def handle_text_message(event):
         )
         return
     
+    # LANGUAGE
     if intent == "LANGUAGE":
         line_bot_api.reply_message(event.reply_token, build_language_selector_flex())
         return
     
-    # 7. OTHER / OUT OF SCOPE
-    if intent == "OTHER":
+    # REGISTRATION -> Trigger LIFF Form Flex Message directly
+    if intent == "REGISTRATION":
+        _start_registration(event, user_id)
+        return
+    
+    # AI QUERY (Default)
+    if intent == "AI_QUERY":
         _handle_ai_query(event, user_id, user_text, timestamp)
         return
     
@@ -639,7 +656,6 @@ def _handle_ai_query(event, user_id, user_text, timestamp):
 
 def _process_shelter_search(event, lat, lon, user_id):
     session = sessions.get(user_id)
-    show_loading_animation(user_id, loading_seconds=10)
 
     shelters = find_nearest_shelters(lat, lon, limit=5)
 
@@ -654,93 +670,77 @@ def _process_shelter_search(event, lat, lon, user_id):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    # AI-powered response based on search results
-    data_summary = "Nearest shelters found:\n"
-    for s in shelters:
-        data_summary += f"- {s['Name']} ({s['District']}, {s['Province']}): Distance {s['distance_km']:.1f} km, Status: {s['Status']}\n"
-    
-    prompt = (
-        "ผู้ใช้แชร์ตำแหน่งมาเพื่อหาศูนย์พักพิง และนี่คือข้อมูลที่ระบบค้นหาได้:\n"
-        f"{data_summary}\n"
-        "ให้นำข้อมูลนี้มาเรียบเรียงเป็นคำตอบที่เป็นธรรมชาติในฐานะ FLOODCARE AI ตามกฎ System Instruction "
-        "(ตอบเป็นข้อๆ, ห้ามอีโมจิ, ห้ามดอกจัน, เน้นความปลอดภัย) โดยบอกชื่อศูนย์ที่ใกล้ที่สุดและสถานะให้ชัดเจน"
-    )
-    
-    ai_response = ask_gemini(prompt)
-    flex_msg = build_shelter_flex_message(lat, lon, shelters) # Keep Flex for visual, but AI speaks first
+    flex_msg = build_shelter_flex_message(lat, lon, shelters)
 
     session.reset()
     update_legacy_state(user_id, "IDLE", {})
-    line_bot_api.reply_message(event.reply_token, [TextSendMessage(text=ai_response), flex_msg])
+    line_bot_api.reply_message(event.reply_token, flex_msg)
 
 
 def _process_water_level(event, lat, lon, user_id, timestamp):
     session = sessions.get(user_id)
     show_loading_animation(user_id, loading_seconds=10)
 
+    # 'Water_Levels' is now kept fresh automatically by a background job that
+    # pulls from ThaiWater's API every 10 minutes (see water_level_refresh_loop
+    # in bot_config.py), so normal requests just read the sheet directly —
+    # fast, and doesn't hit ThaiWater on every single user request. Only if
+    # the sheet is unexpectedly empty (e.g. right at first boot before the
+    # background job has run once) do we fall back to a direct live call.
     records = sheets_mgr.get_all_records("Water_Levels")
     source_label = "sheets"
     if not records:
+        Logger.info("WaterLevel", "Water_Levels sheet empty — falling back to direct ThaiWater API call")
         records = get_live_water_levels_from_api()
         source_label = "live_api_fallback"
 
     stations = []
+    
     for r in records:
         try:
             st_lat = float(r.get("Lat", 0))
             st_lon = float(r.get("Lon", 0))
-            if st_lat == 0 and st_lon == 0: continue
+            if st_lat == 0 and st_lon == 0:
+                continue
             dist = calculate_distance(lat, lon, st_lat, st_lon)
+            
+            wl_val = r.get("WaterLevel", "-")
+            bl_val = r.get("BankLevel", "-")
+            situation = r.get("Situation", "ปกติ")
+            trend = r.get("Trend", "คงที่")
+            
             stations.append({
                 "stationName": r.get("Name", "ไม่ระบุ"),
-                "location": r.get("Location", ""),
-                "river": r.get("River", ""),
+                "provinceName": r.get("Location", ""),
+                "riverName": r.get("River", ""),
+                "latitude": st_lat,
+                "longitude": st_lon,
                 "distance_km": dist,
-                "water_level": r.get("WaterLevel", "-"),
-                "bank_level": r.get("BankLevel", "-"),
-                "situation": r.get("Situation", "ปกติ"),
-                "trend": r.get("Trend", "คงที่"),
-                "time": r.get("Time", "-")
+                "water_level": {"value": wl_val, "uom": "m"},
+                "bank_level": bl_val,
+                "situation": situation,
+                "trend": trend,
+                "measure_time": r.get("Time", "-"),
+                "source": source_label
             })
-        except (ValueError, TypeError): continue
+        except (ValueError, TypeError):
+            continue
     
     stations.sort(key=lambda x: x["distance_km"])
     top_stations = stations[:3]
     
-    # AI-powered response based on search results
-    data_summary = "Nearest water stations found:\n"
-    for st in top_stations:
-        data_summary += f"- {st['stationName']} ({st['river']}): Distance {st['distance_km']:.1f} km, Level: {st['water_level']} m, Situation: {st['situation']}\n"
-    
-    prompt = (
-        "ผู้ใช้แชร์ตำแหน่งมาเพื่อเช็คระดับน้ำ และนี่คือข้อมูลสถานีที่ใกล้ที่สุด:\n"
-        f"{data_summary}\n"
-        "ให้นำข้อมูลนี้มาเรียบเรียงเป็นคำตอบที่เป็นธรรมชาติในฐานะ FLOODCARE AI ตามกฎ System Instruction "
-        "(ตอบเป็นข้อๆ, ห้ามอีโมจิ, ห้ามดอกจัน, เน้นความปลอดภัย) โดยสรุปสถานการณ์น้ำใกล้ตัวเขาให้เข้าใจง่าย"
-    )
-    
-    ai_response = ask_gemini(prompt)
-    
     try:
-        # Re-format for flex builder expected structure
-        flex_stations = []
-        for s in top_stations:
-            flex_stations.append({
-                "stationName": s["stationName"],
-                "provinceName": s["location"],
-                "riverName": s["river"],
-                "distance_km": s["distance_km"],
-                "water_level": {"value": s["water_level"], "uom": "m"},
-                "bank_level": s["bank_level"],
-                "situation": s["situation"],
-                "trend": s["trend"],
-                "measure_time": s["time"]
-            })
-        flex_msg = build_water_level_flex_message(lat, lon, timestamp, flex_stations)
-        line_bot_api.reply_message(event.reply_token, [TextSendMessage(text=ai_response), flex_msg])
+        flex_msg = build_water_level_flex_message(lat, lon, timestamp, top_stations)
+        line_bot_api.reply_message(event.reply_token, flex_msg)
     except Exception as e:
         Logger.error("WaterLevel", f"Flex failed: {e}")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=ai_response))
+        lines = ["🌊 ระดับน้ำใกล้คุณ:\n"]
+        for st in top_stations:
+            wl = st.get("water_level", {})
+            wl_val = wl.get("value", "-")
+            lines.append(f"• {st['stationName']} (ห่าง {st['distance_km']:.1f} กม.): {wl_val} ม.")
+        lines.append(f"\n🔗 ดูแผนที่ระดับน้ำทั้งประเทศ: {WATER_LEVEL_SOURCE_URL}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="\n".join(lines)))
     
     session.reset()
     update_legacy_state(user_id, "IDLE", {})
