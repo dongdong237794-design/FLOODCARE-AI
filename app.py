@@ -30,6 +30,7 @@ import bot_config
 from bot_config import (
     # Core systems
     Logger, cache, rate_limiter, sessions,
+    IntentClassifier,
     # Time helper
     get_bangkok_time,
     # Utilities
