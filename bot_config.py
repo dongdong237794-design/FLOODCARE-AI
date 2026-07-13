@@ -86,12 +86,12 @@ GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 TMD_ACCESS_TOKEN = os.environ.get("TMD_ACCESS_TOKEN", "")
 
 # LIFF Configuration
-SOS_LIFF_ID = os.environ.get("SOS_LIFF_ID", "")
-SOS_LIFF_URL = os.environ.get("SOS_LIFF_URL", "")
-NEED_LIFF_ID = os.environ.get("NEED_LIFF_ID", "")
-NEED_LIFF_URL = os.environ.get("NEED_LIFF_URL", "")
-REGISTER_LIFF_ID = os.environ.get("REGISTER_LIFF_ID", "")
-REGISTER_LIFF_URL = os.environ.get("REGISTER_LIFF_URL", "")
+SOS_LIFF_ID = "2010532052-LWWlJ9M9"
+SOS_LIFF_URL = "https://floodcare-ai-2.onrender.com/liff/sos?liffId=2010532052-LWWlJ9M9"
+NEED_LIFF_ID = "2010532052-7OVUW4Fb"
+NEED_LIFF_URL = "https://floodcare-ai-2.onrender.com/liff/need?liffId=2010532052-7OVUW4Fb"
+REGISTER_LIFF_ID = "2010532052-JZ9Fz0Uv"
+REGISTER_LIFF_URL = "https://floodcare-ai-2.onrender.com/liff/register?liffld=2010532052-JZ9Fz0Uv"
 
 WATER_LEVEL_SOURCE_URL = os.environ.get(
     "WATER_LEVEL_SOURCE_URL", "https://www.thaiwater.net/water/wl"
@@ -411,115 +411,74 @@ def generate_household_id(province: str, district: str, sub_district: str,
 # =============================================================================
 
 class IntentClassifier:
-    """Rule-based Intent Classifier to reduce API costs"""
-    PATTERNS = {
-        "EMERGENCY": [
-            "ช่วยด้วย", "ช่วยด้วยครับ", "ช่วยด้วยค่ะ", "จะตาย", "จมแล้ว", "ไฟดูด", "ไฟฟ้าดูด",
-            "หายใจไม่ออก", "เป็นลม", "บาดเจ็บสาหัส", "ด่วนที่สุด", "วิกฤต", "ช่วยชีวิต", 
-            "กำลังจม", "ติดอยู่", "ขอความช่วยเหลือด่วน", "น้ำเข้าบ้าน", "น้ำกำลังเข้าบ้าน", 
-            "ติดอยู่บนหลังคา", "ติดหลังคา", "น้ำเชี่ยว", "คนจมน้ำ", "รถติดกลางน้ำ", "น้ำเข้ารถ"
-        ],
-        "ACCIDENT": [
-            "อุบัติเหตุ", "รถชน", "รถคว่ำ", "ตกใจ", "เลือดออก", "ขาหัก", "แขนหัก", "แผลฉกรรจ์",
-            "หัวแตก", "สลบ", "ไม่รู้สึกตัว", "คนเจ็บ", "ผู้บาดเจ็บ", "อุบัติเหตุรถยนต์"
-        ],
-        "SOS": [
-            "sos", "ขอความช่วยเหลือ", "แจ้งเหตุ", "กู้ภัย", "ติดน้ำท่วม", "จมน้ำ", "ช่วย"
-        ],
-        "SNAKE_BITE": [
-            "งูกัด", "ถูกงูกัด", "โดนงูกัด", "งูกัดครับ", "งูกัดค่ะ", "ถูกงู", "โดนงู", "งูฉก", "ถูกสัตว์มีพิษกัด"
-        ],
-        "PREP_GUIDE": [
-            "วิธีเตรียมตัว", "เตรียมตัวรับมือ", "เตรียมความพร้อม", "เตรียมของก่อนน้ำท่วม", "เตรียมของ",
-            "ของที่ควรเตรียม", "checklist", "prepare for flood", "how to prepare", "เตรียมรับมือน้ำท่วม"
-        ],
-        "GREETING": [
-            "สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "ดีจ้า", "ดีคับ", "hello", "hi", "hey", 
-            "good morning", "good afternoon", "good evening", "เริ่ม", "start", "menu", "เมนู"
-        ],
-        "NEEDS": [
-            "ขอของ", "ต้องการ", "ขาดแคลน", "ไม่มีอาหาร", "ไม่มีน้ำ", "ของบริจาค", 
-            "ขอความช่วยเหลือเรื่องของ", "need help", "แจ้งความต้องการ", "ขอน้ำดื่ม", "ขอยา", "ขอเสื้อผ้า"
-        ],
-        "SHELTER": [
-            "ศูนย์พักพิง", "ที่พัก", "อพยพ", "หลบภัย", "หลบน้ำ", "ที่พักชั่วคราว", 
-            "evacuation center", "shelter", "ไปไหนดี", "พักที่ไหน", "ห้างน้ำท่วม"
-        ],
-        "WATER_LEVEL": [
-            "ระดับน้ำ", "น้ำสูง", "เช็คน้ำ", "ตรวจน้ำ", "water level", 
-            "flood level", "น้ำขึ้น", "น้ำลด", "สถานการณ์น้ำ", "check water"
-        ],
-        "WEATHER": [
-            "สภาพอากาศ", "พยากรณ์อากาศ", "ฝนตก", "ฝน", "อากาศ", "weather", 
-            "forecast", "rain", " raining", "จะฝนตกไหม", "เช็คฝน", "check weather"
-        ],
-        "CONTACT": [
-            "เบอร์โทร", "โทรศัพท์", "ติดต่อ", "สายด่วน", "hotline", "phone", 
-            "contact", "call", "เบอร์ฉุกเฉิน", "โทรหาใคร", "เบอร์ ปภ", "1784", "1669"
-        ],
-        "LANGUAGE": [
-            "เปลี่ยนภาษา", "change language", "language", "ภาษา", "lang", "english", "ไทย", "japanese", "日本語"
-        ],
-        "CANCEL": [
-            "ยกเลิก", "cancel", "หยุด", "stop", "ออก", "exit", "เริ่มใหม่", "restart", "reset"
-        ],
-        "REGISTRATION": [
-            "ลงทะเบียน", "register", "สมัคร", "เข้าร่วม", "ลงชื่อ", "ข้อมูลของฉัน", "โปรไฟล์", "profile"
-        ],
-        "HELP": [
-            "ทำอะไรได้บ้าง", "ทำอะไรได้", "มีอะไรบ้าง", "ช่วยอะไรได้บ้าง", "ใช้งานยังไง", 
-            "ใช้งานอย่างไร", "วิธีใช้", "วิธีการใช้งาน", "วิธีใช้งาน", "คู่มือการใช้งาน",
-            "สอนใช้งาน", "แนะนำการใช้งาน", "เมนู", "menu", "help",
-            "what can you do", "capabilities", "คุณคือใคร", "คุณทำอะไรได้"
-        ],
-        "FAQ": [
-            "คำถามยอดฮิต", "คำถามที่พบบ่อย", "faq", "คำถามทั่วไป", "อยากรู้เรื่อง", "บอกข้อมูล", 
-            "ค้นหา", "search", "น้ำท่วม 2567", "น้ำท่วม 2568", "น้ำท่วมล่าสุด", "สถานการณ์น้ำ", 
-            "ข่าวน้ำท่วม", "อัพเดทน้ำท่วม", "ระดับน้ำล่าสุด", "คาดการณ์น้ำ", "พยากรณ์น้ำ"
-        ],
-    }
+    """AI-powered Intent Classifier with Keyword fallback for Weather"""
     
     @classmethod
     def classify(cls, text: str) -> Tuple[str, float]:
         if not text:
-            return ("AI_QUERY", 0.5)
+            return ("FAQ", 0.5)
         
         text_lower = text.strip().lower()
-        text_clean = text_lower.strip("!.,😊🙏👋🆘 ")
         
-        PRIORITY_INTENTS = ["EMERGENCY", "SOS", "SNAKE_BITE"]
-        for intent in PRIORITY_INTENTS:
-            keywords = cls.PATTERNS.get(intent, [])
-            for keyword in keywords:
-                kw_lower = keyword.lower()
-                if text_clean == kw_lower:
-                    return (intent, 1.0)
-                if text_clean.startswith(kw_lower):
-                    return (intent, 0.9)
-                if len(keyword) >= 4 and kw_lower in text_lower:
-                    return (intent, 0.8)
-                if len(keyword) < 4 and kw_lower in text_lower:
-                    return (intent, 0.7)
+        # 1. EXCEPTION: Weather (Keyword matching as requested)
+        weather_keywords = ["สภาพอากาศ", "พยากรณ์อากาศ", "ฝนตก", "ฝน", "weather", "forecast", "rain"]
+        if any(kw in text_lower for kw in weather_keywords):
+            return ("WEATHER", 1.0)
+            
+        # 2. EXCEPTION: Cancel/Reset (Quick commands)
+        cancel_keywords = ["ยกเลิก", "cancel", "หยุด", "stop", "เริ่มใหม่", "reset"]
+        if any(kw in text_lower for kw in cancel_keywords):
+            return ("CANCEL", 1.0)
+
+        # 3. AI Intent Analysis (The new standard)
+        return cls.classify_with_ai(text)
+
+    @classmethod
+    def classify_with_ai(cls, text: str) -> Tuple[str, float]:
+        """Uses Gemini to understand user intent and location requirement."""
+        text_lower = text.strip().lower()
         
-        for intent, keywords in cls.PATTERNS.items():
-            if intent in PRIORITY_INTENTS:
-                continue
-            for keyword in keywords:
-                kw_lower = keyword.lower()
-                if text_clean == kw_lower:
-                    return (intent, 1.0)
-                if text_clean.startswith(kw_lower):
-                    return (intent, 0.9)
-                if len(keyword) >= 4 and kw_lower in text_lower:
-                    return (intent, 0.8)
-                if len(keyword) < 4 and kw_lower in text_lower:
-                    return (intent, 0.7)
+        # Keyword overrides for specific LIFF triggers as requested
+        if any(kw in text_lower for kw in ["sos", "แจ้งเหตุ", "ฉุกเฉิน"]):
+            return ("SOS_LIFF", 1.0)
+        if any(kw in text_lower for kw in ["ขอของ", "บริจาค", "ขาดแคลน"]):
+            return ("NEEDS_LIFF", 1.0)
+        if any(kw in text_lower for kw in ["ลงทะเบียน", "register", "สมัคร"]):
+            return ("REGISTER_LIFF", 1.0)
+        if any(kw in text_lower for kw in ["เบอร์โทร", "สายด่วน", "ติดต่อ"]):
+            return ("CONTACT", 1.0)
+        if any(kw in text_lower for kw in ["วิธีเตรียมตัว", "เตรียมความพร้อม"]):
+            return ("PREP_GUIDE", 1.0)
+            
+        prompt = (
+            "Analyze the user message and classify it into ONE of these intents:\n"
+            "- NEARBY_WATER: Asking for water level/flood status NEAR THEM or in their current area.\n"
+            "- GENERAL_WATER: Asking for water level in general, other provinces, or broad regions.\n"
+            "- NEARBY_SHELTER: Asking for evacuation centers/shelters NEAR THEM.\n"
+            "- GENERAL_SHELTER: Asking for shelters in general or in other specific areas.\n"
+            "- EMERGENCY: Immediate danger, life-threatening situation.\n"
+            "- SNAKE_BITE: Snake bite or venomous animal emergency.\n"
+            "- PREP_GUIDE: How to prepare for floods, checklist, advice.\n"
+            "- GREETING: Hello, hi, start, menu.\n"
+            "- HELP: Asking what the bot can do, menu, help.\n"
+            "- FAQ: General questions about floods, safety, health, or situation updates.\n"
+            "- OTHER: Anything else out of scope.\n\n"
+            f"User message: '{text}'\n\n"
+            "Respond ONLY with the intent name (e.g., NEARBY_WATER)."
+        )
         
-        emergency_words = ["ช่วย", "ด่วน", "วิกฤต", "ฉุกเฉิน", "help", "emergency", "urgent"]
-        if any(w in text_lower for w in emergency_words):
-            return ("EMERGENCY", 0.6)
-        
-        return ("AI_QUERY", 0.5)
+        try:
+            intent_raw = ask_gemini(prompt, max_tokens=10).strip().upper()
+            for valid_intent in [
+                "NEARBY_WATER", "GENERAL_WATER", "NEARBY_SHELTER", "GENERAL_SHELTER",
+                "EMERGENCY", "SNAKE_BITE", "PREP_GUIDE", "GREETING", "HELP", "FAQ", "OTHER"
+            ]:
+                if valid_intent in intent_raw:
+                    return (valid_intent, 0.9)
+            return ("FAQ", 0.5)
+        except Exception as e:
+            Logger.error("IntentAI", f"Classification failed: {e}")
+            return ("FAQ", 0.5)
 
 
 # =============================================================================
@@ -615,15 +574,15 @@ FLOODCARE_SYSTEM_INSTRUCTION = (
     "2. หากเป็นเรื่องอื่นนอกเหนือจากนี้ ให้ปฏิเสธอย่างสุภาพและมินิมอล เช่น:\n"
     "   'ขออภัยครับ ผมถูกออกแบบมาเพื่อช่วยเหลือด้านน้ำท่วม ความปลอดภัย และอุบัติเหตุเท่านั้น หากมีคำถามด้านนี้ผมยินดีตอบครับ'\n\n"
     "กฎการตอบคำถาม (CRITICAL FORMATTING RULES):\n"
-    "1. **ห้ามใช้อีโมจิเด็ดขาด**\n"
+    "1. ห้ามใช้อีโมจิเด็ดขาด\n"
     "2. ตอบเป็นข้อๆ (1. 2. 3.) และเว้นบรรทัดให้ชัดเจน\n"
-    "3. **เน้นความปลอดภัยสูงสุด:** หากสถานการณ์ดูอันตราย ให้ขึ้นต้นด้วยคำเตือนและแนะนำขั้นตอนการเอาตัวรอดหรือเบอร์ฉุกเฉินทันที\n"
-    "4. **ความกระชับ:** สูงสุดไม่เกิน 3-4 ข้อ แต่ละข้อไม่เกิน 1 บรรทัด\n"
-    "5. **ห้ามระบุแหล่งที่มาในเนื้อความ** (เช่น 'อ้างอิงจาก...') เด็ดขาด(ที่มา: ...)' หรือ '(ข้อมูลจาก: ...)' แทรกในข้อความ) เพราะระบบจะแสดงแหล่งอ้างอิงแยกไว้ด้านล่างของข้อความให้เองโดยอัตโนมัติ ให้เนื้อหาคำตอบเป็นเนื้อข้อมูลล้วนๆ\n"
-    "4. ห้ามใช้เครื่องหมายดอกจันสองตัว (**) หรือดอกจันตัวเดียว (*) ในข้อความอย่างเด็ดขาด เพราะทำให้ข้อความรกบนระบบ LINE ให้เว้นบรรทัดและเขียนข้อความให้อ่านง่ายแทน\n"
-    "5. คำตอบทุกข้อความต้องจบประโยคอย่างสมบูรณ์เสมอ ห้ามหยุดหรือตัดจบกลางประโยค กลางคำ หรือกลางรายการเด็ดขาด — แต่ความสมบูรณ์นี้หมายถึง 'จบประโยคให้ครบ' ไม่ใช่ข้ออ้างให้ตอบยืดยาวเกินความจำเป็น ให้ตัดสินใจล่วงหน้าว่าจะพูดกี่ประเด็นแล้วจบให้ครบตามข้อ 2\n"
-    "6. หากมีลิงก์อ้างอิงให้จัดเก็บไว้ในโครงสร้างส่วนท้ายของการ์ดหรือแสดงผลเป็นรูปแบบปุ่มกดให้เรียบร้อยสวยงาม ไม่เขียนลิงก์ยาวเปลือยในตัวข้อความหลัก\n"
-    "7. หากคำถามของผู้ใช้สื่อถึงความเครียด ความกลัว หรือความเดือดร้อน (เช่น ถามเรื่องอาการเจ็บป่วยของตนเอง คนในครอบครัว หรือน้ำท่วมบ้านตัวเอง) ให้เปิดประโยคแรกด้วยคำรับรู้ความรู้สึกสั้นๆ ไม่เกิน 1 บรรทัด ก่อนให้ข้อมูล เช่น 'เข้าใจว่าตอนนี้คงเป็นห่วงมากเลยนะครับ' แล้วจึงตอบข้อมูลที่เป็นประโยชน์ต่อทันที ห้ามใส่คำปลอบใจซ้ำหลายประโยคหรือทำให้คำตอบยาวเกินไป"
+    "3. เน้นความปลอดภัยสูงสุด: หากสถานการณ์ดูอันตราย ให้ขึ้นต้นด้วยคำเตือนและแนะนำขั้นตอนการเอาตัวรอดหรือเบอร์ฉุกเฉินทันที\n"
+    "4. ความกระชับ: สูงสุดไม่เกิน 3-4 ข้อ แต่ละข้อไม่เกิน 1 บรรทัด\n"
+    "5. ห้ามระบุแหล่งที่มาในเนื้อความ (เช่น 'อ้างอิงจาก...' หรือ '(ที่มา: ...)' หรือ '(ข้อมูลจาก: ...)') เด็ดขาด เพราะระบบจะแสดงแหล่งอ้างอิงแยกไว้ด้านล่างให้เองอัตโนมัติ ให้เนื้อหาคำตอบเป็นเนื้อข้อมูลล้วนๆ\n"
+    "6. ห้ามใช้เครื่องหมายดอกจันสองตัว (**) หรือดอกจันตัวเดียว (*) ในข้อความอย่างเด็ดขาด เพราะทำให้ข้อความรกบนระบบ LINE ให้เว้นบรรทัดและเขียนข้อความให้อ่านง่ายแทน\n"
+    "7. คำตอบทุกข้อความต้องจบประโยคอย่างสมบูรณ์เสมอ ห้ามหยุดหรือตัดจบกลางประโยค กลางคำ หรือกลางรายการเด็ดขาด — แต่ความสมบูรณ์นี้หมายถึง 'จบประโยคให้ครบ' ไม่ใช่ข้ออ้างให้ตอบยืดยาวเกินความจำเป็น ให้ตัดสินใจล่วงหน้าว่าจะพูดกี่ประเด็นแล้วจบให้ครบตามข้อ 2\n"
+    "8. หากมีลิงก์อ้างอิงให้จัดเก็บไว้ในโครงสร้างส่วนท้ายของการ์ดหรือแสดงผลเป็นรูปแบบปุ่มกดให้เรียบร้อยสวยงาม ไม่เขียนลิงก์ยาวเปลือยในตัวข้อความหลัก\n"
+    "9. หากคำถามของผู้ใช้สื่อถึงความเครียด ความกลัว หรือความเดือดร้อน ให้เปิดประโยคแรกด้วยคำรับรู้ความรู้สึกสั้นๆ ไม่เกิน 1 บรรทัด ก่อนให้ข้อมูล เช่น 'เข้าใจว่าตอนนี้คงเป็นห่วงมากเลยนะครับ' แล้วจึงตอบข้อมูลที่เป็นประโยชน์ต่อทันที ห้ามใส่คำปลอบใจซ้ำหลายประโยค"
 )
 
 
