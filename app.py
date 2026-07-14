@@ -30,7 +30,8 @@ import bot_config
 from bot_config import (
     # Core systems
     Logger, cache, rate_limiter, sessions,
-    IntentClassifier,
+    IntentClassifier, classify_intent_ai,
+    compose_water_level_reply, compose_shelter_reply,
     # Time helper
     get_bangkok_time,
     # Utilities
@@ -39,10 +40,10 @@ from bot_config import (
     # LINE
     line_bot_api, handler, show_loading_animation,
     # Flex builders
-    build_sos_form_flex, build_ai_response_flex,
+    build_ai_response_flex,
     build_language_selector_flex, build_water_level_flex_message,
     build_register_form_flex, build_snake_bite_flex, build_help_flex,
-    build_need_form_flex, build_weather_flex, build_faq_response_flex,
+    build_weather_flex, build_faq_response_flex,
     build_shelter_flex_message, build_prep_guide_flex,
     # Shelter data
     find_nearest_shelters,
@@ -76,6 +77,17 @@ from linebot.models import (
 
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY or os.urandom(32)
+
+# Exact-match whitelist used to detect Rich Menu taps, Quick Reply buttons,
+# and literal typed commands (e.g. "สภาพอากาศ", "ศูนย์พักพิง") — these bypass
+# AI intent analysis entirely and keep using the old deterministic
+# keyword classifier + existing Flex Message UI, unchanged. Only messages
+# that are NOT an exact match (i.e. real free-text sentences) go through
+# the new AI intent analysis.
+_ALL_KEYWORD_TRIGGERS = set()
+for _kw_list in IntentClassifier.PATTERNS.values():
+    for _kw in _kw_list:
+        _ALL_KEYWORD_TRIGGERS.add(_kw.strip().lower())
 
 
 # =============================================================================
@@ -316,11 +328,31 @@ def handle_text_message(event):
         return
     
     # INTENT CLASSIFICATION
-    intent, confidence = IntentClassifier.classify(user_text)
+    # Exact matches of a known menu/button keyword (Rich Menu taps, Quick
+    # Reply buttons, or literally typing "สภาพอากาศ") keep the old
+    # deterministic keyword path so their behavior/Flex UI never changes.
+    # Any other free-text sentence is analyzed by AI instead of guessing
+    # from keywords, per the updated spec.
+    text_clean_for_menu = user_text.strip().lower().strip("!.,😊🙏👋🆘 ")
+    is_menu_trigger = text_clean_for_menu in _ALL_KEYWORD_TRIGGERS
+
+    if is_menu_trigger:
+        intent, confidence = IntentClassifier.classify(user_text)
+        scope = "MENU"
+    else:
+        ai_result = classify_intent_ai(user_text)
+        intent = ai_result.get("intent", "AI_QUERY")
+        confidence = ai_result.get("confidence", 0.5)
+        scope = ai_result.get("scope", "GENERAL")
+
     session.last_intent = intent
-    
-    Logger.info("Intent", f"Classified as {intent} (confidence: {confidence})",
-               {"user": bot_config.hash_user_id(user_id)})
+
+    Logger.info(
+        "Intent",
+        f"Classified as {intent} (confidence: {confidence}, scope: {scope}, "
+        f"via: {'menu_keyword' if is_menu_trigger else 'ai'})",
+        {"user": bot_config.hash_user_id(user_id)}
+    )
     
     # SNAKE BITE (First aid)
     if intent == "SNAKE_BITE":
@@ -361,12 +393,20 @@ def handle_text_message(event):
     
     # SHELTER
     if intent == "SHELTER":
-        _handle_shelter_request(event, user_id)
+        if scope == "GENERAL":
+            # Regional/overview question (e.g. "ภาคเหนือมีศูนย์พักพิงกี่ที่")
+            # doesn't need the user's own location — answer directly.
+            _handle_faq_query(event, user_id, user_text, timestamp)
+        else:
+            _handle_shelter_request(event, user_id, ai_mode=(scope == "NEARBY"))
         return
     
     # WATER LEVEL
     if intent == "WATER_LEVEL":
-        _handle_water_level_request(event, user_id)
+        if scope == "GENERAL":
+            _handle_faq_query(event, user_id, user_text, timestamp)
+        else:
+            _handle_water_level_request(event, user_id, ai_mode=(scope == "NEARBY"))
         return
     
     # WEATHER
@@ -435,9 +475,17 @@ def handle_location_message(event):
     if state == "waiting_shelter_location":
         _process_shelter_search(event, lat, lon, user_id)
         return
+
+    if state == "waiting_shelter_location_ai":
+        _process_shelter_search_ai(event, lat, lon, user_id)
+        return
     
     if state == "waiting_water_location":
         _process_water_level(event, lat, lon, user_id, timestamp)
+        return
+
+    if state == "waiting_water_location_ai":
+        _process_water_level_ai(event, lat, lon, user_id, timestamp)
         return
     
     if state == "waiting_weather_location":
@@ -469,41 +517,53 @@ def handle_image_message(event):
 # AUTOMATIC WEB FORM TRIGGERS (LIFF)
 # =============================================================================
 
-def _require_registered(event, user_id) -> bool:
+def _reply_liff_link(event, header: str, body: str, button_label: str, liff_url: str):
     """
-    Checks the 'users' sheet for this LINE user_id before letting them use
-    SOS / ขอความช่วยเหลือ. If they haven't registered yet, sends a single
-    card with a button that opens the registration link directly — no
-    extra text message first, just one clear tap to get to the form.
+    Shared helper: sends a short text message — with the LIFF link shown as
+    plain text (tappable in LINE) plus a Quick Reply button as a shortcut —
+    that opens the given LIFF page directly. Used for SOS / Needs /
+    Registration. Deliberately static/deterministic (no AI call) so these
+    time-sensitive replies are instant and never blocked by an AI hiccup;
+    now that the LIFF pages are fully self-contained, we no longer need an
+    intermediate Flex "form" card or a chat-side registration gate either.
     """
-    user_record = sheets_mgr.get_user_record(user_id)
-    if user_record:
-        return True
-
-    line_bot_api.reply_message(event.reply_token, build_register_form_flex("คุณ"))
-    return False
+    quick_reply = QuickReply(items=[
+        QuickReplyButton(action=URIAction(label=button_label, uri=liff_url))
+    ])
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=f"{header}\n\n{body}\n{liff_url}", quick_reply=quick_reply)
+    )
 
 
 def _start_sos_flow(event, user_id):
-    if not _require_registered(event, user_id):
-        return
-    if not SOS_LIFF_URL:
-        Logger.info("SOS", "SOS_LIFF_URL not configured")
-    line_bot_api.reply_message(event.reply_token, build_sos_form_flex("คุณ"))
+    _reply_liff_link(
+        event,
+        header="🆘 แจ้งเหตุฉุกเฉิน SOS",
+        body="กดปุ่มด้านล่างเพื่อเปิดแบบฟอร์มแจ้งเหตุฉุกเฉินได้เลยครับ",
+        button_label="📋 เปิดแบบฟอร์ม SOS",
+        liff_url=SOS_LIFF_URL
+    )
 
 
 def _start_needs_flow(event, user_id):
-    if not _require_registered(event, user_id):
-        return
-    if not NEED_LIFF_URL:
-        Logger.info("Needs", "NEED_LIFF_URL not configured")
-    line_bot_api.reply_message(event.reply_token, build_need_form_flex("คุณ"))
+    _reply_liff_link(
+        event,
+        header="📦 ขอความช่วยเหลือเรื่องสิ่งของ",
+        body="กดปุ่มด้านล่างเพื่อเปิดแบบฟอร์มขอความช่วยเหลือเรื่องสิ่งของได้เลยครับ",
+        button_label="📋 เปิดแบบฟอร์มขอของ",
+        liff_url=NEED_LIFF_URL
+    )
 
 
 def _start_registration(event, user_id):
-    if not REGISTER_LIFF_URL:
-        Logger.info("Register", "REGISTER_LIFF_URL not configured")
-    line_bot_api.reply_message(event.reply_token, build_register_form_flex("คุณ"))
+    _reply_liff_link(
+        event,
+        header="📝 ลงทะเบียนข้อมูลของคุณ",
+        body="กดปุ่มด้านล่างเพื่อเปิดแบบฟอร์มลงทะเบียนได้เลยครับ",
+        button_label="📋 เปิดแบบฟอร์มลงทะเบียน",
+        liff_url=REGISTER_LIFF_URL
+    )
 
 
 def _handle_prep_guide_request(event, user_id):
@@ -541,10 +601,12 @@ def _handle_contact_request(event):
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 
-def _handle_shelter_request(event, user_id):
+def _handle_shelter_request(event, user_id, ai_mode=False):
     session = sessions.get(user_id)
-    session.update(state="waiting_shelter_location")
-    update_legacy_state(user_id, "waiting_shelter_location", session.data)
+    state = "waiting_shelter_location_ai" if ai_mode else "waiting_shelter_location"
+    data = {"original_question": event.message.text} if ai_mode else {}
+    session.update(state=state, data=data)
+    update_legacy_state(user_id, state, session.data)
     
     quick_reply = QuickReply(items=[
         QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดหาศูนย์พักพิง"))
@@ -558,10 +620,12 @@ def _handle_shelter_request(event, user_id):
     )
 
 
-def _handle_water_level_request(event, user_id):
+def _handle_water_level_request(event, user_id, ai_mode=False):
     session = sessions.get(user_id)
-    session.update(state="waiting_water_location")
-    update_legacy_state(user_id, "waiting_water_location", session.data)
+    state = "waiting_water_location_ai" if ai_mode else "waiting_water_location"
+    data = {"original_question": event.message.text} if ai_mode else {}
+    session.update(state=state, data=data)
+    update_legacy_state(user_id, state, session.data)
     
     quick_reply = QuickReply(items=[
         QuickReplyButton(action=LocationAction(label="📍 แชร์พิกัดเช็กระดับน้ำ"))
@@ -677,16 +741,17 @@ def _process_shelter_search(event, lat, lon, user_id):
     line_bot_api.reply_message(event.reply_token, flex_msg)
 
 
-def _process_water_level(event, lat, lon, user_id, timestamp):
-    session = sessions.get(user_id)
-    show_loading_animation(user_id, loading_seconds=10)
-
-    # 'Water_Levels' is now kept fresh automatically by a background job that
-    # pulls from ThaiWater's API every 10 minutes (see water_level_refresh_loop
-    # in bot_config.py), so normal requests just read the sheet directly —
-    # fast, and doesn't hit ThaiWater on every single user request. Only if
-    # the sheet is unexpectedly empty (e.g. right at first boot before the
-    # background job has run once) do we fall back to a direct live call.
+def _build_nearest_water_stations(lat, lon, limit=3):
+    """
+    Shared lookup used by both the Rich-Menu water-level flow (Flex Message)
+    and the new AI-intent water-level flow (natural-language reply). 'Water_Levels'
+    is kept fresh automatically by a background job that pulls from ThaiWater's
+    API every 10 minutes (see water_level_refresh_loop in bot_config.py), so
+    normal requests just read the sheet directly — fast, and doesn't hit
+    ThaiWater on every single user request. Only if the sheet is unexpectedly
+    empty (e.g. right at first boot before the background job has run once)
+    do we fall back to a direct live call.
+    """
     records = sheets_mgr.get_all_records("Water_Levels")
     source_label = "sheets"
     if not records:
@@ -695,7 +760,7 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
         source_label = "live_api_fallback"
 
     stations = []
-    
+
     for r in records:
         try:
             st_lat = float(r.get("Lat", 0))
@@ -703,12 +768,12 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
             if st_lat == 0 and st_lon == 0:
                 continue
             dist = calculate_distance(lat, lon, st_lat, st_lon)
-            
+
             wl_val = r.get("WaterLevel", "-")
             bl_val = r.get("BankLevel", "-")
             situation = r.get("Situation", "ปกติ")
             trend = r.get("Trend", "คงที่")
-            
+
             stations.append({
                 "stationName": r.get("Name", "ไม่ระบุ"),
                 "provinceName": r.get("Location", ""),
@@ -725,10 +790,17 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
             })
         except (ValueError, TypeError):
             continue
-    
+
     stations.sort(key=lambda x: x["distance_km"])
-    top_stations = stations[:3]
-    
+    return stations[:limit]
+
+
+def _process_water_level(event, lat, lon, user_id, timestamp):
+    session = sessions.get(user_id)
+    show_loading_animation(user_id, loading_seconds=10)
+
+    top_stations = _build_nearest_water_stations(lat, lon, limit=3)
+
     try:
         flex_msg = build_water_level_flex_message(lat, lon, timestamp, top_stations)
         line_bot_api.reply_message(event.reply_token, flex_msg)
@@ -742,6 +814,50 @@ def _process_water_level(event, lat, lon, user_id, timestamp):
         lines.append(f"\n🔗 ดูแผนที่ระดับน้ำทั้งประเทศ: {WATER_LEVEL_SOURCE_URL}")
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="\n".join(lines)))
     
+    session.reset()
+    update_legacy_state(user_id, "IDLE", {})
+
+
+def _process_water_level_ai(event, lat, lon, user_id, timestamp):
+    """
+    AI-intent path: same nearest-station lookup as the Rich-Menu flow
+    (_build_nearest_water_stations — distances/values all pre-computed, the
+    AI never calculates or guesses them), but the reply is a natural
+    conversational sentence composed by Gemini instead of a Flex card, per
+    spec item 5.
+    """
+    session = sessions.get(user_id)
+    show_loading_animation(user_id, loading_seconds=10)
+
+    original_question = session.data.get("original_question", "ระดับน้ำใกล้ตัวผู้ใช้")
+    top_stations = _build_nearest_water_stations(lat, lon, limit=3)
+
+    reply_text = compose_water_level_reply(original_question, top_stations)
+    if not reply_text:
+        reply_text = "ขออภัยครับ ระบบไม่สามารถสรุปข้อมูลระดับน้ำได้ในขณะนี้ ลองพิมพ์ 'เช็คน้ำ' อีกครั้งได้ครับ"
+
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+
+    session.reset()
+    update_legacy_state(user_id, "IDLE", {})
+
+
+def _process_shelter_search_ai(event, lat, lon, user_id):
+    """
+    AI-intent path for shelters — reuses find_nearest_shelters() (same
+    Google Sheets lookup + distance calculation as the Rich-Menu flow), then
+    has Gemini phrase the result as a natural sentence instead of a Flex card.
+    """
+    session = sessions.get(user_id)
+    original_question = session.data.get("original_question", "ศูนย์พักพิงใกล้ตัวผู้ใช้")
+
+    shelters = find_nearest_shelters(lat, lon, limit=3)
+    reply_text = compose_shelter_reply(original_question, shelters)
+    if not reply_text:
+        reply_text = "ขออภัยครับ ระบบไม่สามารถสรุปข้อมูลศูนย์พักพิงได้ในขณะนี้ ลองพิมพ์ 'ศูนย์พักพิง' อีกครั้งได้ครับ"
+
+    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+
     session.reset()
     update_legacy_state(user_id, "IDLE", {})
 
