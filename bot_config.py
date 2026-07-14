@@ -86,12 +86,16 @@ GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 TMD_ACCESS_TOKEN = os.environ.get("TMD_ACCESS_TOKEN", "")
 
 # LIFF Configuration
-SOS_LIFF_ID = os.environ.get("SOS_LIFF_ID", "")
-SOS_LIFF_URL = os.environ.get("SOS_LIFF_URL", "")
-NEED_LIFF_ID = os.environ.get("NEED_LIFF_ID", "")
-NEED_LIFF_URL = os.environ.get("NEED_LIFF_URL", "")
-REGISTER_LIFF_ID = os.environ.get("REGISTER_LIFF_ID", "")
-REGISTER_LIFF_URL = os.environ.get("REGISTER_LIFF_URL", "")
+# Default URLs point straight at the production LIFF pages so typing
+# 'sos' / 'ขอของ' / 'ลงทะเบียน' works immediately; env vars still override
+# these if set (e.g. for a staging deployment on a different domain).
+SOS_LIFF_ID = os.environ.get("SOS_LIFF_ID", "2010532052-LWWlJ9M9")
+SOS_LIFF_URL = os.environ.get("SOS_LIFF_URL", "https://floodcare-ai-2.onrender.com/liff/sos?liffId=2010532052-LWWlJ9M9")
+NEED_LIFF_ID = os.environ.get("NEED_LIFF_ID", "2010532052-7OVUW4Fb")
+NEED_LIFF_URL = os.environ.get("NEED_LIFF_URL", "https://floodcare-ai-2.onrender.com/liff/need?liffId=2010532052-7OVUW4Fb")
+# NOTE: the register link you sent had "liffld=" (typo) — corrected to "liffId=" here to match the other two.
+REGISTER_LIFF_ID = os.environ.get("REGISTER_LIFF_ID", "2010532052-JZ9Fz0Uv")
+REGISTER_LIFF_URL = os.environ.get("REGISTER_LIFF_URL", "https://floodcare-ai-2.onrender.com/liff/register?liffId=2010532052-JZ9Fz0Uv")
 
 WATER_LEVEL_SOURCE_URL = os.environ.get(
     "WATER_LEVEL_SOURCE_URL", "https://www.thaiwater.net/water/wl"
@@ -422,6 +426,9 @@ class IntentClassifier:
         "SOS": [
             "sos", "ขอความช่วยเหลือ", "แจ้งเหตุ", "กู้ภัย", "ติดน้ำท่วม", "จมน้ำ", "ช่วย"
         ],
+        "NEEDS": [
+            "ขอของ", "ขอสิ่งของ", "ต้องการสิ่งของ", "ขาดแคลน", "need supplies", "need items"
+        ],
         "SNAKE_BITE": [
             "งูกัด", "ถูกงูกัด", "โดนงูกัด", "งูกัดครับ", "งูกัดค่ะ", "ถูกงู", "โดนงู", "งูฉก"
         ],
@@ -511,6 +518,191 @@ class IntentClassifier:
             return ("EMERGENCY", 0.6)
         
         return ("AI_QUERY", 0.5)
+
+
+# =============================================================================
+# SECTION 5B: AI-BASED INTENT ANALYSIS (replaces keyword matching)
+# =============================================================================
+# Free-text messages are now classified by asking Gemini to read the whole
+# sentence and decide the user's real intent, instead of guessing from the
+# presence/absence of specific keywords. IntentClassifier.classify() (above)
+# is kept only as an automatic fallback if Gemini is unavailable or returns
+# something unparsable, so classification never silently fails.
+#
+# "scope" is only meaningful for WATER_LEVEL / SHELTER: NEARBY means the user
+# is asking about their own location (-> ask for LINE location share),
+# GENERAL means an overview/regional question (-> answer directly, no
+# location prompt needed). This is what lets "ภาคเหนือน้ำเป็นไง" go straight
+# to an answer while "น้ำแถวบ้านผมเป็นไง" asks for the user's location first.
+
+INTENT_LIST_AI = [
+    "EMERGENCY", "SOS", "NEEDS", "SNAKE_BITE", "ACCIDENT", "PREP_GUIDE", "GREETING",
+    "HELP", "FAQ", "CONTACT", "SHELTER", "WATER_LEVEL", "WEATHER",
+    "REGISTRATION", "LANGUAGE", "CANCEL", "AI_QUERY"
+]
+
+INTENT_AI_SYSTEM_INSTRUCTION = (
+    "คุณคือระบบวิเคราะห์เจตนา (Intent Analyzer) ของแชทบอท FLOODCARE AI "
+    "หน้าที่ของคุณคือวิเคราะห์ข้อความของผู้ใช้ แล้วตอบกลับเป็น JSON เท่านั้น "
+    "ห้ามมีคำอธิบาย ห้ามมี markdown code fence ห้ามมีข้อความอื่นใดนอกจาก JSON object เดียว\n\n"
+    "รูปแบบ JSON ที่ต้องตอบกลับเป๊ะๆ:\n"
+    '{"intent": "<ONE_OF_INTENTS>", "scope": "NEARBY หรือ GENERAL หรือ NONE", "confidence": <0.0-1.0>}\n\n'
+    f"รายการ intent ที่เลือกได้: {', '.join(INTENT_LIST_AI)}\n\n"
+    "คำอธิบาย intent:\n"
+    "- EMERGENCY: สถานการณ์คับขันเป็นอันตรายถึงชีวิตตอนนี้ (กำลังจมน้ำ ไฟดูด ฯลฯ)\n"
+    "- SOS: ขอความช่วยเหลือกู้ภัยจากน้ำท่วม ต้องการให้ทีมไปช่วยเหลือ (ชีวิต/ความปลอดภัย)\n"
+    "- NEEDS: ขอความช่วยเหลือเรื่องสิ่งของ/เสบียง/ของบรรเทาทุกข์ (ไม่ใช่ขอกู้ภัยฉุกเฉิน)\n"
+    "- SNAKE_BITE: ถูกงูกัด\n"
+    "- ACCIDENT: อุบัติเหตุ บาดเจ็บ\n"
+    "- PREP_GUIDE: ถามวิธีเตรียมตัวรับมือน้ำท่วมล่วงหน้า\n"
+    "- GREETING: ทักทาย\n"
+    "- HELP: ถามว่าบอททำอะไรได้บ้าง/วิธีใช้งาน\n"
+    "- CONTACT: ขอเบอร์โทรฉุกเฉิน/หน่วยงาน\n"
+    "- SHELTER: ถามเกี่ยวกับศูนย์พักพิง/ที่อพยพ — ถ้าถามหาที่ใกล้ตัวเอง (แถวนี้ ใกล้ฉัน บ้านฉัน) "
+    "ให้ scope=NEARBY, ถ้าถามภาพรวม/ทั่วไป/จำนวน/ต่างจังหวัด-ต่างภาค ให้ scope=GENERAL\n"
+    "- WATER_LEVEL: ถามเกี่ยวกับระดับน้ำ — ถ้าถามระดับน้ำใกล้ตัวเอง (บ้าน แถวนี้ ตอนนี้ตรงนี้) "
+    "ให้ scope=NEARBY, ถ้าถามภาพรวมภูมิภาค/จังหวัด/ประเทศ/สถานการณ์ทั่วไปที่ไม่เจาะจงตัวผู้ใช้ ให้ scope=GENERAL\n"
+    "- WEATHER: ถามสภาพอากาศ/พยากรณ์อากาศ\n"
+    "- REGISTRATION: ต้องการลงทะเบียนข้อมูลส่วนตัว\n"
+    "- LANGUAGE: ต้องการเปลี่ยนภาษา\n"
+    "- CANCEL: ต้องการยกเลิก/หยุดขั้นตอนที่ทำอยู่\n"
+    "- FAQ: ถามข้อมูลข่าวสาร/สถานการณ์น้ำท่วมทั่วไปที่ต้องอาศัยข้อมูลล่าสุดจากอินเทอร์เน็ต\n"
+    "- AI_QUERY: คำถามทั่วไปเกี่ยวกับน้ำท่วม/ความปลอดภัย/สุขภาพกายใจจากภัยพิบัติที่ไม่เข้าเงื่อนไขข้างต้น "
+    "รวมถึงคำถามที่ไม่เกี่ยวข้องกับน้ำท่วม/ความปลอดภัยเลย (เช่น ขอเลขหวย แต่งกลอน สูตรอาหาร คำถามทั่วไปอื่นๆ) "
+    "ให้จัดเป็น AI_QUERY เสมอเช่นกัน (ระบบปลายทางจะปฏิเสธอย่างสุภาพเองตามขอบเขตที่กำหนดไว้)\n\n"
+    "สำหรับ intent ที่ไม่ใช่ SHELTER หรือ WATER_LEVEL ให้ใส่ scope เป็น \"NONE\" เสมอ\n"
+    "ตัวอย่าง: \"ภาคเหนือระดับน้ำเป็นอย่างไร\" -> WATER_LEVEL / GENERAL (เพราะถามภาพรวมภูมิภาค ไม่ใช่ใกล้ตัวผู้ใช้)\n"
+    "ตัวอย่าง: \"น้ำแถวบ้านผมเป็นไงบ้าง\" -> WATER_LEVEL / NEARBY (เพราะถามใกล้ตัวผู้ใช้)"
+)
+
+
+def classify_intent_ai(text: str) -> dict:
+    """
+    AI-based intent + scope classifier — this is what free-text (non-menu)
+    messages are routed through now, replacing keyword guessing. Returns
+    {"intent": str, "scope": "NEARBY"|"GENERAL"|"NONE", "confidence": float}.
+
+    Always falls back to the old rule-based IntentClassifier.classify() if
+    Gemini is unavailable, errors out, or returns something that can't be
+    parsed as valid JSON/intent — so the bot never gets stuck without an
+    intent just because the AI call had a hiccup.
+    """
+    fallback_intent, fallback_conf = IntentClassifier.classify(text)
+    fallback = {"intent": fallback_intent, "scope": "GENERAL", "confidence": fallback_conf}
+
+    if not text or not text.strip():
+        return fallback
+
+    if not init_gemini():
+        return fallback
+
+    cache_key = f"intent_ai:{hashlib.md5(text.strip().encode()).hexdigest()}"
+    cached = cache.general.get(cache_key)
+    if cached:
+        return cached
+
+    start_time = time.time()
+    try:
+        response = gemini_model.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=f"ข้อความผู้ใช้: {text.strip()}",
+            config=genai_types.GenerateContentConfig(
+                system_instruction=INTENT_AI_SYSTEM_INSTRUCTION,
+                max_output_tokens=200,
+                temperature=0.0,
+                response_mime_type="application/json",
+            ),
+        )
+        raw = (response.text or "").strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(raw)
+
+        intent = str(parsed.get("intent", "")).strip().upper()
+        scope = str(parsed.get("scope", "GENERAL")).strip().upper()
+        confidence = float(parsed.get("confidence", 0.7))
+
+        if intent not in set(INTENT_LIST_AI):
+            Logger.info("IntentAI", f"Unknown intent '{intent}' returned by AI — using keyword fallback")
+            return fallback
+        if scope not in ("NEARBY", "GENERAL", "NONE"):
+            scope = "GENERAL"
+
+        result = {"intent": intent, "scope": scope, "confidence": confidence}
+        cache.general.set(cache_key, result, ttl=120)
+
+        elapsed = (time.time() - start_time) * 1000
+        Logger.perf("IntentAI", "classify", elapsed, {"intent": intent, "scope": scope})
+        return result
+    except Exception as e:
+        Logger.error("IntentAI", f"Classification failed, using keyword fallback: {e}")
+        return fallback
+
+
+def compose_water_level_reply(user_question: str, stations: list) -> str:
+    """
+    Turns already-computed nearest-station data (distance, level, situation —
+    all calculated in app.py using the existing Google Sheets lookup, never
+    by the AI) into a short, natural conversational Thai reply. Used only for
+    the AI-intent path; the Rich-Menu path keeps using
+    build_water_level_flex_message for its card UI, unchanged.
+    """
+    if not stations:
+        return (
+            "ตอนนี้ยังไม่พบสถานีวัดระดับน้ำในระบบที่อยู่ใกล้ตำแหน่งของคุณครับ "
+            f"ลองดูแผนที่ระดับน้ำทั้งประเทศเพิ่มเติมได้ที่ {WATER_LEVEL_SOURCE_URL} ครับ"
+        )
+
+    lines = []
+    for st in stations:
+        wl = st.get("water_level", {}).get("value", "-")
+        lines.append(
+            f"- {st.get('stationName', 'ไม่ระบุ')} (ห่างประมาณ {st.get('distance_km', 0):.1f} กม.): "
+            f"ระดับน้ำ {wl} ม., สถานการณ์ {st.get('situation', 'ปกติ')}, แนวโน้ม {st.get('trend', 'คงที่')}"
+        )
+    data_block = "\n".join(lines)
+
+    prompt = (
+        f'ผู้ใช้ถามว่า: "{user_question}"\n\n'
+        "นี่คือข้อมูลสถานีวัดระดับน้ำที่ใกล้ตำแหน่งผู้ใช้ที่สุด (ระยะทางและตัวเลขคำนวณมาให้แล้ว "
+        "ห้ามคำนวณ ห้ามเดา หรือแก้ไขตัวเลขใดๆ เพิ่มเอง ใช้ตามที่ให้มาเท่านั้น):\n\n"
+        f"{data_block}\n\n"
+        "จงเรียบเรียงข้อมูลนี้เป็นคำตอบสนทนาภาษาไทยที่เป็นธรรมชาติ กระชับ ไม่เกิน 4-5 บรรทัด "
+        "บอกสถานีที่ใกล้ที่สุดก่อน แล้วเสริมสถานีถัดไปถ้าจำเป็น ห้ามใช้เครื่องหมายดอกจัน "
+        "ถ้าพบว่าระดับน้ำอยู่ในสถานการณ์วิกฤตหรือเกินตลิ่ง ให้เตือนให้ระวังและแนะนำให้ติดตามสถานการณ์ใกล้ชิดด้วย"
+    )
+    return ask_gemini(prompt, max_tokens=1024)
+
+
+def compose_shelter_reply(user_question: str, shelters: list) -> str:
+    """
+    Same idea as compose_water_level_reply, but for nearest-shelter data from
+    find_nearest_shelters() (distance/capacity/status all pre-computed).
+    """
+    if not shelters:
+        return (
+            "ขออภัยครับ ตอนนี้ยังไม่พบศูนย์พักพิงในระบบที่อยู่ใกล้ตำแหน่งของคุณ "
+            "เพื่อความปลอดภัย รบกวนติดต่อสายด่วน ปภ. 1784 เพื่อสอบถามจุดอพยพที่ใกล้ที่สุดในพื้นที่ได้เลยครับ"
+        )
+
+    lines = []
+    for s in shelters:
+        lines.append(
+            f"- {s.get('Name', 'ไม่ระบุชื่อ')} ({s.get('District', '')} {s.get('Province', '')}) "
+            f"ห่างประมาณ {s.get('distance_km', 0):.1f} กม., สถานะ {s.get('Status', 'เปิดรับ')}, "
+            f"รองรับได้ {s.get('Occupancy', 0)}/{s.get('Capacity', 0)} คน"
+        )
+    data_block = "\n".join(lines)
+
+    prompt = (
+        f'ผู้ใช้ถามว่า: "{user_question}"\n\n'
+        "นี่คือข้อมูลศูนย์พักพิงที่ใกล้ตำแหน่งผู้ใช้ที่สุด (ระยะทางและข้อมูลคำนวณมาให้แล้ว "
+        "ห้ามเดาหรือแก้ไขตัวเลขใดๆ เพิ่มเอง ใช้ตามที่ให้มาเท่านั้น):\n\n"
+        f"{data_block}\n\n"
+        "จงเรียบเรียงข้อมูลนี้เป็นคำตอบสนทนาภาษาไทยที่เป็นธรรมชาติ กระชับ ไม่เกิน 4-5 บรรทัด "
+        "บอกศูนย์ที่ใกล้ที่สุดก่อน ถ้าศูนย์ที่ใกล้ที่สุดมีสถานะ 'เต็ม' ให้แนะนำศูนย์ถัดไปที่ยังเปิดรับแทน "
+        "ห้ามใช้เครื่องหมายดอกจัน"
+    )
+    return ask_gemini(prompt, max_tokens=1024)
 
 
 # =============================================================================
@@ -1682,68 +1874,6 @@ def show_loading_animation(user_id: str, loading_seconds: int = 30) -> bool:
 # =============================================================================
 # SECTION 12: FLEX MESSAGE BUILDERS (Exact match for specified features)
 # =============================================================================
-
-def build_sos_form_flex(user_name="คุณ", lang="TH"):
-    liff_url = SOS_LIFF_URL or "https://liff.line.me/"
-    return FlexSendMessage(
-        alt_text="🚨 แจ้งเหตุฉุกเฉิน SOS",
-        contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#C2452F")),
-            header=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text="🚨 แจ้งเหตุฉุกเฉิน SOS", weight="bold", size="lg", color="#FFFFFF", align="center")]
-            ),
-            body=BoxComponent(
-                layout="vertical",
-                spacing="md",
-                contents=[
-                    TextComponent(text=f"สวัสดีครับ คุณ{user_name}", size="sm", color="#374151"),
-                    TextComponent(text="กรุณากรอกข้อมูลเพื่อส่งตำแหน่งและรายละเอียดให้ทีมกู้ภัยช่วยเหลือทันที", size="xs", color="#6B7280", wrap=True),
-                    SeparatorComponent(margin="md"),
-                    ButtonComponent(
-                        action=URIAction(label="📋 เปิดแบบฟอร์ม SOS", uri=liff_url),
-                        style="primary", color="#C2452F", height="lg"
-                    )
-                ]
-            ),
-            footer=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text="ข้อมูลจะถูกส่งไปยังทีมกู้ภัยทันทีเพื่อความช่วยเหลืออย่างเร่งด่วน", size="xxs", color="#9CA3AF", align="center")]
-            )
-        )
-    )
-
-
-def build_need_form_flex(user_name="คุณ", lang="TH"):
-    liff_url = NEED_LIFF_URL or "https://liff.line.me/"
-    return FlexSendMessage(
-        alt_text="📦 แจ้งความต้องการสิ่งของ",
-        contents=BubbleContainer(
-            styles=BubbleStyle(header=BlockStyle(background_color="#2F6F8F")),
-            header=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text="📦 ขอความช่วยเหลือเรื่องสิ่งของ", weight="bold", size="lg", color="#FFFFFF", align="center")]
-            ),
-            body=BoxComponent(
-                layout="vertical",
-                spacing="md",
-                contents=[
-                    TextComponent(text=f"สวัสดีครับ คุณ{user_name}", size="sm", color="#374151"),
-                    TextComponent(text="กรุณากรอกประเภทสิ่งของที่ท่านขาดแคลนเพื่อให้อาสาสมัครจัดเตรียมสิ่งของช่วยเหลือได้ถูกต้อง", size="xs", color="#6B7280", wrap=True),
-                    SeparatorComponent(margin="md"),
-                    ButtonComponent(
-                        action=URIAction(label="📋 ขอความช่วยเหลือเรื่องสิ่งของ", uri=liff_url),
-                        style="primary", color="#2F6F8F", height="lg"
-                    )
-                ]
-            ),
-            footer=BoxComponent(
-                layout="vertical",
-                contents=[TextComponent(text="ข้อมูลจะอัปเดตตรงไปยังระบบฐานข้อมูลอาสาสมัครจัดส่ง", size="xxs", color="#9CA3AF", align="center")]
-            )
-        )
-    )
-
 
 def build_register_form_flex(user_name="คุณ", lang="TH"):
     liff_url = REGISTER_LIFF_URL or "https://liff.line.me/"
