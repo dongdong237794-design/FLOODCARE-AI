@@ -78,6 +78,36 @@ from linebot.models import (
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY or os.urandom(32)
 
+def _get_display_name(user_id: str) -> str:
+    """
+    Resolves the name to greet a user by:
+    1. If they've registered (has a row in the 'users' sheet), use their
+       registered first_name (+ last_name if present) — this is the name
+       they gave us on purpose, so it takes priority.
+    2. Otherwise, fall back to their LINE display name via get_profile().
+    3. If both are unavailable (e.g. LINE API error, blocked bot), fall
+       back to the generic "คุณ" as a last resort so the bot never breaks.
+    """
+    try:
+        user_record = sheets_mgr.get_user_record(user_id)
+        if user_record:
+            first_name = str(user_record.get("first_name", "")).strip()
+            last_name = str(user_record.get("last_name", "")).strip()
+            full_name = f"{first_name} {last_name}".strip()
+            if full_name:
+                return full_name
+    except Exception as e:
+        Logger.error("DisplayName", f"users sheet lookup failed: {e}")
+
+    try:
+        profile = line_bot_api.get_profile(user_id)
+        if profile and profile.display_name:
+            return profile.display_name
+    except Exception as e:
+        Logger.error("DisplayName", f"get_profile failed: {e}")
+
+    return "คุณ"
+
 # Exact-match whitelist used to detect Rich Menu taps, Quick Reply buttons,
 # and literal typed commands (e.g. "สภาพอากาศ", "ศูนย์พักพิง") — these bypass
 # AI intent analysis entirely and keep using the old deterministic
@@ -271,9 +301,10 @@ def handle_follow(event):
     user_id = event.source.user_id
     try:
         already_registered = bool(sheets_mgr.get_user_record(user_id))
-        messages = [get_greeting_message("คุณ")]
+        display_name = _get_display_name(user_id)
+        messages = [get_greeting_message(display_name)]
         if not already_registered:
-            messages.append(build_register_form_flex("คุณ"))
+            messages.append(build_register_form_flex(display_name))
         line_bot_api.reply_message(event.reply_token, messages)
     except Exception as e:
         Logger.error("Follow", f"Welcome message failed: {e}")
@@ -359,6 +390,11 @@ def handle_text_message(event):
         line_bot_api.reply_message(event.reply_token, build_snake_bite_flex())
         return
 
+    # ACCIDENT (อุบัติเหตุ/บาดเจ็บทั่วไป เช่น ขาหัก แขนหัก รถชน — ไม่ใช่เหตุน้ำท่วมโดยตรง)
+    if intent == "ACCIDENT":
+        _handle_ai_query(event, user_id, user_text, timestamp)
+        return
+
     # PREP GUIDE (วิธีเตรียมตัวก่อนน้ำท่วม)
     if intent == "PREP_GUIDE":
         _handle_prep_guide_request(event, user_id)
@@ -372,7 +408,7 @@ def handle_text_message(event):
     
     # GREETING
     if intent == "GREETING":
-        greeting_msg = get_greeting_message("คุณ")
+        greeting_msg = get_greeting_message(_get_display_name(user_id))
         line_bot_api.reply_message(event.reply_token, greeting_msg)
         return
 
