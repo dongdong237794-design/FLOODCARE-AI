@@ -441,15 +441,18 @@ class IntentClassifier:
         ],
         "SHELTER": [
             "ศูนย์พักพิง", "ที่พัก", "อพยพ", "หลบภัย", "หลบน้ำ", "ที่พักชั่วคราว", 
-            "evacuation center", "shelter", "ไปไหนดี", "พักที่ไหน", "ห้างน้ำท่วม"
+            "evacuation center", "shelter", "ไปไหนดี", "พักที่ไหน", "ห้างน้ำท่วม",
+            "ค้นหาศูนย์พักพิง", "ตรวจสอบศูนย์พักพิง", "หาศูนย์พักพิง"
         ],
         "WATER_LEVEL": [
             "ระดับน้ำ", "น้ำสูง", "เช็คน้ำ", "ตรวจน้ำ", "water level", 
-            "flood level", "น้ำขึ้น", "น้ำลด", "สถานการณ์น้ำ", "check water"
+            "flood level", "น้ำขึ้น", "น้ำลด", "สถานการณ์น้ำ", "check water",
+            "ตรวจสอบระดับน้ำ", "เช็คระดับน้ำ", "เช็กระดับน้ำ"
         ],
         "WEATHER": [
             "สภาพอากาศ", "พยากรณ์อากาศ", "ฝนตก", "ฝน", "อากาศ", "weather", 
-            "forecast", "rain", " raining", "จะฝนตกไหม", "เช็คฝน", "check weather"
+            "forecast", "rain", " raining", "จะฝนตกไหม", "เช็คฝน", "check weather",
+            "ตรวจสอบสภาพอากาศ", "เช็คสภาพอากาศ", "เช็กสภาพอากาศ"
         ],
         "CONTACT": [
             "เบอร์โทร", "โทรศัพท์", "ติดต่อ", "สายด่วน", "hotline", "phone", 
@@ -558,7 +561,9 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "- GREETING: ทักทาย\n"
     "- HELP: ถามว่าบอททำอะไรได้บ้าง/วิธีใช้งาน\n"
     "- CONTACT: ขอเบอร์โทรฉุกเฉิน/หน่วยงาน\n"
-    "- SHELTER: ถามเกี่ยวกับศูนย์พักพิง/ที่อพยพ — ถ้าถามหาที่ใกล้ตัวเอง (แถวนี้ ใกล้ฉัน บ้านฉัน) "
+    "- SHELTER: ถามเกี่ยวกับศูนย์พักพิง/ที่อพยพ/ที่ควรไปหลบภัย รวมถึงคำถามที่ไม่ได้พูดคำว่า 'ศูนย์พักพิง' ตรงๆ "
+    "แต่ความหมายคือต้องการรู้ว่าตนเอง ณ ตอนนี้ควรไปที่ไหน/อพยพไปทางไหน (เช่น \"ตอนนี้ผมควรอพยพไปที่ไหน\", "
+    "\"ควรไปหลบที่ไหนดี\") ให้ถือเป็น SHELTER เช่นกัน — ถ้าถามหาที่ใกล้ตัวเอง (แถวนี้ ใกล้ฉัน บ้านฉัน ตอนนี้) "
     "ให้ scope=NEARBY, ถ้าถามภาพรวม/ทั่วไป/จำนวน/ต่างจังหวัด-ต่างภาค ให้ scope=GENERAL\n"
     "- WATER_LEVEL: ถามเกี่ยวกับระดับน้ำ — ถ้าถามระดับน้ำใกล้ตัวเอง (บ้าน แถวนี้ ตอนนี้ตรงนี้) "
     "ให้ scope=NEARBY, ถ้าถามภาพรวมภูมิภาค/จังหวัด/ประเทศ/สถานการณ์ทั่วไปที่ไม่เจาะจงตัวผู้ใช้ ให้ scope=GENERAL\n"
@@ -572,7 +577,8 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "ให้จัดเป็น AI_QUERY เสมอเช่นกัน (ระบบปลายทางจะปฏิเสธอย่างสุภาพเองตามขอบเขตที่กำหนดไว้)\n\n"
     "สำหรับ intent ที่ไม่ใช่ SHELTER หรือ WATER_LEVEL ให้ใส่ scope เป็น \"NONE\" เสมอ\n"
     "ตัวอย่าง: \"ภาคเหนือระดับน้ำเป็นอย่างไร\" -> WATER_LEVEL / GENERAL (เพราะถามภาพรวมภูมิภาค ไม่ใช่ใกล้ตัวผู้ใช้)\n"
-    "ตัวอย่าง: \"น้ำแถวบ้านผมเป็นไงบ้าง\" -> WATER_LEVEL / NEARBY (เพราะถามใกล้ตัวผู้ใช้)"
+    "ตัวอย่าง: \"น้ำแถวบ้านผมเป็นไงบ้าง\" -> WATER_LEVEL / NEARBY (เพราะถามใกล้ตัวผู้ใช้)\n"
+    "ตัวอย่าง: \"ตอนนี้ผมควรอพยพไปที่ไหน\" -> SHELTER / NEARBY (แม้ไม่มีคำว่าศูนย์พักพิง แต่ความหมายคือถามหาที่ปลอดภัยใกล้ตัวตอนนี้)"
 )
 
 
@@ -638,6 +644,20 @@ def classify_intent_ai(text: str) -> dict:
         return fallback
 
 
+NEARBY_DATA_REPLY_SYSTEM_INSTRUCTION = (
+    "คุณคือ FLOODCARE AI ผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินในประเทศไทย\n"
+    "บุคลิกภาพ: สุภาพ มืออาชีพ อบอุ่น เป็นธรรมชาติเหมือนคุยกับคนจริง\n"
+    "ใช้สรรพนามแทนตนเองว่า 'ผม' หรือ 'น้องบอท' ห้ามใช้คำว่า 'ฉัน' และห้ามใช้อีโมจิเด็ดขาด\n\n"
+    "หน้าที่ของคุณตอนนี้คือนำข้อมูลดิบ (ชื่อสถานี/ศูนย์, ระยะทาง, ค่าตัวเลข, สถานะ) ที่ผู้ใช้ส่งมาให้ "
+    "มาเรียบเรียงเป็นคำตอบสนทนา 'แบบร้อยแก้วต่อเนื่อง' ไม่ใช่รายการข้อ ๆ (ห้ามขึ้นต้นด้วยเลข 1. 2. 3. "
+    "และห้ามใช้เครื่องหมายดอกจันเด็ดขาด)\n\n"
+    "กฎสำคัญที่สุด: ต้องใส่ 'ตัวเลข/สถานะที่ผู้ใช้ให้มาทุกตัว' ลงในคำตอบให้ครบ ห้ามตัดข้อมูลตัวเลขทิ้งเพื่อให้สั้น "
+    "(เช่น ระยะทาง กม., ระดับน้ำ ม., สถานะศูนย์พักพิง, ความจุ) เพราะเป็นข้อมูลที่ผู้ใช้ต้องการที่สุด "
+    "แต่ให้เรียบเรียงเป็นประโยคสนทนาไม่เกิน 4-5 บรรทัด ไม่ใช่ตาราง\n"
+    "หากสถานการณ์ดูอันตราย (น้ำวิกฤต/เกินตลิ่ง/ศูนย์เต็ม) ให้เตือนและแนะนำขั้นตอนถัดไปสั้นๆ ต่อท้าย"
+)
+
+
 def compose_water_level_reply(user_question: str, stations: list) -> str:
     """
     Turns already-computed nearest-station data (distance, level, situation —
@@ -670,7 +690,7 @@ def compose_water_level_reply(user_question: str, stations: list) -> str:
         "บอกสถานีที่ใกล้ที่สุดก่อน แล้วเสริมสถานีถัดไปถ้าจำเป็น ห้ามใช้เครื่องหมายดอกจัน "
         "ถ้าพบว่าระดับน้ำอยู่ในสถานการณ์วิกฤตหรือเกินตลิ่ง ให้เตือนให้ระวังและแนะนำให้ติดตามสถานการณ์ใกล้ชิดด้วย"
     )
-    return ask_gemini(prompt, max_tokens=1024)
+    return ask_gemini(prompt, max_tokens=1024, system_instruction=NEARBY_DATA_REPLY_SYSTEM_INSTRUCTION)
 
 
 def compose_shelter_reply(user_question: str, shelters: list) -> str:
@@ -702,7 +722,7 @@ def compose_shelter_reply(user_question: str, shelters: list) -> str:
         "บอกศูนย์ที่ใกล้ที่สุดก่อน ถ้าศูนย์ที่ใกล้ที่สุดมีสถานะ 'เต็ม' ให้แนะนำศูนย์ถัดไปที่ยังเปิดรับแทน "
         "ห้ามใช้เครื่องหมายดอกจัน"
     )
-    return ask_gemini(prompt, max_tokens=1024)
+    return ask_gemini(prompt, max_tokens=1024, system_instruction=NEARBY_DATA_REPLY_SYSTEM_INSTRUCTION)
 
 
 # =============================================================================
@@ -830,16 +850,22 @@ def init_gemini():
         return False
 
 
-def ask_gemini(prompt: str, max_tokens: int = 8192) -> str:
+def ask_gemini(prompt: str, max_tokens: int = 8192, system_instruction: str = None) -> str:
     """
     Optimized Gemini API call.
     - Uses full token capacity (8192) to avoid truncation issues.
+    - system_instruction defaults to FLOODCARE_SYSTEM_INSTRUCTION (the usual
+      bulleted-list persona) but callers that need a different reply shape
+      (e.g. a natural one-paragraph conversational answer, like
+      compose_water_level_reply) can pass their own instead.
     """
     start_time = time.time()
     if not init_gemini():
         return "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
     
-    cache_key = f"gemini:{hashlib.md5(prompt.encode()).hexdigest()}"
+    effective_system_instruction = system_instruction or FLOODCARE_SYSTEM_INSTRUCTION
+
+    cache_key = f"gemini:{hashlib.md5((effective_system_instruction + '|' + prompt).encode()).hexdigest()}"
     cached = cache.general.get(cache_key)
     if cached:
         elapsed = (time.time() - start_time) * 1000
@@ -851,7 +877,7 @@ def ask_gemini(prompt: str, max_tokens: int = 8192) -> str:
             model="gemini-2.5-flash",
             contents=prompt,
             config=genai_types.GenerateContentConfig(
-                system_instruction=FLOODCARE_SYSTEM_INSTRUCTION,
+                system_instruction=effective_system_instruction,
                 max_output_tokens=max_tokens,
                 temperature=0.3,
                 safety_settings=[
@@ -872,6 +898,8 @@ def ask_gemini(prompt: str, max_tokens: int = 8192) -> str:
         elapsed = (time.time() - start_time) * 1000
         Logger.error("Gemini", f"API error: {e}", {"elapsed_ms": round(elapsed, 1)})
         return "⚠️ ขออภัยครับ ระบบ AI ขัดข้องชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
+
+
 
 
 def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
