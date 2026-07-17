@@ -44,7 +44,7 @@ from bot_config import (
     build_language_selector_flex, build_water_level_flex_message,
     build_register_form_flex, build_snake_bite_flex, build_help_flex,
     build_weather_flex, build_faq_response_flex,
-    build_shelter_flex_message, build_prep_guide_flex,
+    build_shelter_flex_message, build_prep_guide_flex, build_accident_flex_message,
     # Shelter data
     find_nearest_shelters,
     # Response handlers
@@ -392,7 +392,7 @@ def handle_text_message(event):
 
     # ACCIDENT (อุบัติเหตุ/บาดเจ็บทั่วไป เช่น ขาหัก แขนหัก รถชน — ไม่ใช่เหตุน้ำท่วมโดยตรง)
     if intent == "ACCIDENT":
-        _handle_ai_query(event, user_id, user_text, timestamp)
+        line_bot_api.reply_message(event.reply_token, build_accident_flex_message())
         return
 
     # PREP GUIDE (วิธีเตรียมตัวก่อนน้ำท่วม)
@@ -770,11 +770,18 @@ def _process_shelter_search(event, lat, lon, user_id):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
-    flex_msg = build_shelter_flex_message(lat, lon, shelters)
+    try:
+        flex_msg = build_shelter_flex_message(lat, lon, shelters)
+        line_bot_api.reply_message(event.reply_token, flex_msg)
+    except Exception as e:
+        Logger.error("Shelter", f"Flex failed: {e}")
+        lines = ["ศูนย์พักพิงใกล้คุณ:\n"]
+        for sh in shelters:
+            lines.append(f"• {sh.get('Name', 'ไม่ระบุชื่อ')} (ห่าง {sh.get('distance_km', 0):.1f} กม.) — {sh.get('Status', 'เปิดรับ')}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="\n".join(lines)))
 
     session.reset()
     update_legacy_state(user_id, "IDLE", {})
-    line_bot_api.reply_message(event.reply_token, flex_msg)
 
 
 def _build_nearest_water_stations(lat, lon, limit=3):
