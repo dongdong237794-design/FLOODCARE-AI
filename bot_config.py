@@ -2313,9 +2313,13 @@ def _pill_badge(label: str, bg: str, text_color: str):
     Small fully-rounded status chip (e.g. ปกติ / เฝ้าระวัง / เต็มแล้ว) — a real
     pill shape via a BoxComponent with a large corner_radius, since LINE's
     native ButtonComponent can't be shaped into a pill.
+    flex=0 is required here: without it, LINE Flex gives this box an equal
+    1:1 share of the row alongside the label next to it, which is what made
+    the badge stretch to ~half the card width in testing.
     """
     return BoxComponent(
         layout="vertical",
+        flex=0,
         background_color=bg,
         corner_radius="12px",
         padding_start="10px", padding_end="10px", padding_top="4px", padding_bottom="4px",
@@ -2324,9 +2328,10 @@ def _pill_badge(label: str, bg: str, text_color: str):
 
 
 def _pill_button(label: str, action, bg="#0F172A", text_color="#FFFFFF"):
-    """Fully-rounded pill action button (BoxComponent + action, tappable)."""
+    """Fully-rounded pill action button (BoxComponent + action, tappable). flex=0 for the same reason as _pill_badge."""
     return BoxComponent(
         layout="vertical",
+        flex=0,
         background_color=bg,
         corner_radius="20px",
         padding_top="10px", padding_bottom="10px", padding_start="18px", padding_end="18px",
@@ -2337,8 +2342,35 @@ def _pill_button(label: str, action, bg="#0F172A", text_color="#FFFFFF"):
 
 
 def _dashed_rule():
-    """Fakes a dashed divider — LINE's SeparatorComponent only supports solid lines."""
-    return TextComponent(text="┈" * 46, size="xs", color="#E2E5E9", margin="md", wrap=False)
+    """
+    Divider between the header info and the key numbers. Previously faked a
+    dashed line with repeated '┈' characters, but that overflowed the card
+    width and LINE rendered it as a truncated '...' in testing. A native
+    SeparatorComponent is a solid line instead of dashed, but it's reliable
+    and never truncates.
+    """
+    return SeparatorComponent(margin="md", color="#EDEFF2")
+
+
+def _facility_mark(present: bool):
+    """
+    Small checkmark/dash for a shelter amenity (เตียง/ห้องน้ำ/ที่จอดรถ). The
+    'Shelters' sheet currently only tracks whether an amenity exists, not a
+    count, so this renders a simple ✓ / — instead of a fabricated number.
+    """
+    return TextComponent(
+        text="✓" if present else "—",
+        size="md", weight="bold",
+        color="#15803D" if present else "#D1D5DB",
+        margin="xs", align="center"
+    )
+
+
+def _has_facility(value) -> bool:
+    """Interprets a shelter facility sheet cell (checkbox-style: TRUE/มี/1/etc.) as present or absent."""
+    if value in (None, ""):
+        return False
+    return str(value).strip().lower() in ("true", "1", "y", "yes", "มี", "✓")
 
 
 _WATER_SEVERITY_COLORS = {
@@ -2442,7 +2474,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                                 TextComponent(text="ระดับน้ำปัจจุบัน", size="xs", color="#9CA3AF"),
                                 TextComponent(
                                     text=f"{wl_val} ม." if wl_val != "-" else "ไม่มีข้อมูล",
-                                    size="xxl", weight="bold", color="#111827", margin="xs"
+                                    size="xl", weight="bold", color="#111827", margin="xs", wrap=True
                                 ),
                             ]
                         ),
@@ -2544,7 +2576,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                                 TextComponent(text="จำนวนที่ว่าง", size="xs", color="#9CA3AF"),
                                 TextComponent(
                                     text=f"{remaining}/{capacity} ที่" if remaining is not None else "ไม่ระบุ",
-                                    size="xxl", weight="bold", color="#111827", margin="xs"
+                                    size="xl", weight="bold", color="#111827", margin="xs", wrap=True
                                 ),
                             ]
                         ),
@@ -2557,16 +2589,16 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                     spacing="md",
                     contents=[
                         BoxComponent(layout="vertical", flex=1, contents=[
-                            TextComponent(text="เตียง", size="xxs", color="#9CA3AF"),
-                            TextComponent(text=str(sh.get("Beds", "-")), size="sm", weight="bold", color="#111827", margin="xs"),
+                            TextComponent(text="เตียง", size="xxs", color="#9CA3AF", align="center"),
+                            _facility_mark(_has_facility(sh.get("Beds"))),
                         ]),
                         BoxComponent(layout="vertical", flex=1, contents=[
-                            TextComponent(text="ห้องน้ำ", size="xxs", color="#9CA3AF"),
-                            TextComponent(text=str(sh.get("Toilets", "-")), size="sm", weight="bold", color="#111827", margin="xs"),
+                            TextComponent(text="ห้องน้ำ", size="xxs", color="#9CA3AF", align="center"),
+                            _facility_mark(_has_facility(sh.get("Toilets"))),
                         ]),
                         BoxComponent(layout="vertical", flex=1, contents=[
-                            TextComponent(text="ที่จอดรถ", size="xxs", color="#9CA3AF"),
-                            TextComponent(text=str(sh.get("Parking", "-")), size="sm", weight="bold", color="#111827", margin="xs"),
+                            TextComponent(text="ที่จอดรถ", size="xxs", color="#9CA3AF", align="center"),
+                            _facility_mark(_has_facility(sh.get("Parking"))),
                         ]),
                     ]
                 ),
