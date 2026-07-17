@@ -52,7 +52,7 @@ except ImportError:
 try:
     from linebot import LineBotApi, WebhookHandler
     from linebot.models import (
-        FlexSendMessage, BubbleContainer, BoxComponent, TextComponent,
+        FlexSendMessage, BubbleContainer, CarouselContainer, BoxComponent, TextComponent,
         SeparatorComponent, ButtonComponent, URIAction, TextSendMessage,
         LocationAction, MessageAction, BubbleStyle, BlockStyle, ImageComponent
     )
@@ -1463,10 +1463,10 @@ sheets_mgr = SheetsManager()
 # =============================================================================
 
 SHELTER_STATUS_MAP = {
-    "เปิดรับ": {"label": "🟢 เปิดรับ", "bg": "#DCFCE7", "text": "#15803D"},
-    "ใกล้เต็ม": {"label": "🟡 ใกล้เต็ม", "bg": "#FEF9C3", "text": "#A16207"},
-    "เต็ม": {"label": "🔴 เต็มแล้ว", "bg": "#FEE2E2", "text": "#B91C1C"},
-    "ปิด": {"label": "⚫ ปิดชั่วคราว", "bg": "#E5E7EB", "text": "#374151"},
+    "เปิดรับ": {"label": "เปิดรับ", "bg": "#DCFCE7", "text": "#15803D"},
+    "ใกล้เต็ม": {"label": "ใกล้เต็ม", "bg": "#FEF9C3", "text": "#A16207"},
+    "เต็ม": {"label": "เต็มแล้ว", "bg": "#FEE2E2", "text": "#B91C1C"},
+    "ปิด": {"label": "ปิดชั่วคราว", "bg": "#E5E7EB", "text": "#374151"},
 }
 
 
@@ -2294,221 +2294,6 @@ def build_weather_flex(lat, lon, weather_data: dict, timestamp: str, lang="TH"):
     )
 
 
-def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang="TH"):
-    """
-    Minimal water-level report card.
-    Each station is rendered as a soft, self-contained stat card:
-    name + status pill on one row, then a clean 3-column stat grid
-    (ระดับน้ำ / ระดับตลิ่ง / ต่างจากตลิ่ง) — no clutter, no extra dividers.
-    """
-    header = BoxComponent(
-        layout="vertical",
-        spacing="xs",
-        contents=[
-            TextComponent(text="รายงานระดับน้ำ", weight="bold", size="lg", color="#1F2937"),
-            _icon_text("icon_pin.jpg", f"พิกัด : {user_lat:.4f}, {user_lon:.4f}"),
-            _icon_text("icon_clock.jpg", f"เวลา: {timestamp}"),
-        ]
-    )
-
-    stations_box = BoxComponent(layout="vertical", spacing="md", margin="lg", contents=[])
-
-    is_critical_any = False
-    if not stations:
-        stations_box.contents.append(
-            TextComponent(text="ไม่พบสถานีวัดระดับน้ำในพื้นที่ใกล้เคียง", size="sm", color="#EF4444", align="center")
-        )
-    else:
-        def _stat_cell(label: str, value: str, value_color: str = "#111827"):
-            return BoxComponent(
-                layout="vertical",
-                flex=1,
-                spacing="xs",
-                contents=[
-                    TextComponent(text=label, size="xxs", color="#9CA3AF", align="center"),
-                    TextComponent(text=value, size="sm", weight="bold", color=value_color, wrap=True, align="center"),
-                ]
-            )
-
-        for st in stations:
-            wl = st.get("water_level")
-            dist = st.get("distance_km", 0)
-            wl_val = "-"
-            assessment = assess_water_level_status(None)
-
-            if wl and wl.get("value") not in [None, "-", ""]:
-                try:
-                    wl_val = float(wl["value"])
-                    bl = st.get("bank_level")
-                    situation = st.get("situation")
-                    assessment = assess_water_level_status(wl_val, bl, situation)
-                except (ValueError, TypeError):
-                    pass
-
-            bl_val = st.get("bank_level", "-")
-            lbl_pill = assessment.get("label_pill", "ปกติ")
-            if lbl_pill in ["ล้นตลิ่ง", "วิกฤต"]:
-                is_critical_any = True
-
-            # Safe parsing for diff calculation
-            diff_label = "ต่างจากตลิ่ง"
-            diff_text_formatted = "-"
-            diff_color = "#111827"
-            if wl_val != "-" and bl_val != "-":
-                try:
-                    wl_f = float(wl_val)
-                    bl_f = float(bl_val)
-                    diff_val = bl_f - wl_f
-                    if diff_val < 0:
-                        diff_text_formatted = f"สูงกว่า {abs(diff_val):.2f} ม."
-                        diff_color = "#DC2626"
-                    else:
-                        diff_text_formatted = f"ต่ำกว่า {diff_val:.2f} ม."
-                except Exception:
-                    pass
-
-            # Pick a themed illustration to match the station's context —
-            # bridge / city / village houses — same visual language as the
-            # reference template (small inline thumbnail, not a full hero).
-            name_l = st['stationName']
-            if "สะพาน" in name_l:
-                station_img = "water_bridge.jpg"
-            elif "เมือง" in name_l or "อำเภอเมือง" in name_l:
-                station_img = "water_city.jpg"
-            else:
-                station_img = "water_houses.jpg"
-            thumb_url = hero_image_url(station_img)
-
-            card_inner = BoxComponent(
-                layout="vertical",
-                flex=1,
-                spacing="sm",
-                contents=[
-                    # Row 1 — Station name
-                    TextComponent(text=st['stationName'], weight="bold", size="sm", color="#111827", wrap=True),
-                    # Row 2 — distance and status pill
-                    BoxComponent(
-                        layout="horizontal",
-                        spacing="sm",
-                        contents=[
-                            TextComponent(text=f"ห่าง {dist:.2f} กม.", size="xs", color="#6B7280", flex=1, gravity="center"),
-                            BoxComponent(
-                                layout="vertical",
-                                flex=0,
-                                gravity="center",
-                                background_color=assessment.get("bg", "#E5E7EB"),
-                                corner_radius="xxl",
-                                padding_start="md",
-                                padding_end="md",
-                                padding_top="xs",
-                                padding_bottom="xs",
-                                contents=[
-                                    TextComponent(
-                                        text=lbl_pill, size="xs",
-                                        color=assessment.get("text", "#1F2937"),
-                                        weight="bold", align="center"
-                                    )
-                                ]
-                            ),
-                        ]
-                    ),
-                    SeparatorComponent(margin="sm", color="#F3F4F6"),
-                    # Row 2 — Clean 3-column stat grid
-                    BoxComponent(
-                        layout="horizontal",
-                        spacing="md",
-                        margin="sm",
-                        contents=[
-                            _stat_cell("ระดับน้ำ", f"{wl_val} ม." if wl_val != "-" else "-"),
-                            _stat_cell("ระดับตลิ่ง", f"{bl_val} ม." if bl_val != "-" else "-"),
-                            _stat_cell(diff_label, diff_text_formatted, diff_color),
-                        ]
-                    ),
-                ]
-            )
-
-            card_contents = [card_inner]
-            if thumb_url:
-                card_contents = [
-                    BoxComponent(
-                        layout="horizontal",
-                        spacing="md",
-                        contents=[
-                            card_inner,
-                            ImageComponent(
-                                url=thumb_url,
-                                size="72px",
-                                flex=0,
-                                aspect_ratio="1:1",
-                                aspect_mode="cover",
-                                gravity="center",
-                            ),
-                        ]
-                    )
-                ]
-
-            card = BoxComponent(
-                layout="vertical",
-                spacing="sm",
-                padding_all="md",
-                contents=card_contents
-            )
-            stations_box.contents.append(card)
-
-    body_contents = [header]
-    if is_critical_any:
-        body_contents.append(
-            BoxComponent(
-                layout="vertical",
-                margin="md",
-                padding_all="md",
-                background_color="#FEF2F2",
-                corner_radius="md",
-                contents=[
-                    TextComponent(text="คำแนะนำความปลอดภัย", weight="bold", size="sm", color="#B91C1C"),
-                    TextComponent(text="1. ตัดกระแสไฟฟ้าในจุดที่น้ำท่วมถึง", size="xs", color="#B91C1C", margin="xs"),
-                    TextComponent(text="2. เคลื่อนย้ายคนและสิ่งของขึ้นที่สูง", size="xs", color="#B91C1C"),
-                    TextComponent(text="3. ติดตามสถานการณ์อย่างใกล้ชิด", size="xs", color="#B91C1C"),
-                    ButtonComponent(
-                        action=URIAction(label="โทรสายด่วน 1784", uri="tel:1784"),
-                        style="primary", color="#DC2626", height="sm", margin="md"
-                    )
-                ]
-            )
-        )
-    body_contents.append(stations_box)
-
-    bubble = BubbleContainer(
-        body=BoxComponent(
-            layout="vertical",
-            spacing="md",
-            contents=body_contents
-        ),
-        footer=BoxComponent(
-            layout="vertical",
-            spacing="sm",
-            padding_top="sm",
-            contents=[
-                ButtonComponent(
-                    action=URIAction(label="ดูข้อมูลเพิ่มเติมที่ ThaiWater", uri=WATER_LEVEL_SOURCE_URL),
-                    style="secondary",
-                    color="#F3F4F6",
-                    height="sm"
-                ),
-                TextComponent(
-                    text="สถาบันสารสนเทศทรัพยากรน้ำ (ThaiWater)",
-                    size="xxs",
-                    color="#9CA3AF",
-                    align="center",
-                    margin="xs",
-                    wrap=True
-                )
-            ]
-        )
-    )
-    return FlexSendMessage(alt_text="รายงานระดับน้ำ", contents=bubble)
-
-
 def _icon_text(icon_file: str, text: str, size="xs", color="#9CA3AF"):
     """Small inline icon image + caption text (replaces emoji in header meta rows)."""
     icon_url = hero_image_url(icon_file)
@@ -2523,156 +2308,285 @@ def _icon_text(icon_file: str, text: str, size="xs", color="#9CA3AF"):
     )
 
 
-def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
+def _pill_badge(label: str, bg: str, text_color: str):
     """
-    Minimalist Shelter (Evacuation Center) Report card.
-    Mirrors the water-level card's visual language (status pill + spacing).
+    Small fully-rounded status chip (e.g. ปกติ / เฝ้าระวัง / เต็มแล้ว) — a real
+    pill shape via a BoxComponent with a large corner_radius, since LINE's
+    native ButtonComponent can't be shaped into a pill.
     """
-    header = BoxComponent(
+    return BoxComponent(
         layout="vertical",
-        spacing="xs",
-        contents=[
-            TextComponent(text="ข้อมูลศูนย์พักพิง", weight="bold", size="lg", color="#1F2937"),
-            _icon_text("icon_pin.jpg", f"พิกัด : {user_lat:.4f}, {user_lon:.4f}"),
-            _icon_text("icon_clock.jpg", f"เวลา: {get_bangkok_time().strftime('%d %b %Y %H:%M')} น."),
-        ]
+        background_color=bg,
+        corner_radius="12px",
+        padding_start="10px", padding_end="10px", padding_top="4px", padding_bottom="4px",
+        contents=[TextComponent(text=label, size="xs", weight="bold", color=text_color, align="center")]
     )
 
-    shelters_box = BoxComponent(layout="vertical", spacing="xl", margin="lg", contents=[])
 
-    if not shelters:
-        shelters_box.contents.append(
-            TextComponent(text="ไม่พบข้อมูลศูนย์พักพิงในพื้นที่ใกล้เคียง", size="sm", color="#EF4444", align="center")
-        )
-    else:
-        for sh in shelters:
-            status_key = sh.get("Status", "เปิดรับ")
-            assessment = SHELTER_STATUS_MAP.get(status_key, SHELTER_STATUS_MAP["เปิดรับ"])
-            dist = sh.get("distance_km", 0)
-            capacity = sh.get("Capacity", 0)
-            occupancy = sh.get("Occupancy", 0)
-            remaining = max(capacity - occupancy, 0) if capacity else None
+def _pill_button(label: str, action, bg="#0F172A", text_color="#FFFFFF"):
+    """Fully-rounded pill action button (BoxComponent + action, tappable)."""
+    return BoxComponent(
+        layout="vertical",
+        background_color=bg,
+        corner_radius="20px",
+        padding_top="10px", padding_bottom="10px", padding_start="18px", padding_end="18px",
+        action=action,
+        gravity="center",
+        contents=[TextComponent(text=label, size="sm", weight="bold", color=text_color, align="center")]
+    )
 
-            capacity_text = (
-                f"ว่าง {remaining}/{capacity} ที่" if remaining is not None else "ไม่ระบุความจุ"
-            )
 
-            card = BoxComponent(
-                layout="vertical",
-                spacing="xs",
-                padding_all="md",
+def _dashed_rule():
+    """Fakes a dashed divider — LINE's SeparatorComponent only supports solid lines."""
+    return TextComponent(text="┈" * 46, size="xs", color="#E2E5E9", margin="md", wrap=False)
+
+
+_WATER_SEVERITY_COLORS = {
+    "น้อยวิกฤต": {"bg": "#FBD9B4", "text": "#9A5B12"},   # ส้มมินิมอล — น้ำแล้งวิกฤต (จากโทนทางการ #D67B27)
+    "น้อย":      {"bg": "#FEF3C7", "text": "#92400E"},   # เหลืองมินิมอล — น้ำน้อย (จากโทนทางการ #FFC000)
+    "ปกติ":      {"bg": "#A7F0D2", "text": "#047857"},   # เขียวมินิมอล — ปลอดภัย (จากโทนทางการ #00B050)
+    "มาก":       {"bg": "#DBEAFE", "text": "#1D4ED8"},   # ฟ้ามินิมอล — เฝ้าระวัง (จากโทนทางการ #0000FF)
+    "ล้นตลิ่ง":  {"bg": "#FBC7D4", "text": "#B91C1C"},   # แดงมินิมอล — วิกฤต (จากโทนทางการ #FF0000)
+}
+
+_SHELTER_SEVERITY_COLORS = {
+    "เปิดรับ":  {"bg": "#A7F0D2", "text": "#0F172A"},
+    "ใกล้เต็ม": {"bg": "#FDE68A", "text": "#0F172A"},
+    "เต็ม":     {"bg": "#FBC7D4", "text": "#0F172A"},
+    "ปิด":      {"bg": "#E5E7EB", "text": "#0F172A"},
+}
+
+
+def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang="TH"):
+    """
+    Ticket-card carousel — one swipeable card per station. Header color maps
+    to the real severity of that station (green=ปกติ, blue=น้อย, orange=น้อยวิกฤต,
+    yellow=มาก, pink=ล้นตลิ่ง), so color always carries meaning rather than
+    being decorative. Replaces the old single long vertical-list bubble.
+    """
+    if not stations:
+        bubble = BubbleContainer(
+            body=BoxComponent(
+                layout="vertical", padding_all="lg",
                 contents=[
-                    # Name
-                    TextComponent(text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold",
-                                size="sm", color="#111827", wrap=True),
-                    # Distance & Status Pill
-                    BoxComponent(
-                        layout="horizontal",
-                        spacing="sm",
-                        contents=[
-                            TextComponent(text=f"ห่าง {dist:.1f} กม.", size="xs", color="#6B7280", flex=1, gravity="center"),
-                            BoxComponent(
-                                layout="vertical",
-                                flex=0,
-                                gravity="center",
-                                background_color=assessment.get("bg", "#F0FDF4") if status_key == "เปิดรับ" else assessment.get("bg", "#FEF2F2"),
-                                corner_radius="xxl",
-                                padding_start="md",
-                                padding_end="md",
-                                padding_top="xs",
-                                padding_bottom="xs",
-                                contents=[
-                                    TextComponent(
-                                        text=assessment.get("label", status_key),
-                                        size="xs",
-                                        color=assessment.get("text", "#15803D") if status_key == "เปิดรับ" else assessment.get("text", "#B91C1C"),
-                                        weight="bold",
-                                        align="center"
-                                    )
-                                ]
-                            ),
-                        ]
-                    ),
+                    TextComponent(text="รายงานระดับน้ำ", weight="bold", size="lg", color="#111827"),
                     TextComponent(
-                        text=f"{sh.get('District', '')} {sh.get('Province', '')}".strip(),
-                        size="xs", color="#6B7280"
+                        text="ไม่พบสถานีวัดระดับน้ำในพื้นที่ใกล้เคียง",
+                        size="sm", color="#6B7280", margin="md", wrap=True
                     ),
-                    # Capacity Info
-                    TextComponent(
-                        text=capacity_text,
-                        size="xs",
-                        color="#4B5563",
-                        margin="xs",
-                        align="center"
-                    ),
-                    SeparatorComponent(margin="sm", color="#F3F4F6"),
-                    # Amenities Grid (Symmetrical 3-column)
-                    BoxComponent(
-                        layout="horizontal",
-                        spacing="md",
-                        margin="sm",
-                        contents=[
-                            BoxComponent(
-                                layout="vertical", flex=1, spacing="xs",
-                                contents=[
-                                    TextComponent(text="เตียง", size="xxs", color="#9CA3AF", align="center"),
-                                    TextComponent(text=str(sh.get("Beds", "-")), size="sm", weight="bold", color="#111827", align="center"),
-                                ]
-                            ),
-                            BoxComponent(
-                                layout="vertical", flex=1, spacing="xs",
-                                contents=[
-                                    TextComponent(text="ห้องน้ำ", size="xxs", color="#9CA3AF", align="center"),
-                                    TextComponent(text=str(sh.get("Toilets", "-")), size="sm", weight="bold", color="#111827", align="center"),
-                                ]
-                            ),
-                            BoxComponent(
-                                layout="vertical", flex=1, spacing="xs",
-                                contents=[
-                                    TextComponent(text="ที่จอดรถ", size="xxs", color="#9CA3AF", align="center"),
-                                    TextComponent(text=str(sh.get("Parking", "-")), size="sm", weight="bold", color="#111827", align="center"),
-                                ]
-                            ),
-                        ]
-                    ),
-                    ButtonComponent(
-                        action=URIAction(
-                            label="นำทางไปศูนย์พักพิง",
-                            uri=f"https://www.google.com/maps/search/?api=1&query={sh.get('Latitude')},{sh.get('Longitude')}"
-                        ),
-                        style="secondary", color="#F9FAFB", height="sm", margin="sm"
-                    )
                 ]
             )
-            shelters_box.contents.append(card)
+        )
+        return FlexSendMessage(alt_text="รายงานระดับน้ำ", contents=bubble)
 
-    hero = None
-    hero_url = hero_image_url("shelter_banner.jpg")
-    if hero_url:
-        hero = ImageComponent(
-            url=hero_url,
-            size="full",
-            aspect_ratio="20:13",
-            aspect_mode="cover",
+    bubbles = []
+    for i, st in enumerate(stations):
+        wl = st.get("water_level")
+        dist = st.get("distance_km", 0)
+        wl_val = "-"
+        assessment = assess_water_level_status(None)
+
+        if wl and wl.get("value") not in [None, "-", ""]:
+            try:
+                wl_val = float(wl["value"])
+                bl = st.get("bank_level")
+                situation = st.get("situation")
+                assessment = assess_water_level_status(wl_val, bl, situation)
+            except (ValueError, TypeError):
+                pass
+
+        lbl_pill = assessment.get("label_pill", "ปกติ")
+        sev = _WATER_SEVERITY_COLORS.get(lbl_pill, _WATER_SEVERITY_COLORS["ปกติ"])
+
+        lat = st.get("latitude")
+        lon = st.get("longitude")
+        nav_action = (
+            URIAction(label="นำทาง", uri=f"https://www.google.com/maps/search/?api=1&query={lat},{lon}")
+            if lat and lon else
+            URIAction(label="ดูเพิ่มเติม", uri=WATER_LEVEL_SOURCE_URL)
         )
 
-    bubble = BubbleContainer(
-        hero=hero,
-        body=BoxComponent(
-            layout="vertical",
+        header = BoxComponent(
+            layout="horizontal",
+            padding_all="lg",
             contents=[
-                header,
-                SeparatorComponent(margin="md", color="#E5E7EB"),
-                shelters_box
+                TextComponent(text=f"อันดับ {i + 1}", size="sm", weight="bold", color="#0F172A", flex=1),
+                TextComponent(text=f"ห่าง {dist:.1f} กม.", size="sm", weight="bold", color="#0F172A", align="end", flex=1),
             ]
         )
-    )
-    return FlexSendMessage(alt_text="ข้อมูลศูนย์พักพิง", contents=bubble)
+
+        body = BoxComponent(
+            layout="vertical",
+            padding_all="lg",
+            spacing="sm",
+            contents=[
+                BoxComponent(
+                    layout="horizontal",
+                    contents=[
+                        TextComponent(text="สถานีวัดระดับน้ำ", size="xs", color="#9CA3AF", flex=1, gravity="center"),
+                        _pill_badge(lbl_pill, sev["bg"], sev["text"]),
+                    ]
+                ),
+                TextComponent(
+                    text=st.get("stationName", "ไม่ระบุ"), weight="bold", size="xl",
+                    color="#111827", wrap=True, margin="sm"
+                ),
+                _dashed_rule(),
+                BoxComponent(
+                    layout="horizontal",
+                    margin="lg",
+                    contents=[
+                        BoxComponent(
+                            layout="vertical", flex=1,
+                            contents=[
+                                TextComponent(text="ระดับน้ำปัจจุบัน", size="xs", color="#9CA3AF"),
+                                TextComponent(
+                                    text=f"{wl_val} ม." if wl_val != "-" else "ไม่มีข้อมูล",
+                                    size="xxl", weight="bold", color="#111827", margin="xs"
+                                ),
+                            ]
+                        ),
+                        _pill_button("นำทาง", nav_action),
+                    ]
+                ),
+                TextComponent(
+                    text="ข้อมูลจาก ThaiWater · อัปเดตทุก 10 นาที",
+                    size="xxs", color="#9CA3AF", margin="lg", wrap=True
+                ),
+            ]
+        )
+
+        bubbles.append(BubbleContainer(
+            size="mega",
+            styles=BubbleStyle(header=BlockStyle(background_color=sev["bg"])),
+            header=header,
+            body=body,
+        ))
+
+    carousel = CarouselContainer(contents=bubbles)
+    return FlexSendMessage(alt_text=f"รายงานระดับน้ำ ({len(stations)} สถานีใกล้คุณ)", contents=carousel)
 
 
-# =============================================================================
-# SECTION 13: GREETING & RESPONSE HANDLERS
-# =============================================================================
+def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
+    """
+    Ticket-card carousel — one swipeable card per shelter, same visual
+    language as build_water_level_flex_message. Header color maps to real
+    availability (green=เปิดรับ, yellow=ใกล้เต็ม, pink=เต็ม, gray=ปิด).
+    """
+    if not shelters:
+        bubble = BubbleContainer(
+            body=BoxComponent(
+                layout="vertical", padding_all="lg",
+                contents=[
+                    TextComponent(text="ข้อมูลศูนย์พักพิง", weight="bold", size="lg", color="#111827"),
+                    TextComponent(
+                        text="ไม่พบข้อมูลศูนย์พักพิงในพื้นที่ใกล้เคียง",
+                        size="sm", color="#6B7280", margin="md", wrap=True
+                    ),
+                ]
+            )
+        )
+        return FlexSendMessage(alt_text="ข้อมูลศูนย์พักพิง", contents=bubble)
+
+    bubbles = []
+    for i, sh in enumerate(shelters):
+        status_key = sh.get("Status", "เปิดรับ")
+        sev = _SHELTER_SEVERITY_COLORS.get(status_key, _SHELTER_SEVERITY_COLORS["เปิดรับ"])
+        status_label = SHELTER_STATUS_MAP.get(status_key, SHELTER_STATUS_MAP["เปิดรับ"]).get("label", status_key)
+
+        dist = sh.get("distance_km", 0)
+        capacity = sh.get("Capacity", 0)
+        occupancy = sh.get("Occupancy", 0)
+        remaining = max(capacity - occupancy, 0) if capacity else None
+        location_text = f"{sh.get('District', '')} {sh.get('Province', '')}".strip()
+
+        nav_action = URIAction(
+            label="นำทาง",
+            uri=f"https://www.google.com/maps/search/?api=1&query={sh.get('Latitude')},{sh.get('Longitude')}"
+        )
+
+        header = BoxComponent(
+            layout="horizontal",
+            padding_all="lg",
+            contents=[
+                TextComponent(text=f"อันดับ {i + 1}", size="sm", weight="bold", color="#0F172A", flex=1),
+                TextComponent(text=f"ห่าง {dist:.1f} กม.", size="sm", weight="bold", color="#0F172A", align="end", flex=1),
+            ]
+        )
+
+        body = BoxComponent(
+            layout="vertical",
+            padding_all="lg",
+            spacing="sm",
+            contents=[
+                BoxComponent(
+                    layout="horizontal",
+                    contents=[
+                        TextComponent(
+                            text=f"ศูนย์พักพิง{' · ' + location_text if location_text else ''}",
+                            size="xs", color="#9CA3AF", flex=1, gravity="center", wrap=True
+                        ),
+                        _pill_badge(status_label, sev["bg"], sev["text"]),
+                    ]
+                ),
+                TextComponent(
+                    text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold", size="xl",
+                    color="#111827", wrap=True, margin="sm"
+                ),
+                _dashed_rule(),
+                BoxComponent(
+                    layout="horizontal",
+                    margin="lg",
+                    contents=[
+                        BoxComponent(
+                            layout="vertical", flex=1,
+                            contents=[
+                                TextComponent(text="จำนวนที่ว่าง", size="xs", color="#9CA3AF"),
+                                TextComponent(
+                                    text=f"{remaining}/{capacity} ที่" if remaining is not None else "ไม่ระบุ",
+                                    size="xxl", weight="bold", color="#111827", margin="xs"
+                                ),
+                            ]
+                        ),
+                        _pill_button("นำทาง", nav_action),
+                    ]
+                ),
+                BoxComponent(
+                    layout="horizontal",
+                    margin="lg",
+                    spacing="md",
+                    contents=[
+                        BoxComponent(layout="vertical", flex=1, contents=[
+                            TextComponent(text="เตียง", size="xxs", color="#9CA3AF"),
+                            TextComponent(text=str(sh.get("Beds", "-")), size="sm", weight="bold", color="#111827", margin="xs"),
+                        ]),
+                        BoxComponent(layout="vertical", flex=1, contents=[
+                            TextComponent(text="ห้องน้ำ", size="xxs", color="#9CA3AF"),
+                            TextComponent(text=str(sh.get("Toilets", "-")), size="sm", weight="bold", color="#111827", margin="xs"),
+                        ]),
+                        BoxComponent(layout="vertical", flex=1, contents=[
+                            TextComponent(text="ที่จอดรถ", size="xxs", color="#9CA3AF"),
+                            TextComponent(text=str(sh.get("Parking", "-")), size="sm", weight="bold", color="#111827", margin="xs"),
+                        ]),
+                    ]
+                ),
+                TextComponent(
+                    text="ข้อมูลจากฐานข้อมูลศูนย์พักพิง FLOODCARE AI",
+                    size="xxs", color="#9CA3AF", margin="lg", wrap=True
+                ),
+            ]
+        )
+
+        bubbles.append(BubbleContainer(
+            size="mega",
+            styles=BubbleStyle(header=BlockStyle(background_color=sev["bg"])),
+            header=header,
+            body=body,
+        ))
+
+    carousel = CarouselContainer(contents=bubbles)
+    return FlexSendMessage(alt_text=f"ข้อมูลศูนย์พักพิง ({len(shelters)} แห่งใกล้คุณ)", contents=carousel)
+
 
 def is_greeting(text: str) -> bool:
     if not text:
