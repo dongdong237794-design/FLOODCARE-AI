@@ -2373,6 +2373,89 @@ def _has_facility(value) -> bool:
     return str(value).strip().lower() in ("true", "1", "y", "yes", "มี", "✓")
 
 
+def build_contact_flex_message(contacts: list) -> FlexSendMessage:
+    """
+    All emergency hotlines in ONE pricing-card-style bubble: dark header with
+    an urgency badge, the most important number shown as the big hero
+    figure, then every contact listed underneath as a symmetric checklist
+    row (checkmark + name + number, role as a smaller line beneath) — same
+    row shape repeated for every contact so the list stays visually even no
+    matter how many rows the 'Contacts' sheet grows to.
+    `contacts` is a list of dicts with Name / Phone / Role keys.
+    """
+    primary = contacts[0] if contacts else {}
+    primary_phone = str(primary.get("Phone", "")).strip()
+
+    header = BoxComponent(
+        layout="horizontal",
+        padding_all="lg",
+        background_color="#0F172A",
+        contents=[
+            TextComponent(text="เบอร์โทรฉุกเฉิน", weight="bold", size="md", color="#FFFFFF", flex=1),
+            _pill_badge("ด่วน", "#DC2626", "#FFFFFF"),
+        ]
+    )
+
+    hero = BoxComponent(
+        layout="baseline",
+        spacing="xs",
+        contents=[
+            TextComponent(text=primary_phone or "—", weight="bold", size="3xl", color="#111827"),
+            TextComponent(text=f"/ {primary.get('Name', '')}", size="sm", color="#9CA3AF"),
+        ]
+    )
+
+    rows = [hero, _dashed_rule()]
+    for c in contacts:
+        name = c.get("Name", "ไม่ระบุ")
+        phone = str(c.get("Phone", "")).strip()
+        role = c.get("Role", "")
+
+        detail_contents = [
+            BoxComponent(
+                layout="horizontal",
+                contents=[
+                    TextComponent(text=name, size="sm", weight="bold", color="#111827", flex=1, wrap=True),
+                    TextComponent(text=phone or "—", size="sm", weight="bold", color="#111827", flex=0, align="end"),
+                ]
+            )
+        ]
+        if role:
+            detail_contents.append(TextComponent(text=role, size="xs", color="#9CA3AF", margin="xs", wrap=True))
+
+        rows.append(
+            BoxComponent(
+                layout="horizontal", spacing="md", margin="lg",
+                contents=[
+                    TextComponent(text="✓", size="sm", weight="bold", color="#16A34A", flex=0, gravity="center"),
+                    BoxComponent(layout="vertical", flex=1, contents=detail_contents),
+                ]
+            )
+        )
+
+    body = BoxComponent(layout="vertical", padding_all="lg", contents=rows)
+
+    footer_contents = []
+    if primary_phone:
+        footer_contents.append(
+            BoxComponent(
+                layout="vertical",
+                background_color="#0F172A",
+                corner_radius="10px",
+                padding_all="md",
+                action=URIAction(label=f"โทร {primary_phone}", uri=f"tel:{primary_phone}"),
+                contents=[TextComponent(text=f"โทรด่วน {primary_phone}", size="sm", weight="bold", color="#FFFFFF", align="center")]
+            )
+        )
+    footer_contents.append(
+        TextComponent(text="ข้อมูลจากฐานข้อมูลเบอร์โทรฉุกเฉิน FLOODCARE AI", size="xxs", color="#9CA3AF", align="center", margin="md", wrap=True)
+    )
+    footer = BoxComponent(layout="vertical", padding_all="lg", padding_top="none", contents=footer_contents)
+
+    bubble = BubbleContainer(size="mega", header=header, body=body, footer=footer)
+    return FlexSendMessage(alt_text="เบอร์โทรฉุกเฉิน", contents=bubble)
+
+
 _WATER_SEVERITY_COLORS = {
     "น้อยวิกฤต": {"bg": "#FBD9B4", "text": "#9A5B12"},   # ส้มมินิมอล — น้ำแล้งวิกฤต (จากโทนทางการ #D67B27)
     "น้อย":      {"bg": "#FEF3C7", "text": "#92400E"},   # เหลืองมินิมอล — น้ำน้อย (จากโทนทางการ #FFC000)
@@ -2459,9 +2542,14 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                         _pill_badge(lbl_pill, sev["bg"], sev["text"]),
                     ]
                 ),
-                TextComponent(
-                    text=st.get("stationName", "ไม่ระบุ"), weight="bold", size="xl",
-                    color="#111827", wrap=True, margin="sm"
+                BoxComponent(
+                    layout="vertical", height="54px", justify_content="center", margin="sm",
+                    contents=[
+                        TextComponent(
+                            text=st.get("stationName", "ไม่ระบุ"), weight="bold", size="lg",
+                            color="#111827", wrap=True, max_lines=2
+                        ),
+                    ]
                 ),
                 _dashed_rule(),
                 BoxComponent(
@@ -2474,7 +2562,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                                 TextComponent(text="ระดับน้ำปัจจุบัน", size="xs", color="#9CA3AF"),
                                 TextComponent(
                                     text=f"{wl_val} ม." if wl_val != "-" else "ไม่มีข้อมูล",
-                                    size="xl", weight="bold", color="#111827", margin="xs", wrap=True
+                                    size="xl", weight="bold", color="#111827", margin="xs", wrap=True, max_lines=1
                                 ),
                             ]
                         ),
@@ -2556,14 +2644,19 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                     contents=[
                         TextComponent(
                             text=f"ศูนย์พักพิง{' · ' + location_text if location_text else ''}",
-                            size="xs", color="#9CA3AF", flex=1, gravity="center", wrap=True
+                            size="xs", color="#9CA3AF", flex=1, gravity="center", wrap=True, max_lines=1
                         ),
                         _pill_badge(status_label, sev["bg"], sev["text"]),
                     ]
                 ),
-                TextComponent(
-                    text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold", size="xl",
-                    color="#111827", wrap=True, margin="sm"
+                BoxComponent(
+                    layout="vertical", height="54px", justify_content="center", margin="sm",
+                    contents=[
+                        TextComponent(
+                            text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold", size="lg",
+                            color="#111827", wrap=True, max_lines=2
+                        ),
+                    ]
                 ),
                 _dashed_rule(),
                 BoxComponent(
@@ -2576,7 +2669,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                                 TextComponent(text="จำนวนที่ว่าง", size="xs", color="#9CA3AF"),
                                 TextComponent(
                                     text=f"{remaining}/{capacity} ที่" if remaining is not None else "ไม่ระบุ",
-                                    size="xl", weight="bold", color="#111827", margin="xs", wrap=True
+                                    size="xl", weight="bold", color="#111827", margin="xs", wrap=True, max_lines=1
                                 ),
                             ]
                         ),
