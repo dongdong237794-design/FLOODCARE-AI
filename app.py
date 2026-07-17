@@ -45,6 +45,7 @@ from bot_config import (
     build_register_form_flex, build_snake_bite_flex, build_help_flex,
     build_weather_flex, build_faq_response_flex,
     build_shelter_flex_message, build_prep_guide_flex, build_accident_flex_message,
+    build_contact_flex_message,
     # Shelter data
     find_nearest_shelters,
     # Response handlers
@@ -621,20 +622,14 @@ def _handle_prep_guide_request(event, user_id):
 
 def _handle_contact_request(event):
     records = sheets_mgr.get_all_records("Contacts")
-    if records:
-        contacts = []
-        for r in records:
-            contacts.append(f"🚨 {r.get('Name')}\n   📞 {r.get('Phone')}\n   📝 {r.get('Role', '')}")
-        reply = "📞 เบอร์โทรฉุกเฉิน:\n\n" + "\n\n".join(contacts)
-    else:
-        reply = (
-            "📞 เบอร์โทรฉุกเฉิน:\n\n"
-            "🚨 ปภ. 1784\n"
-            "🚨 สพฉ. 1669\n"
-            "🚨 หน่วยกู้ชีพ 1554\n"
-            "🚨 ตำรวจทางหลวง 1193"
-        )
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+    if not records:
+        records = [
+            {"Name": "ปภ. — แจ้งเหตุอุทกภัย", "Phone": "1784", "Role": "สายด่วนกรมป้องกันและบรรเทาสาธารณภัย 24 ชม."},
+            {"Name": "สพฉ. — กู้ชีพฉุกเฉิน", "Phone": "1669", "Role": "เจ็บป่วย/อุบัติเหตุฉุกเฉินทางการแพทย์"},
+            {"Name": "หน่วยกู้ชีพ", "Phone": "1554", "Role": "หน่วยกู้ชีพร่วมกตัญญู"},
+            {"Name": "ตำรวจทางหลวง", "Phone": "1193", "Role": "เส้นทางที่ได้รับผลกระทบจากน้ำท่วม"},
+        ]
+    line_bot_api.reply_message(event.reply_token, build_contact_flex_message(records))
 
 
 def _handle_shelter_request(event, user_id, ai_mode=False):
