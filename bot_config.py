@@ -2333,11 +2333,11 @@ def _pill_button(label: str, action, bg="#0F172A", text_color="#FFFFFF"):
         layout="vertical",
         flex=0,
         background_color=bg,
-        corner_radius="20px",
-        padding_top="10px", padding_bottom="10px", padding_start="18px", padding_end="18px",
+        corner_radius="16px",
+        padding_top="7px", padding_bottom="7px", padding_start="13px", padding_end="13px",
         action=action,
         gravity="center",
-        contents=[TextComponent(text=label, size="sm", weight="bold", color=text_color, align="center")]
+        contents=[TextComponent(text=label, size="xs", weight="bold", color=text_color, align="center")]
     )
 
 
@@ -2555,6 +2555,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                 BoxComponent(
                     layout="horizontal",
                     margin="lg",
+                    align_items="center",
                     contents=[
                         BoxComponent(
                             layout="vertical", flex=1,
@@ -2662,6 +2663,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                 BoxComponent(
                     layout="horizontal",
                     margin="lg",
+                    align_items="center",
                     contents=[
                         BoxComponent(
                             layout="vertical", flex=1,
