@@ -979,25 +979,6 @@ def clean_text_for_line(text: str) -> str:
     return text.replace("**", "").replace("*", "").replace("###", "").replace("##", "").replace("#", "")
 
 
-def extract_number(text: str) -> str:
-    if not text:
-        return "1"
-    cleaned = "".join(filter(str.isdigit, text))
-    return cleaned if cleaned else "1"
-
-
-def parse_yes_no(text: str) -> str:
-    if not text:
-        return "NO"
-    text_clean = text.strip().lower()
-    yes_words = ["มี", "ใช่", "yes", "y", "ตกลง", "ok", "ได้"]
-    if any(word in text_clean for word in yes_words):
-        if "ไม่มี" in text_clean or "ไม่ใช่" in text_clean:
-            return "NO"
-        return "YES"
-    return "NO"
-
-
 def extract_sheet_id(sheet_var: str) -> str:
     if not sheet_var:
         return ""
@@ -1109,6 +1090,27 @@ class SheetsManager:
                     ws = sheet.add_worksheet(title=name, rows="3000", cols=len(headers) + 5)
                     ws.append_row(headers)
                     Logger.info("Sheets", f"Created worksheet: {name}")
+
+            # Patch sheets that already exist but are missing newer columns —
+            # e.g. a 'Shelters' sheet set up before Subdistrict/Beds/Toilets/
+            # Parking/Facilities were added to the schema. Only ever appends
+            # missing header names to the end of row 1; never touches,
+            # reorders, or deletes existing columns or data, so this is safe
+            # to run on every startup.
+            for name, headers in required_sheets.items():
+                if name not in existing:
+                    continue  # just created above with the full header set already
+                try:
+                    ws = sheet.worksheet(name)
+                    current_headers = ws.row_values(1)
+                    missing = [h for h in headers if h not in current_headers]
+                    if missing:
+                        start_col = len(current_headers) + 1
+                        for i, h in enumerate(missing):
+                            ws.update_cell(1, start_col + i, h)
+                        Logger.info("Sheets", f"Patched '{name}': added missing columns {missing}")
+                except Exception as e:
+                    Logger.error("Sheets", f"Column patch failed for '{name}': {e}")
             
             if "Contacts" not in existing:
                 ws = sheet.worksheet("Contacts")
@@ -1128,19 +1130,19 @@ class SheetsManager:
             if shelters_is_empty:
                 ws = shelters_ws
                 shelter_defaults = [
-                    ["S001", "โรงเรียนเทศบาล 2 (มลายูบางกอก)", "ยะลา", "เมืองยะลา",
+                    ["S001", "โรงเรียนเทศบาล 2 (มลายูบางกอก)", "ยะลา", "เมืองยะลา", "",
                      6.5458, 101.2825, "", "", "เปิดรับ", "", "", "", ""],
-                    ["S002", "โรงเรียนเทศบาล 3 (วัดพุทธภูมิ)", "ยะลา", "เมืองยะลา",
+                    ["S002", "โรงเรียนเทศบาล 3 (วัดพุทธภูมิ)", "ยะลา", "เมืองยะลา", "",
                      6.5445, 101.2912, "", "", "เปิดรับ", "", "", "", ""],
-                    ["S003", "โรงเรียนเทศบาล 4 (ธนวิถี)", "ยะลา", "เมืองยะลา",
+                    ["S003", "โรงเรียนเทศบาล 4 (ธนวิถี)", "ยะลา", "เมืองยะลา", "",
                      6.5401, 101.2833, "", "", "เปิดรับ", "", "", "", ""],
-                    ["S004", "โรงเรียนเทศบาล 5 (บ้านตลาดเก่า)", "ยะลา", "เมืองยะลา",
+                    ["S004", "โรงเรียนเทศบาล 5 (บ้านตลาดเก่า)", "ยะลา", "เมืองยะลา", "",
                      6.5385, 101.2980, "", "", "เปิดรับ", "", "", "", ""],
-                    ["S005", "ศูนย์เยาวชน (TK Park)", "ยะลา", "เมืองยะลา",
+                    ["S005", "ศูนย์เยาวชน (TK Park)", "ยะลา", "เมืองยะลา", "",
                      6.5470, 101.2905, "", "", "เปิดรับ", "", "", "", ""],
                     # NOTE: S006 has no verified Lat/Long yet. get_shelters_from_sheet()
                     # will silently skip this row until coordinates are filled in.
-                    ["S006", "อาคารศรีนิบง", "ยะลา", "เมืองยะลา",
+                    ["S006", "อาคารศรีนิบง", "ยะลา", "เมืองยะลา", "",
                      "", "", "", "", "เปิดรับ", "", "", "", ""],
                 ]
                 for row in shelter_defaults:
@@ -1509,6 +1511,7 @@ def get_shelters_from_sheet(force_refresh: bool = False) -> list:
                 "Name": row.get("Name", "ไม่ระบุชื่อ"),
                 "Province": row.get("Province", ""),
                 "District": row.get("District", ""),
+                "Subdistrict": row.get("Subdistrict", ""),
                 "Latitude": lat,
                 "Longitude": lon,
                 "Capacity": _to_int(row.get("Capacity")),
@@ -1702,26 +1705,22 @@ def get_live_weather_scraper(lat: float, lon: float) -> str:
     return f"🌡️ {d['temp']} °C | 🌧️ {d['desc']}\n💧 ชื้น {d['rh']}% | 🍃 ลม {d['wind']} m/s"
 
 
-def calculate_situation(water_level, bank_level):
-    try:
-        wl = float(water_level) if water_level is not None else 0
-        bl = float(bank_level) if bank_level is not None else 0
-    except (ValueError, TypeError):
-        return "ไม่มีข้อมูล"
-    
-    if bl <= 0:
-        if wl >= 3.0: return "ล้นตลิ่ง"
-        if wl >= 2.0: return "มาก"
-        if wl >= 1.0: return "ปกติ"
-        if wl >= 0.5: return "น้อย"
-        return "น้อยวิกฤต"
-    
-    ratio = wl / bl
-    if wl >= bl: return "ล้นตลิ่ง"
-    elif ratio >= 0.70: return "มาก"
-    elif ratio >= 0.30: return "ปกติ"
-    elif ratio >= 0.10: return "น้อย"
-    return "น้อยวิกฤต"
+_last_water_refresh_ts = 0.0
+
+
+def is_water_data_stale() -> bool:
+    """
+    True if the background refresh job (water_level_refresh_loop, runs every
+    10 min) hasn't successfully updated the 'Water_Levels' sheet within
+    WATER_DATA_MAX_AGE_MINUTES — e.g. ThaiWater's API has been down or sheet
+    writes have been silently failing for a while. Used to fall back to a
+    direct live API call instead of serving old data with no indication
+    it's stale.
+    """
+    if _last_water_refresh_ts == 0:
+        return False  # haven't refreshed even once yet this run — let the "sheet empty" fallback handle it
+    age_minutes = (time.time() - _last_water_refresh_ts) / 60
+    return age_minutes > WATER_DATA_MAX_AGE_MINUTES
 
 
 def get_live_water_levels_from_api() -> list:
@@ -2619,7 +2618,8 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
         capacity = sh.get("Capacity", 0)
         occupancy = sh.get("Occupancy", 0)
         remaining = max(capacity - occupancy, 0) if capacity else None
-        location_text = f"{sh.get('District', '')} {sh.get('Province', '')}".strip()
+        location_text = f"{sh.get('Subdistrict', '')} {sh.get('District', '')} {sh.get('Province', '')}".split()
+        location_text = " ".join(location_text)
 
         nav_action = URIAction(
             label="นำทาง",
@@ -2635,73 +2635,85 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
             ]
         )
 
+        facilities_note = str(sh.get("Facilities", "")).strip()
+
+        body_contents = [
+            BoxComponent(
+                layout="horizontal",
+                contents=[
+                    TextComponent(
+                        text=f"ศูนย์พักพิง{' · ' + location_text if location_text else ''}",
+                        size="xs", color="#9CA3AF", flex=1, gravity="center", wrap=True, max_lines=1
+                    ),
+                    _pill_badge(status_label, sev["bg"], sev["text"]),
+                ]
+            ),
+            BoxComponent(
+                layout="vertical", height="54px", justify_content="flex-start", margin="sm",
+                contents=[
+                    TextComponent(
+                        text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold", size="lg",
+                        color="#111827", wrap=True, max_lines=2
+                    ),
+                ]
+            ),
+            _dashed_rule(),
+            BoxComponent(
+                layout="horizontal",
+                margin="lg",
+                align_items="center",
+                contents=[
+                    BoxComponent(
+                        layout="vertical", flex=1,
+                        contents=[
+                            TextComponent(text="จำนวนที่ว่าง", size="xs", color="#9CA3AF"),
+                            TextComponent(
+                                text=f"{remaining}/{capacity} ที่" if remaining is not None else "ไม่ระบุ",
+                                size="xl", weight="bold", color="#111827", margin="xs", wrap=True, max_lines=1
+                            ),
+                        ]
+                    ),
+                    _pill_button("นำทาง", nav_action),
+                ]
+            ),
+            BoxComponent(
+                layout="horizontal",
+                margin="lg",
+                spacing="md",
+                contents=[
+                    BoxComponent(layout="vertical", flex=1, contents=[
+                        TextComponent(text="เตียง", size="xxs", color="#9CA3AF", align="center"),
+                        _facility_mark(_has_facility(sh.get("Beds"))),
+                    ]),
+                    BoxComponent(layout="vertical", flex=1, contents=[
+                        TextComponent(text="ห้องน้ำ", size="xxs", color="#9CA3AF", align="center"),
+                        _facility_mark(_has_facility(sh.get("Toilets"))),
+                    ]),
+                    BoxComponent(layout="vertical", flex=1, contents=[
+                        TextComponent(text="ที่จอดรถ", size="xxs", color="#9CA3AF", align="center"),
+                        _facility_mark(_has_facility(sh.get("Parking"))),
+                    ]),
+                ]
+            ),
+        ]
+
+        if facilities_note and facilities_note != "-":
+            body_contents.append(
+                TextComponent(text=facilities_note, size="xs", color="#374151", margin="md", wrap=True)
+            )
+
+        body_contents.append(
+            TextComponent(
+                text="ข้อมูลจากฐานข้อมูลศูนย์พักพิง FLOODCARE AI",
+                size="xxs", color="#9CA3AF", margin="lg", wrap=True
+            )
+        )
+
         body = BoxComponent(
             layout="vertical",
             padding_all="lg",
             spacing="sm",
-            contents=[
-                BoxComponent(
-                    layout="horizontal",
-                    contents=[
-                        TextComponent(
-                            text=f"ศูนย์พักพิง{' · ' + location_text if location_text else ''}",
-                            size="xs", color="#9CA3AF", flex=1, gravity="center", wrap=True, max_lines=1
-                        ),
-                        _pill_badge(status_label, sev["bg"], sev["text"]),
-                    ]
-                ),
-                BoxComponent(
-                    layout="vertical", height="54px", justify_content="flex-start", margin="sm",
-                    contents=[
-                        TextComponent(
-                            text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold", size="lg",
-                            color="#111827", wrap=True, max_lines=2
-                        ),
-                    ]
-                ),
-                _dashed_rule(),
-                BoxComponent(
-                    layout="horizontal",
-                    margin="lg",
-                    align_items="center",
-                    contents=[
-                        BoxComponent(
-                            layout="vertical", flex=1,
-                            contents=[
-                                TextComponent(text="จำนวนที่ว่าง", size="xs", color="#9CA3AF"),
-                                TextComponent(
-                                    text=f"{remaining}/{capacity} ที่" if remaining is not None else "ไม่ระบุ",
-                                    size="xl", weight="bold", color="#111827", margin="xs", wrap=True, max_lines=1
-                                ),
-                            ]
-                        ),
-                        _pill_button("นำทาง", nav_action),
-                    ]
-                ),
-                BoxComponent(
-                    layout="horizontal",
-                    margin="lg",
-                    spacing="md",
-                    contents=[
-                        BoxComponent(layout="vertical", flex=1, contents=[
-                            TextComponent(text="เตียง", size="xxs", color="#9CA3AF", align="center"),
-                            _facility_mark(_has_facility(sh.get("Beds"))),
-                        ]),
-                        BoxComponent(layout="vertical", flex=1, contents=[
-                            TextComponent(text="ห้องน้ำ", size="xxs", color="#9CA3AF", align="center"),
-                            _facility_mark(_has_facility(sh.get("Toilets"))),
-                        ]),
-                        BoxComponent(layout="vertical", flex=1, contents=[
-                            TextComponent(text="ที่จอดรถ", size="xxs", color="#9CA3AF", align="center"),
-                            _facility_mark(_has_facility(sh.get("Parking"))),
-                        ]),
-                    ]
-                ),
-                TextComponent(
-                    text="ข้อมูลจากฐานข้อมูลศูนย์พักพิง FLOODCARE AI",
-                    size="xxs", color="#9CA3AF", margin="lg", wrap=True
-                ),
-            ]
+            contents=body_contents
         )
 
         bubbles.append(BubbleContainer(
@@ -2714,14 +2726,6 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
     carousel = CarouselContainer(contents=bubbles)
     return FlexSendMessage(alt_text=f"ข้อมูลศูนย์พักพิง ({len(shelters)} แห่งใกล้คุณ)", contents=carousel)
 
-
-def is_greeting(text: str) -> bool:
-    if not text:
-        return False
-    clean = text.strip().lower().strip("!.,😊🙏👋 ")
-    greetings = ["สวัสดี", "หวัดดี", "ดีครับ", "ดีค่ะ", "hello", "hi", "hey",
-                "good morning", "good afternoon", "good evening", "menu", "เมนู", "เริ่ม", "start"]
-    return any(clean.startswith(g.lower()) or g.lower() in clean for g in greetings)
 
 
 def get_greeting_message(user_name="คุณ"):
@@ -2815,37 +2819,6 @@ def calculate_sos_priority(group_types: list, urgency_level: str) -> Tuple[str, 
     return ("🟢 NORMAL", "NORMAL")
 
 
-def build_sos_summary_text(data: dict) -> str:
-    lat = data.get("latitude", "0")
-    lon = data.get("longitude", "0")
-    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    priority_label = data.get("priority_label", "🟢 NORMAL")
-    
-    return (
-        "📋 สรุปข้อมูลแจ้งเหตุ\n\n"
-        f"📍 พิกัด: {maps_link}\n"
-        f"👥 กลุ่ม: {', '.join(data.get('group_types', []))}\n"
-        f"🌊 สถานการณ์: {data.get('urgency_level', 'ต่ำ')}\n"
-        f"📊 ระดับความเร่งด่วน: {priority_label}\n\n"
-        f"ยืนยันการส่งข้อมูลแจ้งกู้ภัย?"
-    )
-
-
-def build_needs_summary_text(data: dict) -> str:
-    lat = data.get("latitude", "0")
-    lon = data.get("longitude", "0")
-    maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-    
-    return (
-        "📋 สรุปความต้องการ\n\n"
-        f"📍 พิกัด: {maps_link}\n"
-        f"📦 หมวดหมู่: {', '.join(data.get('categories', []))}\n"
-        f"📝 รายละเอียด: {data.get('details', '-')}\n"
-        f"⏳ ความเร่งด่วน: {data.get('urgency', '-')}\n\n"
-        f"ยืนยันการส่งข้อมูล?"
-    )
-
-
 def start_background_tasks():
     def cleanup_loop():
         while True:
@@ -2873,6 +2846,8 @@ def start_background_tasks():
                 if stations:
                     ok = sheets_mgr.overwrite_water_levels(stations)
                     if ok:
+                        global _last_water_refresh_ts
+                        _last_water_refresh_ts = time.time()
                         Logger.info("WaterLevelRefresh", f"Updated {len(stations)} stations in Water_Levels sheet")
                     else:
                         Logger.error("WaterLevelRefresh", "Failed to write stations to sheet")
