@@ -50,12 +50,11 @@ from bot_config import (
     find_nearest_shelters,
     # Response handlers
     get_greeting_message, handle_emergency_response,
-    build_sos_summary_text, build_needs_summary_text,
     calculate_sos_priority,
     # Services
     ask_gemini, ask_gemini_with_search, get_live_weather_scraper, get_live_weather_data,
     get_live_water_levels_from_api, sheets_mgr,
-    assess_water_level_status, calculate_situation,
+    assess_water_level_status, is_water_data_stale,
     # Legacy state
     USER_STATES, USER_DATA, update_legacy_state,
     # Config
@@ -786,15 +785,21 @@ def _build_nearest_water_stations(lat, lon, limit=3):
     is kept fresh automatically by a background job that pulls from ThaiWater's
     API every 10 minutes (see water_level_refresh_loop in bot_config.py), so
     normal requests just read the sheet directly — fast, and doesn't hit
-    ThaiWater on every single user request. Only if the sheet is unexpectedly
-    empty (e.g. right at first boot before the background job has run once)
-    do we fall back to a direct live call.
+    ThaiWater on every single user request. Falls back to a direct live call
+    if the sheet is empty (e.g. right at first boot) OR if the background
+    job hasn't refreshed it in longer than WATER_DATA_MAX_AGE_MINUTES (e.g.
+    ThaiWater's API has been down or sheet writes have been silently failing).
     """
     records = sheets_mgr.get_all_records("Water_Levels")
     source_label = "sheets"
     if not records:
         Logger.info("WaterLevel", "Water_Levels sheet empty — falling back to direct ThaiWater API call")
         records = get_live_water_levels_from_api()
+        source_label = "live_api_fallback"
+    elif is_water_data_stale():
+        Logger.info("WaterLevel", f"Water_Levels sheet older than {WATER_DATA_MAX_AGE_MINUTES} min — falling back to direct ThaiWater API call")
+        records = get_live_water_levels_from_api()
+        source_label = "live_api_fallback_stale"
         source_label = "live_api_fallback"
 
     stations = []
@@ -1395,8 +1400,10 @@ def api_sos_submit():
         household_id = (user_record or {}).get("household_id", "-") or "-"
 
         new_people_count = int(str(data.get("victim_count", "1")).strip() or 1)
-        new_priority = data.get("priority", "NORMAL")
+        new_priority_client = str(data.get("priority", "NORMAL")).strip().upper()
         PRIORITY_RANK = {"NORMAL": 1, "HIGH": 2, "CRITICAL": 3}
+        if new_priority_client not in PRIORITY_RANK:
+            new_priority_client = "NORMAL"
 
         # Split the selected vulnerable-group checkboxes into their own
         # yes/no columns — this is how the live 'sos_requests' sheet is
@@ -1409,6 +1416,26 @@ def api_sos_submit():
         elderly_flag = _flag("สูงอายุ", "คนชรา")
         bedridden_flag = _flag("ติดเตียง")
         pets_flag = _flag("สัตว์เลี้ยง", "สัตว์")
+
+        # Server-side priority check: never trust the LIFF form's priority
+        # value alone (a client bug or bad network retry could under-report
+        # it) — recompute from the actual submitted household details and
+        # take whichever of the two is more urgent.
+        group_types_for_priority = []
+        if children_flag == "ใช่":
+            group_types_for_priority.append("เด็ก")
+        if elderly_flag == "ใช่":
+            group_types_for_priority.append("ผู้สูงอายุ")
+        if bedridden_flag == "ใช่":
+            group_types_for_priority.append("ผู้ป่วยติดเตียง")
+        urgency_signal = f"{data.get('water_level_status', '')} {data.get('details', '')}"
+        _, computed_priority = calculate_sos_priority(group_types_for_priority, urgency_signal)
+
+        new_priority = (
+            new_priority_client
+            if PRIORITY_RANK.get(new_priority_client, 1) >= PRIORITY_RANK.get(computed_priority, 1)
+            else computed_priority
+        )
 
         merge_row, existing_case = sheets_mgr.find_open_case_by_household(household_id, window_minutes=45)
 
