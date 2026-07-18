@@ -2543,7 +2543,7 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
                     ]
                 ),
                 BoxComponent(
-                    layout="vertical", height="54px", justify_content="center", margin="sm",
+                    layout="vertical", height="54px", justify_content="flex-start", margin="sm",
                     contents=[
                         TextComponent(
                             text=st.get("stationName", "ไม่ระบุ"), weight="bold", size="lg",
@@ -2650,7 +2650,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                     ]
                 ),
                 BoxComponent(
-                    layout="vertical", height="54px", justify_content="center", margin="sm",
+                    layout="vertical", height="54px", justify_content="flex-start", margin="sm",
                     contents=[
                         TextComponent(
                             text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold", size="lg",
