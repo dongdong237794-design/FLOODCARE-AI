@@ -45,7 +45,7 @@ from bot_config import (
     build_register_form_flex, build_snake_bite_flex, build_help_flex,
     build_weather_flex, build_faq_response_flex,
     build_shelter_flex_message, build_prep_guide_flex, build_accident_flex_message,
-    build_contact_flex_message,
+    build_contact_flex_message, build_my_cases_flex_message,
     # Shelter data
     find_nearest_shelters,
     # Response handlers
@@ -55,6 +55,7 @@ from bot_config import (
     ask_gemini, ask_gemini_with_search, get_live_weather_scraper, get_live_weather_data,
     get_live_water_levels_from_api, sheets_mgr,
     assess_water_level_status, is_water_data_stale,
+    SOS_STATUS_LABELS_TH, need_status_label_th,
     # Legacy state
     USER_STATES, USER_DATA, update_legacy_state,
     # Config
@@ -66,6 +67,7 @@ from bot_config import (
     LINE_CHANNEL_SECRET,
     WATER_DATA_MAX_AGE_MINUTES,
     GEMINI_API_KEY,
+    PUBLIC_BASE_URL,
 )
 
 from linebot.exceptions import InvalidSignatureError
@@ -150,12 +152,19 @@ def check_rate_limit(user_id: str) -> bool:
     return allowed
 
 
-def _push_save_confirmation(user_id: Optional[str], message: str) -> None:
+def _push_save_confirmation(user_id: Optional[str], message: str, track_id: Optional[str] = None) -> None:
     if not user_id or user_id == "unknown":
         Logger.info("Push", "Skipped confirmation push — no verified user_id")
         return
     try:
-        line_bot_api.push_message(user_id, TextSendMessage(text=message))
+        quick_reply = None
+        if track_id:
+            base = PUBLIC_BASE_URL or "https://floodcare-ai-2.onrender.com"
+            track_url = f"{base}/liff/track?id={track_id}"
+            quick_reply = QuickReply(items=[
+                QuickReplyButton(action=URIAction(label="📍 ติดตามเคสนี้", uri=track_url))
+            ])
+        line_bot_api.push_message(user_id, TextSendMessage(text=message, quick_reply=quick_reply))
     except Exception as e:
         Logger.info("Push", f"Failed to send save-confirmation: {e}")
 
@@ -459,6 +468,11 @@ def handle_text_message(event):
     if intent == "NEEDS":
         _start_needs_flow(event, user_id)
         return
+
+    # TRACK -> Link to the case-tracking page
+    if intent == "TRACK":
+        _start_track_flow(event, user_id)
+        return
     
     # CANCEL
     if intent == "CANCEL":
@@ -599,6 +613,93 @@ def _start_registration(event, user_id):
         body="กดปุ่มด้านล่างเพื่อเปิดแบบฟอร์มลงทะเบียนได้เลยครับ",
         button_label="📋 เปิดแบบฟอร์มลงทะเบียน",
         liff_url=REGISTER_LIFF_URL
+    )
+
+
+def _relative_time_th(timestamp_str: str) -> str:
+    """Converts a stored 'YYYY-MM-DD HH:MM:SS' timestamp into a short Thai relative-time string."""
+    try:
+        ts = datetime.datetime.strptime(timestamp_str.strip(), "%Y-%m-%d %H:%M:%S")
+    except (ValueError, AttributeError):
+        return timestamp_str or "-"
+    delta = get_bangkok_time().replace(tzinfo=None) - ts
+    seconds = delta.total_seconds()
+    if seconds < 60:
+        return "เมื่อสักครู่"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} นาทีที่แล้ว"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)} ชั่วโมงที่แล้ว"
+    days = int(seconds // 86400)
+    if days < 30:
+        return f"{days} วันที่แล้ว"
+    return ts.strftime("%d/%m/%Y")
+
+
+PRIORITY_LABELS_TH = {"CRITICAL": "วิกฤต", "HIGH": "เร่งด่วน", "NORMAL": "ปกติ"}
+
+
+def _start_track_flow(event, user_id):
+    base = PUBLIC_BASE_URL or "https://floodcare-ai-2.onrender.com"
+
+    # A user's SOS case may have been merged into a shared household case
+    # filed by someone else in the same house — match on household_id too
+    # (if they're registered) so they still see it as "their" case.
+    user_record = sheets_mgr.get_user_record(user_id)
+    household_id = user_record.get("household_id", "") if user_record else ""
+
+    cases = []
+
+    for r in sheets_mgr.get_all_records("sos_requests"):
+        if str(r.get("user_id", "")) == user_id or (household_id and str(r.get("household_id", "")) == household_id):
+            status = str(r.get("status", "OPEN")).upper()
+            priority = str(r.get("priority", "NORMAL")).upper()
+            people_count = r.get("people_count", "")
+            tags = [PRIORITY_LABELS_TH.get(priority, priority)]
+            if people_count:
+                tags.append(f"{people_count} คน")
+            cases.append({
+                "case_id": r.get("request_id", ""),
+                "kind": "sos",
+                "status_label": SOS_STATUS_LABELS_TH.get(status, status),
+                "date": _relative_time_th(str(r.get("timestamp", ""))),
+                "summary": r.get("note", ""),
+                "tags": tags,
+                "_sort_key": str(r.get("timestamp", "")),
+            })
+
+    for r in sheets_mgr.get_all_records("user_needs"):
+        if str(r.get("user_id", "")) == user_id:
+            categories_raw = str(r.get("categories", "")).strip()
+            tags = [t.strip() for t in categories_raw.split(",") if t.strip()][:4]
+            cases.append({
+                "case_id": r.get("need_id", ""),
+                "kind": "need",
+                "status_label": need_status_label_th(r.get("status", "")),
+                "date": _relative_time_th(str(r.get("timestamp", ""))),
+                "summary": r.get("details", "") or categories_raw,
+                "tags": tags,
+                "_sort_key": str(r.get("timestamp", "")),
+            })
+
+    cases.sort(key=lambda c: c["_sort_key"], reverse=True)
+
+    if not cases:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="ยังไม่พบเคสที่คุณเคยแจ้งไว้ในระบบครับ ถ้าเพิ่งแจ้งไปหมาดๆ ลองรออีกสักครู่แล้วพิมพ์ 'ติดตามเคส' อีกครั้งได้ครับ\n\n"
+                     f"หรือถ้ามีเลขเคสของคนอื่นที่อยากเช็คแทน ค้นหาได้ที่ {base}/liff/track"
+            )
+        )
+        return
+
+    line_bot_api.reply_message(
+        event.reply_token,
+        [
+            build_my_cases_flex_message(cases, base),
+            TextSendMessage(text=f"มีเลขเคสของคนอื่นที่อยากเช็คแทนไหมครับ ค้นหาด้วยเลขเคสได้ที่ {base}/liff/track")
+        ]
     )
 
 
@@ -971,6 +1072,11 @@ def need_liff_page():
 @app.route("/liff/register")
 def register_liff_page():
     return _render_liff_page("register_liff.html", "Register LIFF")
+
+
+@app.route("/liff/track")
+def track_liff_page():
+    return _render_liff_page("track_liff.html", "Track LIFF")
 
 
 # =============================================================================
@@ -1479,7 +1585,8 @@ def api_sos_submit():
                     f"✅ ได้รับข้อมูลแจ้งเหตุแล้วครับ\n"
                     f"เลขเคส: {case_id} (รวมกับรายงานของสมาชิกในบ้านเดียวกันที่แจ้งไว้ก่อนหน้านี้)\n\n"
                     f"ระบบตรวจพบว่ามีรายงานเหตุจากบ้าน/ห้องเดียวกันอยู่แล้วในระบบ จึงรวมข้อมูลเป็นเคสเดียวกันเพื่อไม่ให้ทีมกู้ภัยได้รับแจ้งซ้ำซ้อน "
-                    f"ทีมงานกำลังประสานงานติดต่อกลับโดยเร็วที่สุดครับ"
+                    f"ทีมงานกำลังประสานงานติดต่อกลับโดยเร็วที่สุดครับ",
+                    track_id=case_id
                 )
 
             return jsonify({"success": success, "case_id": case_id, "merged": True})
@@ -1513,7 +1620,8 @@ def api_sos_submit():
                 f"✅ บันทึกข้อมูลแจ้งเหตุเรียบร้อยแล้วครับ\n"
                 f"เลขเคส: {case_id}\n\n"
                 f"ทีมงานได้รับแจ้งเหตุอุทกภัยฉุกเฉินแล้ว กำลังประสานงานติดต่อกลับโดยเร็วที่สุดครับ "
-                f"หากสถานการณ์เปลี่ยนแปลงหรือทวีความรุนแรงขึ้น พิมพ์ 'sos' เพื่อขอแบบฟอร์มส่งข้อมูลซ้ำได้ครับ"
+                f"หากสถานการณ์เปลี่ยนแปลงหรือทวีความรุนแรงขึ้น พิมพ์ 'sos' เพื่อขอแบบฟอร์มส่งข้อมูลซ้ำได้ครับ",
+                track_id=case_id
             )
 
         return jsonify({"success": success, "case_id": case_id, "merged": False})
@@ -1565,13 +1673,86 @@ def api_need_submit():
                 user_id,
                 f"✅ บันทึกข้อมูลความต้องการสิ่งของเรียบร้อยแล้วครับ\n"
                 f"เลขที่รายการ: {need_id}\n\n"
-                f"ทีมอาสาสมัครจะประสานจัดส่งสิ่งของบรรเทาทุกข์ให้เร็วที่สุดตามลำดับความเร่งด่วนครับ"
+                f"ทีมอาสาสมัครจะประสานจัดส่งสิ่งของบรรเทาทุกข์ให้เร็วที่สุดตามลำดับความเร่งด่วนครับ",
+                track_id=need_id
             )
 
         return jsonify({"success": success, "need_id": need_id})
     except Exception as e:
         Logger.error("Need_API", f"Submit error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/track", methods=['GET'])
+def api_track_case():
+    """
+    Self-serve case lookup for the /liff/track page — no LIFF auth needed,
+    since the case_id itself (SOS-YYYYMMDD-XXXXXX / NEED-YYYYMMDD-XXXXXX,
+    6 random hex chars) is the lookup key, the same trust model a shipping
+    tracking number uses. Returns a normalized {steps: [...]} timeline the
+    frontend renders directly, so SOS and Needs cases share one UI.
+    """
+    case_id = (request.args.get("id") or "").strip().upper()
+    if not case_id:
+        return jsonify({"success": False, "error": "missing_id"}), 400
+
+    if case_id.startswith("SOS-"):
+        records = sheets_mgr.get_all_records("sos_requests")
+        rec = next((r for r in records if str(r.get("request_id", "")).upper() == case_id), None)
+        if not rec:
+            return jsonify({"success": False, "error": "not_found"}), 404
+
+        status = str(rec.get("status", "OPEN")).upper()
+        status_label = {"OPEN": "รอดำเนินการ", "IN_PROGRESS": "ทีมกำลังช่วยเหลือ", "CLOSED": "ช่วยเหลือสำเร็จ"}.get(status, status)
+        in_progress_or_done = status in ("IN_PROGRESS", "CLOSED")
+        done = status == "CLOSED"
+
+        steps = [
+            {"label": "แจ้งเหตุแล้ว", "done": True, "time": rec.get("timestamp", "-")},
+            {"label": "ทีมกู้ภัยกำลังเดินทาง", "done": in_progress_or_done, "time": rec.get("accepted_at", "") if in_progress_or_done else ""},
+            {"label": "ช่วยเหลือสำเร็จ", "done": done, "time": rec.get("completed_at", "") if done else ""},
+        ]
+
+        return jsonify({
+            "success": True, "type": "sos", "case_id": case_id,
+            "status": status, "status_label": status_label,
+            "priority": rec.get("priority", "NORMAL"),
+            "people_count": rec.get("people_count", "-"),
+            "responder_name": rec.get("responder_name", "-"),
+            "note": rec.get("note", "-"),
+            "latitude": rec.get("latitude", ""), "longitude": rec.get("longitude", ""),
+            "steps": steps,
+        })
+
+    elif case_id.startswith("NEED-"):
+        records = sheets_mgr.get_all_records("user_needs")
+        rec = next((r for r in records if str(r.get("need_id", "")).upper() == case_id), None)
+        if not rec:
+            return jsonify({"success": False, "error": "not_found"}), 404
+
+        status = str(rec.get("status", "PENDING")).upper()
+        delivered = status in ("DELIVERED", "DONE", "COMPLETED")
+        in_progress = status not in ("PENDING", "")
+        status_label = "ส่งมอบแล้ว" if delivered else ("กำลังจัดเตรียม" if in_progress else "รอดำเนินการ")
+
+        steps = [
+            {"label": "ส่งคำขอแล้ว", "done": True, "time": rec.get("timestamp", "-")},
+            {"label": "อาสาสมัครกำลังจัดเตรียม", "done": in_progress or delivered, "time": ""},
+            {"label": "ส่งมอบแล้ว", "done": delivered, "time": rec.get("delivered_at", "") if delivered else ""},
+        ]
+
+        return jsonify({
+            "success": True, "type": "need", "case_id": case_id,
+            "status": status, "status_label": status_label,
+            "categories": rec.get("categories", "-"),
+            "responder_name": rec.get("volunteer_name", "-"),
+            "note": rec.get("details", "-"),
+            "latitude": rec.get("latitude", ""), "longitude": rec.get("longitude", ""),
+            "steps": steps,
+        })
+
+    else:
+        return jsonify({"success": False, "error": "invalid_id_format"}), 400
 
 
 @app.route("/api/register/submit", methods=['POST'])
@@ -1692,7 +1873,7 @@ def debug_status():
 # =============================================================================
 
 def _startup_self_check():
-    required_templates = ["sos_liff.html", "need_liff.html", "register_liff.html", "dashboard.html"]
+    required_templates = ["sos_liff.html", "need_liff.html", "register_liff.html", "dashboard.html", "track_liff.html"]
     templates_dir = os.path.join(app.root_path, app.template_folder or "templates")
 
     Logger.info("Startup", f"Checking LIFF templates in: {templates_dir}")
