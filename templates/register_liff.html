@@ -1147,11 +1147,24 @@
         }
 
         function closeLIFF() {
-            if (liff.isInClient()) {
-                liff.closeWindow();
-            } else {
-                window.close();
+            try {
+                if (liff.isInClient()) {
+                    liff.closeWindow();
+                    return;
+                }
+            } catch (e) {
+                console.error('liff.isInClient() failed:', e);
             }
+            window.close();
+            setTimeout(() => {
+                const successScreen = document.getElementById('successScreen');
+                if (successScreen) {
+                    const closedNotice = document.createElement('p');
+                    closedNotice.style.cssText = 'text-align:center; font-size:13px; color: var(--text-secondary); margin-top: 8px;';
+                    closedNotice.textContent = 'ทำรายการเสร็จสมบูรณ์แล้ว ปิดแท็บนี้ได้เลยครับ';
+                    successScreen.querySelector('.card').appendChild(closedNotice);
+                }
+            }, 300);
         }
 
         window.addEventListener('DOMContentLoaded', initLIFF);
