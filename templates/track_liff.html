@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ติดตามเคส - FLOODCARE AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #F8F9FA;
+            --surface-color: #FFFFFF;
+            --text-primary: #1F2226;
+            --text-secondary: #606870;
+            --border-soft: #EFEFF1;
+            --primary-accent: #E05353;
+            --primary-accent-light: #FCE8E8;
+            --success-accent: #3CD070;
+            --success-accent-light: #E8F8EE;
+            --info-accent: #2F6F8F;
+            --info-accent-light: #EBF3FC;
+            --warning-accent: #D67B27;
+            --warning-accent-light: #FDF1E6;
+            --ink: #1F2226;
+            --shadow-subtle: 0 16px 36px rgba(0, 0, 0, 0.04);
+            --shadow-button: 0 8px 24px rgba(31, 34, 38, 0.14);
+            --radius-xl: 28px;
+            --radius-lg: 20px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Inter', 'Kanit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding-bottom: 48px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 480px;
+            padding: 24px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* ---------- top bar ---------- */
+        .topbar { display: flex; align-items: center; gap: 12px; }
+        .topbar h1 { font-family: 'Kanit'; font-size: 1.1rem; font-weight: 600; flex: 1; text-align: center; }
+        .back-btn {
+            width: 40px; height: 40px; border-radius: 50%; background: var(--surface-color);
+            border: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: var(--shadow-subtle); flex-shrink: 0;
+        }
+        .back-btn svg { width: 18px; height: 18px; }
+        .spacer40 { width: 40px; flex-shrink: 0; }
+
+        /* ---------- card shell ---------- */
+        .card {
+            background: var(--surface-color);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-subtle);
+            border: 1px solid var(--border-soft);
+            padding: 22px;
+        }
+
+        /* ---------- search state ---------- */
+        #searchView { display: flex; flex-direction: column; gap: 16px; margin-top: 40px; }
+        #searchView .hero-icon {
+            width: 64px; height: 64px; border-radius: 50%; background: var(--info-accent-light);
+            display: flex; align-items: center; justify-content: center; margin: 0 auto 6px;
+        }
+        #searchView h2 { font-family: 'Kanit'; font-size: 1.3rem; text-align: center; font-weight: 600; }
+        #searchView p { color: var(--text-secondary); text-align: center; font-size: 0.88rem; line-height: 1.6; }
+        .input-row {
+            display: flex; align-items: center; gap: 10px; background: var(--bg-color);
+            border: 1px solid var(--border-soft); border-radius: var(--radius-lg); padding: 14px 18px;
+        }
+        .input-row input {
+            border: none; background: transparent; outline: none; flex: 1;
+            font-family: 'Inter'; font-size: 0.95rem; color: var(--text-primary); text-transform: uppercase;
+        }
+        .input-row input::placeholder { color: #B7BDC4; text-transform: none; }
+        .primary-btn {
+            border: none; border-radius: var(--radius-lg); padding: 16px; text-align: center;
+            font-family: 'Kanit'; font-weight: 600; font-size: 0.98rem; color: #fff;
+            background: var(--ink); box-shadow: var(--shadow-button); cursor: pointer;
+        }
+        .hint-text { color: var(--text-secondary); font-size: 0.78rem; text-align: center; }
+        #searchError {
+            display: none; background: var(--primary-accent-light); color: var(--primary-accent);
+            border-radius: var(--radius-lg); padding: 14px; font-size: 0.85rem; text-align: center;
+        }
+
+        /* ---------- result state ---------- */
+        #resultView { display: none; flex-direction: column; gap: 18px; }
+
+        .id-row { display: flex; align-items: center; gap: 12px; }
+        .id-icon {
+            width: 44px; height: 44px; border-radius: 50%; background: var(--bg-color);
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .id-text { flex: 1; }
+        .id-text .k { font-size: 0.72rem; color: var(--text-secondary); }
+        .id-text .v { font-family: 'Kanit'; font-size: 1.02rem; font-weight: 600; }
+        .status-pill {
+            padding: 7px 14px; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+            white-space: nowrap;
+        }
+
+        /* stepper */
+        .stepper { display: flex; align-items: flex-start; padding: 6px 4px; }
+        .step { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; }
+        .step .dot {
+            width: 26px; height: 26px; border-radius: 50%; border: 2px solid #D8DCE1; background: #fff;
+            display: flex; align-items: center; justify-content: center; z-index: 2; font-size: 0.7rem;
+        }
+        .step.done .dot { border-color: var(--ink); background: var(--ink); color: #fff; }
+        .step .line {
+            position: absolute; top: 13px; left: 50%; width: 100%; height: 2px; background: #D8DCE1; z-index: 1;
+        }
+        .step:last-child .line { display: none; }
+        .step.done .line { background: var(--ink); }
+        .step .label { font-size: 0.72rem; text-align: center; margin-top: 8px; font-weight: 500; }
+        .step .time { font-size: 0.66rem; color: var(--text-secondary); margin-top: 2px; }
+
+        /* details */
+        .details-head { display: flex; align-items: center; gap: 8px; color: var(--info-accent); font-weight: 600; font-size: 0.9rem; margin-bottom: 14px; }
+        .detail-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 0.86rem; }
+        .detail-row .k { color: var(--text-secondary); }
+        .detail-row .v { font-weight: 600; text-align: right; }
+
+        /* responder */
+        .responder-row { display: flex; align-items: center; gap: 12px; }
+        .responder-avatar {
+            width: 44px; height: 44px; border-radius: 50%; background: var(--success-accent-light);
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1.1rem;
+        }
+        .responder-info { flex: 1; }
+        .responder-info .name { font-weight: 600; font-size: 0.92rem; }
+        .responder-info .role { color: var(--text-secondary); font-size: 0.78rem; }
+        .call-btn {
+            width: 42px; height: 42px; border-radius: 50%; background: var(--ink); color: #fff;
+            display: flex; align-items: center; justify-content: center; text-decoration: none; flex-shrink: 0;
+        }
+
+        /* activity log */
+        .log-item { display: flex; gap: 12px; padding: 10px 0; }
+        .log-item .dotcol { display: flex; flex-direction: column; align-items: center; }
+        .log-item .dotcol .d { width: 9px; height: 9px; border-radius: 50%; background: var(--ink); margin-top: 4px; }
+        .log-item .dotcol .l { width: 2px; flex: 1; background: var(--border-soft); margin-top: 4px; }
+        .log-item:last-child .dotcol .l { display: none; }
+        .log-item .body { padding-bottom: 4px; }
+        .log-item .time { font-size: 0.72rem; color: var(--text-secondary); }
+        .log-item .desc { font-size: 0.84rem; margin-top: 2px; line-height: 1.5; }
+
+        .search-again { text-align: center; font-size: 0.82rem; color: var(--info-accent); font-weight: 600; margin-top: 4px; cursor: pointer; }
+
+        #loadingView { display: none; text-align: center; padding: 60px 0; color: var(--text-secondary); font-size: 0.88rem; }
+    </style>
+</head>
+<body>
+<div class="app-container">
+
+    <div class="topbar">
+        <div class="spacer40"></div>
+        <h1>ติดตามเคส</h1>
+        <div class="spacer40"></div>
+    </div>
+
+    <!-- ============ SEARCH STATE ============ -->
+    <div id="searchView">
+        <div class="hero-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F6F8F" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <h2>ค้นหาเคสของคุณ</h2>
+        <p>กรอกเลขเคสที่ได้รับทางแชท LINE ตอนแจ้งเหตุ SOS หรือขอความช่วยเหลือสำเร็จ</p>
+
+        <div class="card" style="padding: 16px;">
+            <div class="input-row">
+                <input id="caseIdInput" type="text" placeholder="เช่น SOS-20260719-A1B2C3" autocomplete="off">
+            </div>
+        </div>
+
+        <div id="searchError"></div>
+
+        <button class="primary-btn" onclick="lookupCase()">ค้นหาเคส</button>
+        <div class="hint-text">เลขเคสขึ้นต้นด้วย SOS- หรือ NEED- ตามด้วยวันที่และรหัส</div>
+    </div>
+
+    <!-- ============ LOADING ============ -->
+    <div id="loadingView">กำลังค้นหาเคส...</div>
+
+    <!-- ============ RESULT STATE ============ -->
+    <div id="resultView">
+
+        <div class="card">
+            <div class="id-row">
+                <div class="id-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1F2226" stroke-width="2"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </div>
+                <div class="id-text">
+                    <div class="k">เลขเคส</div>
+                    <div class="v" id="rCaseId">-</div>
+                </div>
+                <div class="status-pill" id="rStatusPill">-</div>
+            </div>
+
+            <div class="stepper" id="rStepper" style="margin-top: 22px;"></div>
+        </div>
+
+        <div class="card">
+            <div class="details-head">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2F6F8F" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                รายละเอียดเคส
+            </div>
+            <div id="rDetails"></div>
+        </div>
+
+        <div class="card" id="rResponderCard" style="display:none;">
+            <div class="responder-row">
+                <div class="responder-avatar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3CD070" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6"/></svg>
+                </div>
+                <div class="responder-info">
+                    <div class="name" id="rResponderName">-</div>
+                    <div class="role">ทีมผู้ดูแลเคสนี้</div>
+                </div>
+                <a class="call-btn" href="tel:1784" title="โทรสายด่วน ปภ. 1784">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                </a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="details-head" style="color: var(--text-primary);">ความเคลื่อนไหว</div>
+            <div id="rActivityLog"></div>
+        </div>
+
+        <div class="search-again" onclick="resetToSearch()">← ค้นหาเคสอื่น</div>
+    </div>
+
+</div>
+
+<script>
+    const STATUS_COLORS = {
+        "OPEN": { bg: "#FDF1E6", fg: "#D67B27" },
+        "IN_PROGRESS": { bg: "#EBF3FC", fg: "#2F6F8F" },
+        "CLOSED": { bg: "#E8F8EE", fg: "#3CD070" },
+        "PENDING": { bg: "#FDF1E6", fg: "#D67B27" },
+        "DELIVERED": { bg: "#E8F8EE", fg: "#3CD070" },
+        "DONE": { bg: "#E8F8EE", fg: "#3CD070" },
+        "COMPLETED": { bg: "#E8F8EE", fg: "#3CD070" },
+    };
+
+    function qs(id) { return document.getElementById(id); }
+
+    function showView(name) {
+        qs("searchView").style.display = name === "search" ? "flex" : "none";
+        qs("loadingView").style.display = name === "loading" ? "block" : "none";
+        qs("resultView").style.display = name === "result" ? "flex" : "none";
+    }
+
+    function resetToSearch() {
+        history.replaceState(null, "", location.pathname);
+        showView("search");
+        qs("searchError").style.display = "none";
+    }
+
+    async function lookupCase(idOverride) {
+        const raw = (idOverride || qs("caseIdInput").value || "").trim().toUpperCase();
+        qs("searchError").style.display = "none";
+        if (!raw) return;
+
+        showView("loading");
+        try {
+            const res = await fetch(`/api/track?id=${encodeURIComponent(raw)}`);
+            const data = await res.json();
+            if (!data.success) {
+                showView("search");
+                qs("searchError").textContent =
+                    data.error === "not_found" ? "ไม่พบเคสนี้ในระบบ กรุณาตรวจสอบเลขเคสอีกครั้ง" :
+                    data.error === "invalid_id_format" ? "รูปแบบเลขเคสไม่ถูกต้อง ต้องขึ้นต้นด้วย SOS- หรือ NEED-" :
+                    "ค้นหาไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
+                qs("searchError").style.display = "block";
+                return;
+            }
+            renderResult(data);
+            history.replaceState(null, "", `${location.pathname}?id=${encodeURIComponent(raw)}`);
+            showView("result");
+        } catch (e) {
+            showView("search");
+            qs("searchError").textContent = "เชื่อมต่อระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
+            qs("searchError").style.display = "block";
+        }
+    }
+
+    function renderResult(data) {
+        qs("rCaseId").textContent = data.case_id;
+
+        const pill = qs("rStatusPill");
+        const colors = STATUS_COLORS[data.status] || { bg: "#EFEFF1", fg: "#606870" };
+        pill.textContent = data.status_label;
+        pill.style.background = colors.bg;
+        pill.style.color = colors.fg;
+
+        const stepper = qs("rStepper");
+        stepper.innerHTML = "";
+        data.steps.forEach(s => {
+            const el = document.createElement("div");
+            el.className = "step" + (s.done ? " done" : "");
+            el.innerHTML = `
+                <div class="line"></div>
+                <div class="dot">${s.done ? "✓" : ""}</div>
+                <div class="label">${s.label}</div>
+                <div class="time">${s.time || ""}</div>
+            `;
+            stepper.appendChild(el);
+        });
+
+        const details = qs("rDetails");
+        details.innerHTML = "";
+        const rows = data.type === "sos" ? [
+            ["ประเภท", "แจ้งเหตุฉุกเฉิน SOS"],
+            ["ความเร่งด่วน", data.priority || "-"],
+            ["จำนวนคน", data.people_count || "-"],
+            ["หมายเหตุ", data.note || "-"],
+        ] : [
+            ["ประเภท", "ขอความช่วยเหลือเรื่องสิ่งของ"],
+            ["หมวดหมู่", data.categories || "-"],
+            ["รายละเอียด", data.note || "-"],
+        ];
+        if (data.latitude && data.longitude) {
+            rows.push(["พิกัด", "ดูแผนที่"]);
+        }
+        rows.forEach(([k, v]) => {
+            const row = document.createElement("div");
+            row.className = "detail-row";
+            if (k === "พิกัด") {
+                row.innerHTML = `<span class="k">${k}</span><a class="v" style="color:var(--info-accent);" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${data.latitude},${data.longitude}">${v} ↗</a>`;
+            } else {
+                row.innerHTML = `<span class="k">${k}</span><span class="v">${v}</span>`;
+            }
+            details.appendChild(row);
+        });
+
+        const responderCard = qs("rResponderCard");
+        if (data.responder_name && data.responder_name !== "-") {
+            responderCard.style.display = "block";
+            qs("rResponderName").textContent = data.responder_name;
+        } else {
+            responderCard.style.display = "none";
+        }
+
+        const log = qs("rActivityLog");
+        log.innerHTML = "";
+        data.steps.filter(s => s.done).forEach(s => {
+            const item = document.createElement("div");
+            item.className = "log-item";
+            item.innerHTML = `
+                <div class="dotcol"><div class="d"></div><div class="l"></div></div>
+                <div class="body">
+                    <div class="time">${s.time || ""}</div>
+                    <div class="desc">${s.label}</div>
+                </div>
+            `;
+            log.appendChild(item);
+        });
+    }
+
+    qs("caseIdInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") lookupCase();
+    });
+
+    // If opened with ?id=... (e.g. tapped from the LINE chat confirmation button), auto-lookup.
+    const params = new URLSearchParams(location.search);
+    const presetId = params.get("id");
+    if (presetId) {
+        lookupCase(presetId);
+    }
+</script>
+</body>
+</html>
