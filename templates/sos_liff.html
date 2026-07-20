@@ -846,6 +846,7 @@
                     </div>
                 </div>
 
+                <a id="trackCaseBtn" class="btn-modern btn-primary" href="#" style="text-decoration:none; display:flex; align-items:center; justify-content:center;">ติดตามเคสนี้</a>
                 <button class="btn-modern btn-secondary" onclick="closeLIFF()">ปิดหน้าต่างนี้</button>
             </div>
         </div>
@@ -1157,6 +1158,7 @@
                 
                 if (result.success) {
                     document.getElementById('caseId').textContent = result.case_id;
+                    document.getElementById('trackCaseBtn').href = '/liff/track?id=' + encodeURIComponent(result.case_id);
                     document.getElementById('step5').classList.add('hidden');
                     document.getElementById('successScreen').classList.remove('hidden');
                     document.getElementById('successScreen').classList.add('fade-in');
@@ -1191,11 +1193,28 @@
         }
 
         function closeLIFF() {
-            if (liff.isInClient()) {
-                liff.closeWindow();
-            } else {
-                window.close();
+            try {
+                if (liff.isInClient()) {
+                    liff.closeWindow();
+                    return;
+                }
+            } catch (e) {
+                console.error('liff.isInClient() failed:', e);
             }
+            // Outside the LINE app, window.close() only works on tabs opened
+            // via window.open() — browsers silently ignore it otherwise, which
+            // is why the button can look like it "does nothing". Show a clear
+            // message so the person knows it's safe to close the tab manually.
+            window.close();
+            setTimeout(() => {
+                const successScreen = document.getElementById('successScreen');
+                if (successScreen) {
+                    const closedNotice = document.createElement('p');
+                    closedNotice.style.cssText = 'text-align:center; font-size:13px; color: var(--text-secondary); margin-top: 8px;';
+                    closedNotice.textContent = 'ทำรายการเสร็จสมบูรณ์แล้ว ปิดแท็บนี้ได้เลยครับ';
+                    successScreen.querySelector('.card').appendChild(closedNotice);
+                }
+            }, 300);
         }
 
         document.addEventListener('DOMContentLoaded', initLIFF);
