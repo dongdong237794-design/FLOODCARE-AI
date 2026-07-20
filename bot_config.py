@@ -133,6 +133,7 @@ DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "")
 
 # Performance Tuning
 WATER_DATA_MAX_AGE_MINUTES = int(os.environ.get("WATER_DATA_MAX_AGE_MINUTES", "10"))
+MAX_CASES_PER_SECTION = int(os.environ.get("MAX_CASES_PER_SECTION", "10"))
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
 RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "30"))
 RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
@@ -429,6 +430,9 @@ class IntentClassifier:
         "NEEDS": [
             "ขอของ", "ขอสิ่งของ", "ต้องการสิ่งของ", "ขาดแคลน", "need supplies", "need items"
         ],
+        "TRACK": [
+            "ติดตามเคส", "เช็คสถานะ", "เช็กสถานะ", "ติดตามสถานะ", "track", "tracking"
+        ],
         "SNAKE_BITE": [
             "งูกัด", "ถูกงูกัด", "โดนงูกัด", "งูกัดครับ", "งูกัดค่ะ", "ถูกงู", "โดนงู", "งูฉก"
         ],
@@ -539,7 +543,7 @@ class IntentClassifier:
 # to an answer while "น้ำแถวบ้านผมเป็นไง" asks for the user's location first.
 
 INTENT_LIST_AI = [
-    "EMERGENCY", "SOS", "NEEDS", "SNAKE_BITE", "ACCIDENT", "PREP_GUIDE", "GREETING",
+    "EMERGENCY", "SOS", "NEEDS", "TRACK", "SNAKE_BITE", "ACCIDENT", "PREP_GUIDE", "GREETING",
     "HELP", "FAQ", "CONTACT", "SHELTER", "WATER_LEVEL", "WEATHER",
     "REGISTRATION", "LANGUAGE", "CANCEL", "AI_QUERY"
 ]
@@ -555,6 +559,7 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "- EMERGENCY: สถานการณ์คับขันเป็นอันตรายถึงชีวิตตอนนี้ (กำลังจมน้ำ ไฟดูด ฯลฯ)\n"
     "- SOS: ขอความช่วยเหลือกู้ภัยจากน้ำท่วม ต้องการให้ทีมไปช่วยเหลือ (ชีวิต/ความปลอดภัย)\n"
     "- NEEDS: ขอความช่วยเหลือเรื่องสิ่งของ/เสบียง/ของบรรเทาทุกข์ (ไม่ใช่ขอกู้ภัยฉุกเฉิน)\n"
+    "- TRACK: ต้องการติดตามสถานะ/ความคืบหน้าของเคสที่เคยแจ้งไปแล้ว (SOS หรือขอของ) เช่น \"เคสของฉันถึงไหนแล้ว\" \"เช็คสถานะการแจ้งเหตุ\"\n"
     "- SNAKE_BITE: ถูกงูกัด\n"
     "- ACCIDENT: อุบัติเหตุ บาดเจ็บ\n"
     "- PREP_GUIDE: ถามวิธีเตรียมตัวรับมือน้ำท่วมล่วงหน้า\n"
@@ -1071,10 +1076,11 @@ class SheetsManager:
                          "consent_pdpa", "register_date", "status"],
                 "sos_requests": ["request_id", "household_id", "user_id", "timestamp", "latitude", "longitude",
                                 "people_count", "children", "elderly", "bedridden", "pets",
-                                "water_level", "note", "priority", "status"],
+                                "water_level", "note", "priority", "status",
+                                "accepted_at", "completed_at", "responder_name", "last_notified_status"],
                 "user_needs": ["need_id", "timestamp", "user_id", "first_name", "last_name", "phone",
                               "latitude", "longitude", "categories", "details", "urgency", "status",
-                              "halal_required", "volunteer_name", "delivered_at"],
+                              "halal_required", "volunteer_name", "delivered_at", "last_notified_status"],
                 "Shelters": ["ShelterID", "Name", "Province", "District", "Subdistrict", "Latitude",
                             "Longitude", "Capacity", "Occupancy", "Status",
                             "Beds", "Toilets", "Parking", "Facilities"],
@@ -1221,6 +1227,41 @@ class SheetsManager:
             Logger.error("Sheets", f"Get records error: {e}")
             return []
     
+    def update_row_by_id(self, worksheet_name: str, id_column: str, id_value: str, update_dict: dict) -> bool:
+        """
+        Finds the row where `id_column` == `id_value` and updates only the
+        fields in `update_dict`, matched by header name (same header-name
+        matching approach as append_row_by_headers, so nothing shifts if the
+        sheet's column order differs from the code's).
+        """
+        client = self.get_client()
+        if not client:
+            return False
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet(worksheet_name)
+            headers = ws.row_values(1)
+            if id_column not in headers:
+                Logger.error("Sheets", f"'{worksheet_name}' has no '{id_column}' column")
+                return False
+
+            id_col_index = headers.index(id_column) + 1
+            id_cells = ws.col_values(id_col_index)
+            row_num = next((i + 1 for i, v in enumerate(id_cells) if v == id_value), None)
+            if row_num is None:
+                return False
+
+            for field, value in update_dict.items():
+                if field in headers:
+                    col_index = headers.index(field) + 1
+                    ws.update_cell(row_num, col_index, value)
+
+            cache.sheets.delete(f"sheets:{worksheet_name}")
+            return True
+        except Exception as e:
+            Logger.error("Sheets", f"update_row_by_id error: {e}")
+            return False
+
     def update_cell(self, worksheet_name: str, row: int, col: int, value):
         client = self.get_client()
         if not client:
@@ -2071,6 +2112,137 @@ def build_prep_guide_flex(member_count: int = 1, lang="TH"):
     )
 
 
+_CASE_STATUS_COLORS = {
+    "รอดำเนินการ": {"bg": "#FEF3C7", "text": "#92400E"},
+    "ทีมกำลังช่วยเหลือ": {"bg": "#DBEAFE", "text": "#1D4ED8"},
+    "กำลังจัดเตรียม": {"bg": "#DBEAFE", "text": "#1D4ED8"},
+    "ช่วยเหลือสำเร็จ": {"bg": "#A7F0D2", "text": "#047857"},
+    "ส่งมอบแล้ว": {"bg": "#A7F0D2", "text": "#047857"},
+}
+
+
+def _case_avatar(kind: str):
+    """Small colored initial-circle avatar — 'S' for SOS (red family), 'N' for Need (blue family)."""
+    bg, letter = ("#B91C1C", "S") if kind == "sos" else ("#1D4ED8", "N")
+    return BoxComponent(
+        layout="vertical", width="36px", height="36px", corner_radius="18px",
+        background_color=bg, justify_content="center", align_items="center", flex=0,
+        contents=[TextComponent(text=letter, size="sm", weight="bold", color="#FFFFFF", align="center")]
+    )
+
+
+def _tag_chip(label: str):
+    """Small neutral gray tag chip (e.g. category / priority / people-count tags)."""
+    return BoxComponent(
+        layout="vertical", flex=0, background_color="#F3F4F6", corner_radius="8px",
+        padding_start="9px", padding_end="9px", padding_top="4px", padding_bottom="4px",
+        contents=[TextComponent(text=label, size="xxs", color="#4B5563", weight="bold")]
+    )
+
+
+def _case_row(c: dict, base_url: str):
+    sev = _CASE_STATUS_COLORS.get(c["status_label"], {"bg": "#EFEFF1", "text": "#374151"})
+    track_url = f"{base_url}/liff/track?id={c['case_id']}"
+
+    return BoxComponent(
+        layout="vertical",
+        background_color="#FFFFFF",
+        corner_radius="16px",
+        padding_all="lg",
+        margin="md",
+        action=URIAction(label="ดูรายละเอียด", uri=track_url),
+        contents=[
+            BoxComponent(
+                layout="horizontal", spacing="sm",
+                contents=[
+                    _case_avatar(c["kind"]),
+                    BoxComponent(
+                        layout="vertical", flex=1, justify_content="center",
+                        contents=[
+                            TextComponent(text=c["case_id"], size="xs", weight="bold", color="#111827"),
+                            TextComponent(text=c["date"], size="xxs", color="#9CA3AF", margin="xs"),
+                        ]
+                    ),
+                    _pill_badge(c["status_label"], sev["bg"], sev["text"]),
+                ]
+            ),
+            BoxComponent(
+                layout="vertical", height="38px", justify_content="flex-start", margin="md",
+                contents=[
+                    TextComponent(text=c.get("summary") or "ไม่มีรายละเอียดเพิ่มเติม", size="sm",
+                                  weight="bold", color="#111827", wrap=True, max_lines=2),
+                ]
+            ),
+            BoxComponent(
+                layout="horizontal", spacing="xs", margin="sm", wrap=True,
+                contents=[_tag_chip(t) for t in c.get("tags", [])] or [TextComponent(text="", size="xxs")]
+            ),
+            _dashed_rule(),
+            BoxComponent(
+                layout="horizontal", margin="md", align_items="center",
+                contents=[
+                    BoxComponent(
+                        layout="vertical", flex=1,
+                        contents=[
+                            TextComponent(text="สถานะล่าสุด", size="xxs", color="#9CA3AF"),
+                            TextComponent(text=c["status_label"], size="sm", weight="bold", color="#111827", margin="xs"),
+                        ]
+                    ),
+                    _pill_button("ดูรายละเอียด", URIAction(label="ดูรายละเอียด", uri=track_url)),
+                ]
+            ),
+        ]
+    )
+
+
+def build_my_cases_flex_message(cases: list, base_url: str) -> FlexSendMessage:
+    """
+    Lists every SOS/Need case a user has filed as ONE vertically-stacked
+    Flex bubble (not a horizontal swipe carousel) — each case rendered as
+    its own card-like row, tappable straight through to its tracking page.
+    SOS and Need cases are grouped into their own clearly-labeled sections
+    since they carry different fields (priority/people-count vs categories).
+    `cases` is a list of dicts: {case_id, kind ('sos'|'need'), status_label,
+    date, summary, tags}, already sorted newest-first by the caller.
+    """
+    sos_all = [c for c in cases if c["kind"] == "sos"]
+    need_all = [c for c in cases if c["kind"] == "need"]
+    sos_cases = sos_all[:MAX_CASES_PER_SECTION]
+    need_cases = need_all[:MAX_CASES_PER_SECTION]
+
+    contents = [
+        TextComponent(text="เคสของคุณ", weight="bold", size="lg", color="#111827"),
+        TextComponent(text=f"ทั้งหมด {len(cases)} รายการ", size="xs", color="#9CA3AF", margin="xs"),
+    ]
+
+    if sos_cases:
+        contents.append(TextComponent(text="แจ้งเหตุฉุกเฉิน", size="sm", weight="bold", color="#B91C1C", margin="xl"))
+        for c in sos_cases:
+            contents.append(_case_row(c, base_url))
+        if len(sos_all) > MAX_CASES_PER_SECTION:
+            contents.append(TextComponent(
+                text=f"แสดง {MAX_CASES_PER_SECTION} รายการล่าสุด จากทั้งหมด {len(sos_all)} รายการ",
+                size="xxs", color="#9CA3AF", margin="sm"
+            ))
+
+    if need_cases:
+        contents.append(TextComponent(text="ขอความช่วยเหลือสิ่งของ", size="sm", weight="bold", color="#1D4ED8", margin="xl"))
+        for c in need_cases:
+            contents.append(_case_row(c, base_url))
+        if len(need_all) > MAX_CASES_PER_SECTION:
+            contents.append(TextComponent(
+                text=f"แสดง {MAX_CASES_PER_SECTION} รายการล่าสุด จากทั้งหมด {len(need_all)} รายการ",
+                size="xxs", color="#9CA3AF", margin="sm"
+            ))
+
+    bubble = BubbleContainer(
+        size="giga",
+        styles=BubbleStyle(body=BlockStyle(background_color="#F5F6F8")),
+        body=BoxComponent(layout="vertical", padding_all="lg", contents=contents)
+    )
+    return FlexSendMessage(alt_text=f"เคสของคุณ ({len(cases)} รายการ)", contents=bubble)
+
+
 def build_help_flex(lang="TH"):
     """
     Capabilities / help menu.
@@ -2079,6 +2251,7 @@ def build_help_flex(lang="TH"):
     items = [
         ("🆘", "แจ้งเหตุฉุกเฉิน", "พิมพ์ 'sos'"),
         ("📦", "ขอความช่วยเหลือเรื่องสิ่งของ", "พิมพ์ 'ขอของ'"),
+        ("📍", "ติดตามเคสที่แจ้งไปแล้ว", "พิมพ์ 'ติดตามเคส'"),
         ("🌊", "เช็คระดับน้ำใกล้คุณ", "พิมพ์ 'เช็คระดับน้ำ' แล้วแชร์พิกัด"),
         ("🌦️", "เช็คสภาพอากาศ", "พิมพ์ 'สภาพอากาศ' แล้วแชร์พิกัด"),
         ("🏠", "หาศูนย์พักพิงใกล้คุณ", "พิมพ์ 'ศูนย์พักพิง' แล้วแชร์พิกัด"),
@@ -2743,8 +2916,9 @@ def get_greeting_message(user_name="คุณ"):
         "3. ค้นหาศูนย์พักพิงและจุดอพยพ\n"
         "4. ตรวจสอบระดับน้ำและสภาพอากาศ\n"
         "5. แจ้งความต้องการสิ่งของบรรเทาทุกข์\n"
-        "6. คู่มือเตรียมความพร้อมและปฐมพยาบาล\n"
-        "7. สอบถามข้อมูลภัยพิบัติผ่านระบบ AI\n\n"
+        "6. ติดตามสถานะเคสที่เคยแจ้งไว้\n"
+        "7. คู่มือเตรียมความพร้อมและปฐมพยาบาล\n"
+        "8. สอบถามข้อมูลภัยพิบัติผ่านระบบ AI\n\n"
         "ยินดีช่วยเหลือคุณตลอด 24 ชั่วโมงครับ"
     )
     return TextSendMessage(text=text)
@@ -2819,6 +2993,18 @@ def calculate_sos_priority(group_types: list, urgency_level: str) -> Tuple[str, 
     return ("🟢 NORMAL", "NORMAL")
 
 
+SOS_STATUS_LABELS_TH = {"OPEN": "รอดำเนินการ", "IN_PROGRESS": "ทีมกำลังช่วยเหลือ", "CLOSED": "ช่วยเหลือสำเร็จ"}
+
+
+def need_status_label_th(status: str) -> str:
+    status = (status or "").upper()
+    if status in ("DELIVERED", "DONE", "COMPLETED"):
+        return "ส่งมอบแล้ว"
+    if status in ("", "PENDING"):
+        return "รอดำเนินการ"
+    return "กำลังจัดเตรียม"
+
+
 def start_background_tasks():
     def cleanup_loop():
         while True:
@@ -2857,13 +3043,72 @@ def start_background_tasks():
                 Logger.error("WaterLevelRefresh", f"Loop error: {e}")
             time.sleep(600)
 
+    def status_notification_loop():
+        # Polls sos_requests / user_needs every 3 minutes for status changes
+        # made directly in the sheet by staff (e.g. accepting a case, marking
+        # delivered) and pushes a LINE message to the reporting user the
+        # moment it changes — instead of making them keep re-checking
+        # 'ติดตามเคส' themselves. Uses 'last_notified_status' as a durable
+        # marker (stored in the sheet itself) so a bot restart never causes
+        # duplicate or missed notifications.
+        base = PUBLIC_BASE_URL or "https://floodcare-ai-2.onrender.com"
+        while True:
+            try:
+                for r in sheets_mgr.get_all_records("sos_requests"):
+                    status = str(r.get("status", "")).upper().strip()
+                    last_notified = str(r.get("last_notified_status", "")).upper().strip()
+                    user_id = str(r.get("user_id", "")).strip()
+                    case_id = str(r.get("request_id", "")).strip()
+                    if not status or not user_id or not case_id or status == last_notified:
+                        continue
+                    if last_notified:  # skip push on first-ever sighting of a fresh row — just establish baseline
+                        label = SOS_STATUS_LABELS_TH.get(status, status)
+                        try:
+                            line_bot_api.push_message(
+                                user_id,
+                                TextSendMessage(
+                                    text=f"อัปเดตเคส {case_id}\nสถานะล่าสุด: {label}\n\nดูรายละเอียดเพิ่มเติมที่ {base}/liff/track?id={case_id}"
+                                )
+                            )
+                            Logger.info("StatusNotify", f"Pushed SOS {case_id} -> {status}")
+                        except Exception as e:
+                            Logger.error("StatusNotify", f"Push failed for {case_id}: {e}")
+                    sheets_mgr.update_row_by_id("sos_requests", "request_id", case_id, {"last_notified_status": status})
+
+                for r in sheets_mgr.get_all_records("user_needs"):
+                    status_raw = str(r.get("status", "")).strip()
+                    last_notified = str(r.get("last_notified_status", "")).strip()
+                    user_id = str(r.get("user_id", "")).strip()
+                    case_id = str(r.get("need_id", "")).strip()
+                    if not user_id or not case_id or status_raw.upper() == last_notified.upper():
+                        continue
+                    if last_notified:
+                        label = need_status_label_th(status_raw)
+                        try:
+                            line_bot_api.push_message(
+                                user_id,
+                                TextSendMessage(
+                                    text=f"อัปเดตรายการ {case_id}\nสถานะล่าสุด: {label}\n\nดูรายละเอียดเพิ่มเติมที่ {base}/liff/track?id={case_id}"
+                                )
+                            )
+                            Logger.info("StatusNotify", f"Pushed NEED {case_id} -> {status_raw}")
+                        except Exception as e:
+                            Logger.error("StatusNotify", f"Push failed for {case_id}: {e}")
+                    sheets_mgr.update_row_by_id("user_needs", "need_id", case_id, {"last_notified_status": status_raw})
+            except Exception as e:
+                Logger.error("StatusNotify", f"Loop error: {e}")
+            time.sleep(180)
+
     thread = threading.Thread(target=cleanup_loop, daemon=True)
     thread.start()
 
     water_thread = threading.Thread(target=water_level_refresh_loop, daemon=True)
     water_thread.start()
 
-    Logger.info("System", "Background cleanup + water-level refresh started")
+    notify_thread = threading.Thread(target=status_notification_loop, daemon=True)
+    notify_thread.start()
+
+    Logger.info("System", "Background cleanup + water-level refresh + status notifications started")
 
 start_background_tasks()
 Logger.info("System", "FLOODCARE AI Bot Config v2.5.1 Initialized Successfully")
