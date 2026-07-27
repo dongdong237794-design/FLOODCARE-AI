@@ -1067,7 +1067,21 @@ input:checked + .slider:before { transform: translateX(21px); }
       <!-- STEP 3 -->
       <div class="shstep" data-step="3" style="display:none;">
         <div class="step-label">ขั้นตอน 3 จาก 3 — สิ่งอำนวยความสะดวก</div>
-        <div class="facopt" id="facOptions"></div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: block; margin-bottom:8px;">
+            มีให้บริการหรือไม่ (แสดงเป็นเครื่องหมายถูกในการ์ด LINE)
+          </label>
+          <div class="facopt" id="coreFacOptions"></div>
+        </div>
+
+        <div style="border-top: 1px dashed var(--border); padding-top: 14px;">
+          <label style="font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: block; margin-bottom:8px;">
+            สิ่งอำนวยความสะดวกเพิ่มเติม (ข้อความเสริมในการ์ด)
+          </label>
+          <div class="facopt" id="facOptions"></div>
+        </div>
+
         <div class="fbrow" style="margin-top:20px;">
           <button class="fullbtn light" data-prev="2" style="margin-bottom:0;"><i class="ph ph-arrow-left"></i> ย้อนกลับ</button>
           <button class="fullbtn dark" id="f_submit"><i class="ph ph-floppy-disk"></i> บันทึก</button>
@@ -1083,6 +1097,11 @@ const PRIORITY_LABEL = { CRITICAL:'วิกฤต', HIGH:'เร่งด่ว
 const STATUS_LABEL   = { OPEN:'รอรับเคส', IN_PROGRESS:'กำลังช่วย', CLOSED:'เสร็จสิ้น' };
 const NEEDS_URGENCY_LABEL = { CRITICAL:'ด่วนวิกฤต', HIGH:'ปานกลาง', NORMAL:'ไม่ด่วน' };
 const SHELTER_COLORS = ['#22C55E','#16A34A','#4ADE80','#15803D','#86EFAC'];
+const CORE_FACILITIES = [
+  { key: 'beds', label: 'เตียง' },
+  { key: 'toilets', label: 'ห้องน้ำ' },
+  { key: 'parking', label: 'ที่จอดรถ' },
+];
 const FACILITIES = ['ไฟฟ้า','น้ำสะอาด','อินเทอร์เน็ต','รองรับผู้พิการ','รับสัตว์เลี้ยง','มีแพทย์ประจำ'];
 
 let state = {
@@ -1092,7 +1111,8 @@ let state = {
   needsSearch: '', needsUrg: 'ALL', needsStat: 'ALL',
   pending: {},
   settings: { darkMode:false, hideClosed:false },
-  facilities: new Set(['ไฟฟ้า','น้ำสะอาด'])
+  facilities: new Set(['ไฟฟ้า','น้ำสะอาด']),
+  coreFacilities: { beds: false, toilets: false, parking: false }
 };
 
 let dashMap, fullMap;
@@ -1677,8 +1697,10 @@ document.getElementById('openShelterModal').addEventListener('click',()=>{
   document.getElementById('f_capacity').value=100;
   document.getElementById('f_occupancy').value=0;
   document.getElementById('shelterFormErr').innerHTML='';
+  state.coreFacilities = { beds: false, toilets: false, parking: false };
   initDropdowns();
   renderFacilityOptions();
+  renderCoreFacOptions();
   goToStep(1);
   shelterModal.classList.add('show');
   initModalMap();
@@ -1722,6 +1744,22 @@ document.getElementById('f_geoBtn').addEventListener('click',()=>{
     err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>ไม่สามารถดึงพิกัดตำแหน่งของคุณได้ในขณะนี้ กรุณาคลิกปักหมุดเองบนแผนที่</div>`;
   });
 });
+
+function renderCoreFacOptions(){
+  const el=document.getElementById('coreFacOptions');
+  el.innerHTML=CORE_FACILITIES.map(f=>{
+    const isSel=!!state.coreFacilities[f.key];
+    return `<div class="facitem ${isSel?'sel':''}" onclick="toggleCoreFac('${f.key}',this)">
+      <div class="chk">${isSel?'<i class="ph-bold ph-check" style="font-size:10px;"></i>':''}</div>
+      ${f.label}
+    </div>`;
+  }).join('');
+}
+function toggleCoreFac(key,el){
+  state.coreFacilities[key] = !state.coreFacilities[key];
+  el.classList.toggle('sel', state.coreFacilities[key]);
+  el.querySelector('.chk').innerHTML = state.coreFacilities[key] ? '<i class="ph-bold ph-check" style="font-size:10px;"></i>' : '';
+}
 
 function renderFacilityOptions(){
   const el=document.getElementById('facOptions');
@@ -2155,6 +2193,9 @@ document.getElementById('f_submit').addEventListener('click',async()=>{
         longitude:parseFloat(document.getElementById('f_lon').value)||0,
         capacity:parseInt(document.getElementById('f_capacity').value)||100,
         occupancy:parseInt(document.getElementById('f_occupancy').value)||0,
+        beds:state.coreFacilities.beds,
+        toilets:state.coreFacilities.toilets,
+        parking:state.coreFacilities.parking,
         facilities:[...state.facilities],
       })
     });
