@@ -30,7 +30,7 @@ import bot_config
 from bot_config import (
     # Core systems
     Logger, cache, rate_limiter, sessions,
-    IntentClassifier, classify_intent_ai,
+    IntentClassifier, classify_intent_ai, classify_and_maybe_answer,
     compose_water_level_reply, compose_shelter_reply,
     # Time helper
     get_bangkok_time,
@@ -162,7 +162,7 @@ def _push_save_confirmation(user_id: Optional[str], message: str, track_id: Opti
             base = PUBLIC_BASE_URL or "https://floodcare-ai-2.onrender.com"
             track_url = f"{base}/liff/track?id={track_id}"
             quick_reply = QuickReply(items=[
-                QuickReplyButton(action=URIAction(label="📍 ติดตามเคสนี้", uri=track_url))
+                QuickReplyButton(action=URIAction(label="ติดตามเคสนี้", uri=track_url))
             ])
         line_bot_api.push_message(user_id, TextSendMessage(text=message, quick_reply=quick_reply))
     except Exception as e:
@@ -350,12 +350,20 @@ def handle_text_message(event):
     
     if user_text.startswith("ตั้งค่าภาษา: "):
         lang = user_text.replace("ตั้งค่าภาษา: ", "").strip()
-        session.language = lang
-        msgs = {"TH": "✅ ภาษาไทย", "EN": "✅ English", "JP": "✅ 日本語", "MY": "✅ Bahasa Melayu"}
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=msgs.get(lang, f"✅ Language set to {lang}"))
-        )
+        if lang in ("TH", "MY"):
+            session.language = lang
+            try:
+                sheets_mgr.update_row_by_id("users", "user_id", user_id, {"preferred_language": lang})
+            except Exception as e:
+                Logger.error("Language", f"Could not persist preferred_language: {e}")
+            line_bot_api.reply_message(event.reply_token, get_greeting_message(_get_display_name(user_id), lang))
+        else:
+            lang_names = {"EN": "English", "JP": "日本語"}
+            reply_text = (
+                f"ขออภัยครับ {lang_names.get(lang, lang)} ยังอยู่ระหว่างการพัฒนา "
+                f"ตอนนี้ระบบให้บริการเต็มรูปแบบในภาษาไทยและมลายูครับ"
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
     
     if user_text in ["ยกเลิก", "cancel", "หยุด", "stop"]:
@@ -375,22 +383,35 @@ def handle_text_message(event):
     # from keywords, per the updated spec.
     text_clean_for_menu = user_text.strip().lower().strip("!.,😊🙏👋🆘 ")
     is_menu_trigger = text_clean_for_menu in _ALL_KEYWORD_TRIGGERS
+    pre_answer = None  # set below if the combined call already drafted a usable answer
 
     if is_menu_trigger:
         intent, confidence = IntentClassifier.classify(user_text)
         scope = "MENU"
     else:
-        ai_result = classify_intent_ai(user_text)
-        intent = ai_result.get("intent", "AI_QUERY")
-        confidence = ai_result.get("confidence", 0.5)
-        scope = ai_result.get("scope", "GENERAL")
+        # Try the single-round-trip combined call first (classify + draft
+        # answer together) — cuts typical latency roughly in half for FAQ/
+        # AI_QUERY messages. Falls back to the original two-step flow below
+        # if the model's output couldn't be parsed for any reason.
+        combined = classify_and_maybe_answer(user_text, session.language)
+        if combined:
+            intent = combined.get("intent", "AI_QUERY")
+            confidence = combined.get("confidence", 0.5)
+            scope = combined.get("scope", "GENERAL")
+            if combined.get("answer"):
+                pre_answer = combined
+        else:
+            ai_result = classify_intent_ai(user_text)
+            intent = ai_result.get("intent", "AI_QUERY")
+            confidence = ai_result.get("confidence", 0.5)
+            scope = ai_result.get("scope", "GENERAL")
 
     session.last_intent = intent
 
     Logger.info(
         "Intent",
         f"Classified as {intent} (confidence: {confidence}, scope: {scope}, "
-        f"via: {'menu_keyword' if is_menu_trigger else 'ai'})",
+        f"via: {'menu_keyword' if is_menu_trigger else ('combined' if pre_answer else 'ai')})",
         {"user": bot_config.hash_user_id(user_id)}
     )
     
@@ -417,7 +438,7 @@ def handle_text_message(event):
     
     # GREETING
     if intent == "GREETING":
-        greeting_msg = get_greeting_message(_get_display_name(user_id))
+        greeting_msg = get_greeting_message(_get_display_name(user_id), session.language)
         line_bot_api.reply_message(event.reply_token, greeting_msg)
         return
 
@@ -428,7 +449,7 @@ def handle_text_message(event):
 
     # FAQ (Google search with grounding)
     if intent == "FAQ":
-        _handle_faq_query(event, user_id, user_text, timestamp)
+        _handle_faq_query(event, user_id, user_text, timestamp, pre_answer=pre_answer)
         return
     
     # CONTACT
@@ -441,7 +462,7 @@ def handle_text_message(event):
         if scope == "GENERAL":
             # Regional/overview question (e.g. "ภาคเหนือมีศูนย์พักพิงกี่ที่")
             # doesn't need the user's own location — answer directly.
-            _handle_faq_query(event, user_id, user_text, timestamp)
+            _handle_faq_query(event, user_id, user_text, timestamp, pre_answer=pre_answer)
         else:
             _handle_shelter_request(event, user_id, ai_mode=(scope == "NEARBY"))
         return
@@ -449,7 +470,7 @@ def handle_text_message(event):
     # WATER LEVEL
     if intent == "WATER_LEVEL":
         if scope == "GENERAL":
-            _handle_faq_query(event, user_id, user_text, timestamp)
+            _handle_faq_query(event, user_id, user_text, timestamp, pre_answer=pre_answer)
         else:
             _handle_water_level_request(event, user_id, ai_mode=(scope == "NEARBY"))
         return
@@ -496,7 +517,7 @@ def handle_text_message(event):
     
     # AI QUERY (Default)
     if intent == "AI_QUERY":
-        _handle_ai_query(event, user_id, user_text, timestamp)
+        _handle_ai_query(event, user_id, user_text, timestamp, pre_answer=pre_answer)
         return
     
     line_bot_api.reply_message(
@@ -791,15 +812,26 @@ def _handle_weather_request(event, user_id):
 # CHAT AI HANDLERS (With Typing Indicators)
 # =============================================================================
 
-def _handle_faq_query(event, user_id, user_text, timestamp):
-    show_loading_animation(user_id, loading_seconds=30)
+def _handle_faq_query(event, user_id, user_text, timestamp, pre_answer=None):
+    lang = sessions.get(user_id).language
 
-    result = ask_gemini_with_search(user_text, max_tokens=8192)
-    answer = result.get("answer", "")
-    sources = result.get("sources", [])
+    if pre_answer and pre_answer.get("answer"):
+        # Already drafted in the combined classify+answer call — skip the
+        # second Gemini round-trip entirely.
+        answer = pre_answer["answer"]
+        sources = pre_answer.get("sources", [])
+    else:
+        show_loading_animation(user_id, loading_seconds=30)
+        result = ask_gemini_with_search(user_text, max_tokens=1500, lang=lang)
+        answer = result.get("answer", "")
+        sources = result.get("sources", [])
 
     if not answer:
-        answer = "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติหรือความปลอดภัยในคำถามนี้ กรุณาลองสอบถามใหม่อีกครั้งครับ"
+        answer = (
+            "Maaf, tiada maklumat berkaitan bencana atau keselamatan untuk soalan ini. Sila cuba tanya semula."
+            if lang == "MY" else
+            "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติหรือความปลอดภัยในคำถามนี้ กรุณาลองสอบถามใหม่อีกครั้งครับ"
+        )
 
     flex_msg = build_faq_response_flex(answer, sources, user_text)
     line_bot_api.reply_message(event.reply_token, flex_msg)
@@ -813,21 +845,31 @@ def _handle_faq_query(event, user_id, user_text, timestamp):
         Logger.error("FAQ", f"Log error: {e}")
 
 
-def _handle_ai_query(event, user_id, user_text, timestamp):
-    show_loading_animation(user_id, loading_seconds=30)
+def _handle_ai_query(event, user_id, user_text, timestamp, pre_answer=None):
+    lang = sessions.get(user_id).language
 
-    result = ask_gemini_with_search(
-        "ประเมินตามกฎและเงื่อนไข System Instruction (น้องบอท): ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ "
-        "ความปลอดภัย และสุขภาพของผู้เจ็บป่วยหรือเครียดเท่านั้น ปฏิเสธเรื่องนอกขอบเขตอย่างสุภาพและอบอุ่น "
-        "และตอบคำถามดังต่อไปนี้โดยไม่ใช้เครื่องหมายดอกจันเด็ดขาด:\n\n"
-        f"คำถาม: {user_text}",
-        max_tokens=8192
-    )
-    ai_response = result.get("answer", "")
-    sources = result.get("sources", [])
+    if pre_answer and pre_answer.get("answer"):
+        ai_response = pre_answer["answer"]
+        sources = pre_answer.get("sources", [])
+    else:
+        show_loading_animation(user_id, loading_seconds=30)
+        result = ask_gemini_with_search(
+            "ประเมินตามกฎและเงื่อนไข System Instruction (น้องบอท): ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ "
+            "ความปลอดภัย และสุขภาพของผู้เจ็บป่วยหรือเครียดเท่านั้น ปฏิเสธเรื่องนอกขอบเขตอย่างสุภาพและอบอุ่น "
+            "และตอบคำถามดังต่อไปนี้โดยไม่ใช้เครื่องหมายดอกจันเด็ดขาด:\n\n"
+            f"คำถาม: {user_text}",
+            max_tokens=1500,
+            lang=lang
+        )
+        ai_response = result.get("answer", "")
+        sources = result.get("sources", [])
 
     if not ai_response:
-        ai_response = "น้องบอทไม่พร้อมใช้งานชั่วคราวครับ หากฉุกเฉินรบกวนโทร ปภ. 1784 ได้ทันทีครับ"
+        ai_response = (
+            "Maaf, sistem tidak tersedia buat masa ini. Jika kecemasan, sila hubungi 1784 dengan serta-merta."
+            if lang == "MY" else
+            "น้องบอทไม่พร้อมใช้งานชั่วคราวครับ หากฉุกเฉินรบกวนโทร ปภ. 1784 ได้ทันทีครับ"
+        )
 
     if sources:
         flex_msg = build_faq_response_flex(ai_response, sources, user_text)
@@ -1325,18 +1367,22 @@ def api_dashboard_update_sos_status(case_id):
     if reporter_id and reporter_id != "unknown":
         if new_status == "IN_PROGRESS":
             notify_text = (
-                f"📣 อัปเดตเคส {case_id}\n\n"
-                f"ทีมกู้ภัยได้รับเรื่องและกำลังเดินทางไปช่วยเหลือคุณแล้วครับ 🚤\n"
+                f"อัปเดตเคส {case_id}\n\n"
+                f"ทีมกู้ภัยได้รับเรื่องและกำลังเดินทางไปช่วยเหลือคุณแล้วครับ\n"
                 f"กรุณาอยู่ในที่ปลอดภัยและรอการติดต่อจากเจ้าหน้าที่"
             )
-            _push_save_confirmation(reporter_id, notify_text)
+            _push_save_confirmation(reporter_id, notify_text, track_id=case_id)
         elif new_status == "CLOSED":
             notify_text = (
-                f"✅ เคส {case_id} เสร็จสิ้นแล้ว\n\n"
+                f"เคส {case_id} เสร็จสิ้นแล้ว\n\n"
                 f"ทีมงานได้ปิดเคสของคุณเรียบร้อยแล้วครับ หากยังต้องการความช่วยเหลือเพิ่มเติม "
                 f"พิมพ์ 'sos' เพื่อแจ้งเหตุใหม่ได้ทันทีครับ"
             )
-            _push_save_confirmation(reporter_id, notify_text)
+            _push_save_confirmation(reporter_id, notify_text, track_id=case_id)
+        # Mark this status as already-notified so the background
+        # status_notification_loop (bot_config.py) doesn't detect the same
+        # change again on its next 3-minute sweep and push a duplicate.
+        sheets_mgr.update_row_by_id("sos_requests", "request_id", case_id, {"last_notified_status": new_status})
 
     return jsonify({"success": True, "case_id": case_id, "status": new_status})
 
@@ -1384,9 +1430,9 @@ def api_dashboard_create_shelter():
         "Capacity": capacity,
         "Occupancy": occupancy,
         "Status": status_label,
-        "Beds": "-",
-        "Toilets": "-",
-        "Parking": "-",
+        "Beds": "TRUE" if data.get("beds") else "-",
+        "Toilets": "TRUE" if data.get("toilets") else "-",
+        "Parking": "TRUE" if data.get("parking") else "-",
         "Facilities": facilities_str or "-",
     })
 
@@ -1582,7 +1628,7 @@ def api_sos_submit():
             if success:
                 _push_save_confirmation(
                     user_id,
-                    f"✅ ได้รับข้อมูลแจ้งเหตุแล้วครับ\n"
+                    f"ได้รับข้อมูลแจ้งเหตุแล้วครับ\n"
                     f"เลขเคส: {case_id} (รวมกับรายงานของสมาชิกในบ้านเดียวกันที่แจ้งไว้ก่อนหน้านี้)\n\n"
                     f"ระบบตรวจพบว่ามีรายงานเหตุจากบ้าน/ห้องเดียวกันอยู่แล้วในระบบ จึงรวมข้อมูลเป็นเคสเดียวกันเพื่อไม่ให้ทีมกู้ภัยได้รับแจ้งซ้ำซ้อน "
                     f"ทีมงานกำลังประสานงานติดต่อกลับโดยเร็วที่สุดครับ",
@@ -1617,7 +1663,7 @@ def api_sos_submit():
         if success:
             _push_save_confirmation(
                 user_id,
-                f"✅ บันทึกข้อมูลแจ้งเหตุเรียบร้อยแล้วครับ\n"
+                f"บันทึกข้อมูลแจ้งเหตุเรียบร้อยแล้วครับ\n"
                 f"เลขเคส: {case_id}\n\n"
                 f"ทีมงานได้รับแจ้งเหตุอุทกภัยฉุกเฉินแล้ว กำลังประสานงานติดต่อกลับโดยเร็วที่สุดครับ "
                 f"หากสถานการณ์เปลี่ยนแปลงหรือทวีความรุนแรงขึ้น พิมพ์ 'sos' เพื่อขอแบบฟอร์มส่งข้อมูลซ้ำได้ครับ",
@@ -1671,7 +1717,7 @@ def api_need_submit():
         if success:
             _push_save_confirmation(
                 user_id,
-                f"✅ บันทึกข้อมูลความต้องการสิ่งของเรียบร้อยแล้วครับ\n"
+                f"บันทึกข้อมูลความต้องการสิ่งของเรียบร้อยแล้วครับ\n"
                 f"เลขที่รายการ: {need_id}\n\n"
                 f"ทีมอาสาสมัครจะประสานจัดส่งสิ่งของบรรเทาทุกข์ให้เร็วที่สุดตามลำดับความเร่งด่วนครับ",
                 track_id=need_id
