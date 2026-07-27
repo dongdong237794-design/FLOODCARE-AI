@@ -1,3 +1,4 @@
+[Uploading README.md…]()
 [README.md](https://github.com/user-attachments/files/29662618/README.md)
 # FLOODCARE AI v2.0 - Production Ready
 
@@ -133,10 +134,9 @@ floodcare-ai/
 ├── templates/
 │   ├── sos_liff.html       # SOS LIFF (แจ้งเหตุฉุกเฉิน)
 │   ├── need_liff.html      # Needs LIFF (ขอความช่วยเหลือ)
-│   ├── register_liff.html  # Register LIFF (ลงทะเบียนข้อมูลผู้ใช้เบื้องต้น) — ใหม่
-│   └── dashboard.html      # หน้า Dashboard เจ้าหน้าที่ (ดูเคส SOS/Needs/ผู้ลงทะเบียน) — ใหม่
-├── sos_liff.py         # (legacy) SOS LIFF HTML source
-├── need_liff.py        # (legacy) Needs LIFF HTML source
+│   ├── register_liff.html  # Register LIFF (ลงทะเบียนข้อมูลผู้ใช้เบื้องต้น)
+│   ├── track_liff.html     # Track LIFF (ติดตามสถานะเคส SOS/Needs) — ใหม่
+│   └── dashboard.html      # หน้า Dashboard เจ้าหน้าที่ (ดูเคส SOS/Needs/ผู้ลงทะเบียน)
 ├── requirements.txt    # Python Dependencies
 ├── .env.example        # ตัวอย่างไฟล์ environment variables
 └── README.md           # คู่มือนี้
