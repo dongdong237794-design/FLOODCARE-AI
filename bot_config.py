@@ -586,6 +586,136 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "ตัวอย่าง: \"ตอนนี้ผมควรอพยพไปที่ไหน\" -> SHELTER / NEARBY (แม้ไม่มีคำว่าศูนย์พักพิง แต่ความหมายคือถามหาที่ปลอดภัยใกล้ตัวตอนนี้)"
 )
 
+# =============================================================================
+# SECTION 5C: COMBINED CLASSIFY + ANSWER (single round-trip, latency fix)
+# =============================================================================
+# classify_intent_ai() (above) needs a second Gemini call afterwards for any
+# intent that ends in a search-grounded AI answer (FAQ, AI_QUERY, and
+# WATER_LEVEL/SHELTER with scope=GENERAL) — two sequential LLM round-trips
+# for one user message, often 5-12s combined. This does both in ONE call:
+# the model classifies the message AND, only when the intent calls for it,
+# drafts the final search-grounded answer in the same response. app.py uses
+# the draft directly for those intents instead of calling
+# ask_gemini_with_search a second time. Every other intent (SOS, EMERGENCY,
+# SHELTER/WATER_LEVEL NEARBY, GREETING, etc.) still costs only one call,
+# same as before, since no answer needs to be drafted for those.
+#
+# This trades a bit of classification-call simplicity (structured JSON mode
+# can't be combined with the Search tool, so this uses a plain-text header +
+# delimiter format instead) for the latency win. If parsing ever fails for
+# any reason, classify_and_maybe_answer() returns None and the caller falls
+# straight back to the original two-step classify_intent_ai() +
+# ask_gemini_with_search() flow — so this can only ever help, never break
+# anything if the model doesn't follow the format exactly.
+
+_ANSWER_DELIMITER = "===ANSWER==="
+
+COMBINED_CLASSIFY_ANSWER_SYSTEM_INSTRUCTION = (
+    INTENT_AI_SYSTEM_INSTRUCTION.replace(
+        "หน้าที่ของคุณคือวิเคราะห์ข้อความของผู้ใช้ แล้วตอบกลับเป็น JSON เท่านั้น "
+        "ห้ามมีคำอธิบาย ห้ามมี markdown code fence ห้ามมีข้อความอื่นใดนอกจาก JSON object เดียว\n\n",
+        "หน้าที่ของคุณคือวิเคราะห์ข้อความของผู้ใช้ แล้ววิเคราะห์เจตนาก่อนเสมอ\n\n"
+    )
+    + "\n\n"
+    "หลังวิเคราะห์เจตนาแล้ว ให้ตอบกลับตามรูปแบบนี้เป๊ะๆ:\n\n"
+    "บรรทัดแรก: JSON บรรทัดเดียวเท่านั้น ห้ามมี markdown code fence "
+    '{"intent": "<ONE_OF_INTENTS>", "scope": "NEARBY หรือ GENERAL หรือ NONE", "confidence": <0.0-1.0>}\n\n'
+    f"ถ้า intent ที่วิเคราะห์ได้คือ FAQ หรือ AI_QUERY เท่านั้น ให้ตามด้วยบรรทัด {_ANSWER_DELIMITER} แล้วตามด้วยคำตอบเต็ม "
+    "โดยค้นหาข้อมูลด้วย Google Search ประกอบคำตอบ และทำตามกฎการตอบต่อไปนี้อย่างเคร่งครัด:\n"
+    "1. ห้ามใช้เครื่องหมายดอกจันเดี่ยวหรือสองชั้น (*) ในข้อความอย่างเด็ดขาด\n"
+    "2. ตอบเป็นข้อๆ เสมอ ขึ้นต้นแต่ละประเด็นด้วยเลขข้อ (1. 2. 3. ...) เว้นบรรทัดระหว่างข้อ ยกเว้นคำตอบสั้นมากที่มีประเด็นเดียวให้ตอบเป็นประโยคปกติได้\n"
+    "3. กระชับ ตอบเฉพาะสิ่งที่ถามจริงๆ สูงสุดไม่เกิน 4-5 ข้อ แต่ละข้อไม่เกิน 1-2 บรรทัด รวมไม่เกินประมาณ 60-80 คำ เว้นแต่จำเป็นต้องครบทุกขั้นตอนจริงๆ\n"
+    "4. ห้ามระบุแหล่งที่มา/อ้างอิงในเนื้อความคำตอบเด็ดขาด ระบบจะแสดงแหล่งอ้างอิงแยกให้เอง\n"
+    "5. จบประโยคให้ครบเสมอ ห้ามตัดจบกลางประโยค\n"
+    "6. ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ ความปลอดภัย และสุขภาพกาย/ใจของผู้เจ็บป่วยหรือเครียดจากภัยพิบัติเท่านั้น "
+    "ถ้าคำถามอยู่นอกขอบเขตนี้เลย (เช่น ขอเลขหวย แต่งกลอน สูตรอาหาร) ให้ปฏิเสธอย่างสุภาพและอบอุ่นแทนการตอบคำถามนั้นจริงๆ\n\n"
+    f"ถ้า intent ไม่ใช่ FAQ หรือ AI_QUERY ให้จบคำตอบแค่บรรทัด JSON บรรทัดเดียวเท่านั้น "
+    f"ห้ามใส่ {_ANSWER_DELIMITER} หรือคำตอบใดๆ ต่อท้ายเด็ดขาด เพราะ intent เหล่านั้นระบบอื่นจะจัดการเอง"
+)
+
+
+def classify_and_maybe_answer(text: str, lang: str = "TH"):
+    """
+    Single-call combined intent classification + (conditionally) search-
+    grounded answer draft. Returns a dict {intent, scope, confidence,
+    answer, sources} on success, or None if the model's output couldn't be
+    parsed — callers must fall back to classify_intent_ai() +
+    ask_gemini_with_search() when this returns None.
+    """
+    if not text or not text.strip():
+        return None
+    if not init_gemini():
+        return None
+
+    cache_key = f"classify_answer:{lang}:{hashlib.md5(text.strip().encode()).hexdigest()}"
+    cached = cache.general.get(cache_key)
+    if cached:
+        return cached
+
+    start_time = time.time()
+    try:
+        lang_note = (
+            "\n\nถ้ามีคำตอบ ให้ตอบเป็นภาษามลายู (Bahasa Melayu) แทนภาษาไทย ยกเว้นชื่อเฉพาะ" if lang == "MY" else ""
+        )
+        response = gemini_model.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=f"ข้อความผู้ใช้: {text.strip()}",
+            config=genai_types.GenerateContentConfig(
+                system_instruction=COMBINED_CLASSIFY_ANSWER_SYSTEM_INSTRUCTION + lang_note,
+                max_output_tokens=2048,
+                temperature=0.2,
+                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+            ),
+        )
+        raw = (response.text or "").strip()
+
+        if _ANSWER_DELIMITER in raw:
+            header_part, answer_part = raw.split(_ANSWER_DELIMITER, 1)
+        else:
+            header_part, answer_part = raw, ""
+
+        header_part = header_part.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(header_part)
+
+        intent = str(parsed.get("intent", "")).strip().upper()
+        scope = str(parsed.get("scope", "GENERAL")).strip().upper()
+        confidence = float(parsed.get("confidence", 0.7))
+
+        if intent not in set(INTENT_LIST_AI):
+            return None
+        if scope not in ("NEARBY", "GENERAL", "NONE"):
+            scope = "GENERAL"
+
+        answer_text = clean_text_for_line(answer_part.strip()) if answer_part.strip() else None
+
+        sources = []
+        if answer_text:
+            try:
+                for candidate in response.candidates:
+                    grounding = getattr(candidate, "grounding_metadata", None)
+                    if grounding:
+                        for chunk in getattr(grounding, "grounding_chunks", None) or []:
+                            web = getattr(chunk, "web", None)
+                            if web:
+                                uri = getattr(web, "uri", "") or ""
+                                if uri:
+                                    sources.append({"title": getattr(web, "title", "") or "", "url": uri})
+            except Exception:
+                pass
+
+        result = {
+            "intent": intent, "scope": scope, "confidence": confidence,
+            "answer": answer_text, "sources": sources,
+        }
+        cache.general.set(cache_key, result, ttl=120)
+
+        elapsed = (time.time() - start_time) * 1000
+        Logger.perf("ClassifyAnswer", "combined_call", elapsed, {"intent": intent, "had_answer": bool(answer_text)})
+        return result
+    except Exception as e:
+        Logger.info("ClassifyAnswer", f"Combined call failed, falling back to two-step flow: {e}")
+        return None
+
 
 def classify_intent_ai(text: str) -> dict:
     """
@@ -663,15 +793,22 @@ NEARBY_DATA_REPLY_SYSTEM_INSTRUCTION = (
 )
 
 
-def compose_water_level_reply(user_question: str, stations: list) -> str:
+def compose_water_level_reply(user_question: str, stations: list, lang: str = "TH") -> str:
     """
     Turns already-computed nearest-station data (distance, level, situation —
     all calculated in app.py using the existing Google Sheets lookup, never
-    by the AI) into a short, natural conversational Thai reply. Used only for
+    by the AI) into a short, natural conversational reply. Used only for
     the AI-intent path; the Rich-Menu path keeps using
     build_water_level_flex_message for its card UI, unchanged.
+    lang="MY" makes the composed reply Bahasa Melayu — station names stay
+    in Thai since they're official proper nouns with no translation.
     """
     if not stations:
+        if lang == "MY":
+            return (
+                "Belum ada stesen paras air berdekatan lokasi anda dalam sistem buat masa ini. "
+                f"Sila semak peta paras air seluruh negara di {WATER_LEVEL_SOURCE_URL}."
+            )
         return (
             "ตอนนี้ยังไม่พบสถานีวัดระดับน้ำในระบบที่อยู่ใกล้ตำแหน่งของคุณครับ "
             f"ลองดูแผนที่ระดับน้ำทั้งประเทศเพิ่มเติมได้ที่ {WATER_LEVEL_SOURCE_URL} ครับ"
@@ -686,24 +823,35 @@ def compose_water_level_reply(user_question: str, stations: list) -> str:
         )
     data_block = "\n".join(lines)
 
+    lang_instruction = (
+        "จงเรียบเรียงข้อมูลนี้เป็นคำตอบสนทนาภาษามลายู (Bahasa Melayu) ที่เป็นธรรมชาติ กระชับ ไม่เกิน 4-5 บรรทัด "
+        "คงชื่อสถานีเป็นภาษาไทยตามเดิมเพราะเป็นชื่อเฉพาะ "
+        if lang == "MY" else
+        "จงเรียบเรียงข้อมูลนี้เป็นคำตอบสนทนาภาษาไทยที่เป็นธรรมชาติ กระชับ ไม่เกิน 4-5 บรรทัด "
+    )
     prompt = (
         f'ผู้ใช้ถามว่า: "{user_question}"\n\n'
         "นี่คือข้อมูลสถานีวัดระดับน้ำที่ใกล้ตำแหน่งผู้ใช้ที่สุด (ระยะทางและตัวเลขคำนวณมาให้แล้ว "
         "ห้ามคำนวณ ห้ามเดา หรือแก้ไขตัวเลขใดๆ เพิ่มเอง ใช้ตามที่ให้มาเท่านั้น):\n\n"
         f"{data_block}\n\n"
-        "จงเรียบเรียงข้อมูลนี้เป็นคำตอบสนทนาภาษาไทยที่เป็นธรรมชาติ กระชับ ไม่เกิน 4-5 บรรทัด "
+        f"{lang_instruction}"
         "บอกสถานีที่ใกล้ที่สุดก่อน แล้วเสริมสถานีถัดไปถ้าจำเป็น ห้ามใช้เครื่องหมายดอกจัน "
         "ถ้าพบว่าระดับน้ำอยู่ในสถานการณ์วิกฤตหรือเกินตลิ่ง ให้เตือนให้ระวังและแนะนำให้ติดตามสถานการณ์ใกล้ชิดด้วย"
     )
-    return ask_gemini(prompt, max_tokens=1024, system_instruction=NEARBY_DATA_REPLY_SYSTEM_INSTRUCTION)
+    return ask_gemini(prompt, max_tokens=1024, system_instruction=NEARBY_DATA_REPLY_SYSTEM_INSTRUCTION, lang=lang)
 
 
-def compose_shelter_reply(user_question: str, shelters: list) -> str:
+def compose_shelter_reply(user_question: str, shelters: list, lang: str = "TH") -> str:
     """
     Same idea as compose_water_level_reply, but for nearest-shelter data from
     find_nearest_shelters() (distance/capacity/status all pre-computed).
     """
     if not shelters:
+        if lang == "MY":
+            return (
+                "Maaf, belum ada pusat perlindungan berdekatan lokasi anda dalam sistem buat masa ini. "
+                "Untuk keselamatan, sila hubungi talian kecemasan 1784 untuk maklumat pusat perlindungan terdekat."
+            )
         return (
             "ขออภัยครับ ตอนนี้ยังไม่พบศูนย์พักพิงในระบบที่อยู่ใกล้ตำแหน่งของคุณ "
             "เพื่อความปลอดภัย รบกวนติดต่อสายด่วน ปภ. 1784 เพื่อสอบถามจุดอพยพที่ใกล้ที่สุดในพื้นที่ได้เลยครับ"
@@ -718,16 +866,22 @@ def compose_shelter_reply(user_question: str, shelters: list) -> str:
         )
     data_block = "\n".join(lines)
 
+    lang_instruction = (
+        "จงเรียบเรียงข้อมูลนี้เป็นคำตอบสนทนาภาษามลายู (Bahasa Melayu) ที่เป็นธรรมชาติ กระชับ ไม่เกิน 4-5 บรรทัด "
+        "คงชื่อศูนย์พักพิงเป็นภาษาไทยตามเดิมเพราะเป็นชื่อเฉพาะ "
+        if lang == "MY" else
+        "จงเรียบเรียงข้อมูลนี้เป็นคำตอบสนทนาภาษาไทยที่เป็นธรรมชาติ กระชับ ไม่เกิน 4-5 บรรทัด "
+    )
     prompt = (
         f'ผู้ใช้ถามว่า: "{user_question}"\n\n'
         "นี่คือข้อมูลศูนย์พักพิงที่ใกล้ตำแหน่งผู้ใช้ที่สุด (ระยะทางและข้อมูลคำนวณมาให้แล้ว "
         "ห้ามเดาหรือแก้ไขตัวเลขใดๆ เพิ่มเอง ใช้ตามที่ให้มาเท่านั้น):\n\n"
         f"{data_block}\n\n"
-        "จงเรียบเรียงข้อมูลนี้เป็นคำตอบสนทนาภาษาไทยที่เป็นธรรมชาติ กระชับ ไม่เกิน 4-5 บรรทัด "
+        f"{lang_instruction}"
         "บอกศูนย์ที่ใกล้ที่สุดก่อน ถ้าศูนย์ที่ใกล้ที่สุดมีสถานะ 'เต็ม' ให้แนะนำศูนย์ถัดไปที่ยังเปิดรับแทน "
         "ห้ามใช้เครื่องหมายดอกจัน"
     )
-    return ask_gemini(prompt, max_tokens=1024, system_instruction=NEARBY_DATA_REPLY_SYSTEM_INSTRUCTION)
+    return ask_gemini(prompt, max_tokens=1024, system_instruction=NEARBY_DATA_REPLY_SYSTEM_INSTRUCTION, lang=lang)
 
 
 # =============================================================================
@@ -772,6 +926,13 @@ class SessionManager:
             session = self._sessions.get(user_id)
             if session is None or session.is_expired():
                 session = UserSession(user_id)
+                try:
+                    user_record = sheets_mgr.get_user_record(user_id)
+                    preferred_lang = (user_record or {}).get("preferred_language", "").strip().upper()
+                    if preferred_lang:
+                        session.language = preferred_lang
+                except Exception as e:
+                    Logger.error("Session", f"Could not load preferred_language for user: {e}")
                 self._sessions[user_id] = session
             return session
     
@@ -855,7 +1016,7 @@ def init_gemini():
         return False
 
 
-def ask_gemini(prompt: str, max_tokens: int = 8192, system_instruction: str = None) -> str:
+def ask_gemini(prompt: str, max_tokens: int = 8192, system_instruction: str = None, lang: str = "TH") -> str:
     """
     Optimized Gemini API call.
     - Uses full token capacity (8192) to avoid truncation issues.
@@ -863,14 +1024,26 @@ def ask_gemini(prompt: str, max_tokens: int = 8192, system_instruction: str = No
       bulleted-list persona) but callers that need a different reply shape
       (e.g. a natural one-paragraph conversational answer, like
       compose_water_level_reply) can pass their own instead.
+    - lang="MY" appends a directive forcing the reply into Bahasa Melayu
+      instead of Thai, on top of whichever system_instruction is used.
     """
     start_time = time.time()
     if not init_gemini():
-        return "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
+        return (
+            "Maaf, sistem AI tidak tersedia buat masa ini. Jika dalam keadaan bahaya segera, "
+            "sila hubungi talian kecemasan 1784 dengan serta-merta."
+            if lang == "MY" else
+            "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
+        )
     
     effective_system_instruction = system_instruction or FLOODCARE_SYSTEM_INSTRUCTION
+    if lang == "MY":
+        effective_system_instruction += (
+            "\n\nสำคัญ: ตอบเป็นภาษามลายู (Bahasa Melayu) เท่านั้น ห้ามตอบเป็นภาษาไทยหรืออังกฤษ "
+            "ยกเว้นชื่อเฉพาะ เช่น ชื่อสถานที่ ชื่อสถานีวัดน้ำ ที่ไม่มีคำแปล ให้คงเป็นภาษาไทยตามเดิม"
+        )
 
-    cache_key = f"gemini:{hashlib.md5((effective_system_instruction + '|' + prompt).encode()).hexdigest()}"
+    cache_key = f"gemini:{lang}:{hashlib.md5((effective_system_instruction + '|' + prompt).encode()).hexdigest()}"
     cached = cache.general.get(cache_key)
     if cached:
         elapsed = (time.time() - start_time) * 1000
@@ -902,18 +1075,32 @@ def ask_gemini(prompt: str, max_tokens: int = 8192, system_instruction: str = No
     except Exception as e:
         elapsed = (time.time() - start_time) * 1000
         Logger.error("Gemini", f"API error: {e}", {"elapsed_ms": round(elapsed, 1)})
-        return "⚠️ ขออภัยครับ ระบบ AI ขัดข้องชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
+        return (
+            "Maaf, sistem AI menghadapi masalah sementara. Jika dalam keadaan bahaya segera, "
+            "sila hubungi talian kecemasan 1784 dengan serta-merta."
+            if lang == "MY" else
+            "⚠️ ขออภัยครับ ระบบ AI ขัดข้องชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
+        )
 
 
 
 
-def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
+def ask_gemini_with_search(question: str, max_tokens: int = 8192, lang: str = "TH") -> dict:
     """
     Gemini API call with Google Search grounding.
     - Uses full token capacity (8192) to avoid truncation issues.
+    - lang="MY" makes Gemini answer in Bahasa Melayu instead of Thai —
+      place names, station names, and other proper nouns from the source
+      data stay as-is since they don't have a Malay equivalent.
     """
     if not init_gemini():
-        return {"answer": "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ", "sources": []}
+        fallback_text = (
+            "Maaf, sistem AI tidak tersedia buat masa ini. Jika dalam keadaan bahaya segera, "
+            "sila hubungi talian kecemasan 1784 dengan serta-merta."
+            if lang == "MY" else
+            "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
+        )
+        return {"answer": fallback_text, "sources": []}
 
     start_time = time.time()
     prompt = (
@@ -934,7 +1121,10 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=(
-                    "You are FLOODCARE AI. Always respond in Thai. Be concise — answer only what "
+                    "You are FLOODCARE AI. "
+                    + ("Always respond in Bahasa Melayu (Malay), never Thai or English."
+                       if lang == "MY" else "Always respond in Thai.")
+                    + " Be concise — answer only what "
                     "was asked, skip background info or details the user didn't request. Structure "
                     "the answer as a numbered list (1. 2. 3. ...) with a line break between each "
                     "point, max 4-5 points, each point 1-2 short lines, total answer roughly 60-80 "
@@ -945,7 +1135,9 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
                     "separately below the message automatically. Use the Google Search tool to "
                     "ground your answer. Always finish complete sentences — never truncate or stop "
                     "mid-sentence — but plan for a concise answer up front rather than writing long "
-                    "and cutting it off."
+                    "and cutting it off. Place names, station names, and other proper nouns from the "
+                    "source data should stay in their original Thai form even when responding in "
+                    "Bahasa Melayu, since they don't have a translated equivalent."
                 ),
                 max_output_tokens=max_tokens,
                 temperature=0.2,
@@ -974,7 +1166,7 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192) -> dict:
         return {"answer": raw_text, "sources": sources}
     except Exception as e:
         Logger.info("Gemini", f"Search grounding failed ({e}), falling back to plain ask_gemini")
-        answer = ask_gemini(prompt, max_tokens=max_tokens)
+        answer = ask_gemini(prompt, max_tokens=max_tokens, lang=lang)
         return {"answer": answer, "sources": []}
 
 
@@ -1073,7 +1265,7 @@ class SheetsManager:
                          "housing_type", "house_no", "condo_floor", "condo_room",
                          "province", "district", "sub_district", "gps_lat", "gps_lon",
                          "member_count", "emergency_contact", "sms_enabled",
-                         "consent_pdpa", "register_date", "status"],
+                         "consent_pdpa", "register_date", "status", "preferred_language"],
                 "sos_requests": ["request_id", "household_id", "user_id", "timestamp", "latitude", "longitude",
                                 "people_count", "children", "elderly", "bedridden", "pets",
                                 "water_level", "note", "priority", "status",
@@ -2122,12 +2314,12 @@ _CASE_STATUS_COLORS = {
 
 
 def _case_avatar(kind: str):
-    """Small colored initial-circle avatar — 'S' for SOS (red family), 'N' for Need (blue family)."""
-    bg, letter = ("#B91C1C", "S") if kind == "sos" else ("#1D4ED8", "N")
+    """Small initial-circle avatar — pastel background + accent-colored letter, matching the same muted pill palette used across every other Flex card in the app (water level / shelter / contact), instead of a solid saturated fill."""
+    bg, letter_color, letter = ("#FBC7D4", "#B91C1C", "S") if kind == "sos" else ("#DBEAFE", "#1D4ED8", "N")
     return BoxComponent(
         layout="vertical", width="36px", height="36px", corner_radius="18px",
         background_color=bg, justify_content="center", align_items="center", flex=0,
-        contents=[TextComponent(text=letter, size="sm", weight="bold", color="#FFFFFF", align="center")]
+        contents=[TextComponent(text=letter, size="sm", weight="bold", color=letter_color, align="center")]
     )
 
 
@@ -2356,20 +2548,42 @@ def build_ai_response_flex(ai_text: str, original_question: str, lang="TH"):
 
 
 def build_language_selector_flex():
+    """
+    Honest language status card — the bot only actually operates in Thai
+    (every Gemini prompt, Flex Message, and hardcoded string is Thai; full
+    translation is a much larger effort than a toggle). Rather than faking
+    a working language switch that silently does nothing, this shows Thai
+    as fully supported and the rest as clearly labeled 'in development' so
+    tapping them can't be mistaken for a real language change.
+    """
+    def _lang_row(label: str, status_label: str, bg: str, text_color: str, msg_text: str):
+        return BoxComponent(
+            layout="horizontal",
+            margin="md",
+            action=MessageAction(label=label, text=msg_text),
+            contents=[
+                TextComponent(text=label, size="sm", weight="bold", color="#111827", flex=1, gravity="center"),
+                _pill_badge(status_label, bg, text_color),
+            ]
+        )
+
     return FlexSendMessage(
-        alt_text="🌐 เลือกภาษา",
+        alt_text="ภาษา",
         contents=BubbleContainer(
-            size="sm",
+            size="kilo",
             body=BoxComponent(
                 layout="vertical",
-                spacing="md",
+                padding_all="lg",
+                spacing="sm",
                 contents=[
-                    TextComponent(text="🌐 Language", weight="bold", size="md", color="#1F2937", align="center"),
-                    SeparatorComponent(margin="md"),
-                    ButtonComponent(action=MessageAction(label="[TH] ภาษาไทย", text="ตั้งค่าภาษา: TH"),
-                                    style="secondary", color="#F3F4F6", height="sm"),
-                    ButtonComponent(action=MessageAction(label="[EN] English", text="ตั้งค่าภาษา: EN"),
-                                    style="secondary", color="#F3F4F6", height="sm"),
+                    TextComponent(text="ภาษา", weight="bold", size="md", color="#111827"),
+                    TextComponent(text="ขณะนี้ภาษาไทยและมลายูพร้อมใช้งาน ภาษาอื่นอยู่ระหว่างการพัฒนาครับ",
+                                  size="xs", color="#9CA3AF", margin="xs", wrap=True),
+                    _dashed_rule(),
+                    _lang_row("ภาษาไทย", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: TH"),
+                    _lang_row("Bahasa Melayu", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: MY"),
+                    _lang_row("English", "กำลังพัฒนา", "#FEF3C7", "#92400E", "ตั้งค่าภาษา: EN"),
+                    _lang_row("日本語", "กำลังพัฒนา", "#FEF3C7", "#92400E", "ตั้งค่าภาษา: JP"),
                 ]
             )
         )
@@ -2901,26 +3115,74 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
 
 
 
-def get_greeting_message(user_name="คุณ"):
+UI_TEXT = {
+    "greeting_time_morning": {"TH": "อรุณสวัสดิ์", "MY": "Selamat pagi"},
+    "greeting_time_default": {"TH": "สวัสดี", "MY": "Salam sejahtera"},
+    "greeting_intro": {
+        "TH": "ผมคือ FLOODCARE AI ผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินครับ",
+        "MY": "Saya FLOODCARE AI, pembantu pintar untuk banjir dan kecemasan.",
+    },
+    "greeting_services_label": {
+        "TH": "รายการบริการที่ผมช่วยคุณได้:",
+        "MY": "Perkhidmatan yang boleh saya bantu:",
+    },
+    "greeting_services": {
+        "TH": [
+            "เบอร์โทรฉุกเฉินและสายด่วน",
+            "SOS แจ้งเหตุขอความช่วยเหลือกู้ภัย",
+            "ค้นหาศูนย์พักพิงและจุดอพยพ",
+            "ตรวจสอบระดับน้ำและสภาพอากาศ",
+            "แจ้งความต้องการสิ่งของบรรเทาทุกข์",
+            "ติดตามสถานะเคสที่เคยแจ้งไว้",
+            "คู่มือเตรียมความพร้อมและปฐมพยาบาล",
+            "สอบถามข้อมูลภัยพิบัติผ่านระบบ AI",
+        ],
+        "MY": [
+            "Talian kecemasan dan hotline",
+            "SOS - lapor kecemasan minta bantuan",
+            "Cari pusat perlindungan berdekatan",
+            "Semak paras air dan cuaca",
+            "Minta bantuan bekalan keperluan",
+            "Semak status kes yang pernah dilaporkan",
+            "Panduan persediaan dan pertolongan cemas",
+            "Tanya soalan tentang bencana melalui AI",
+        ],
+    },
+    "greeting_footer": {
+        "TH": "ยินดีช่วยเหลือคุณตลอด 24 ชั่วโมงครับ",
+        "MY": "Sedia membantu anda 24 jam sehari.",
+    },
+    "help_title": {"TH": "FLOODCARE AI ทำอะไรได้บ้าง", "MY": "Apa yang FLOODCARE AI boleh buat"},
+    "note_ai_replies_thai": {
+        "TH": None,
+        "MY": "หมายเหตุ: คำตอบจาก AI และข้อมูลสถานี/ศูนย์พักพิงยังเป็นภาษาไทยเป็นหลัก (Nota: jawapan AI dan data stesen/pusat perlindungan masih dalam Bahasa Thai buat masa ini)",
+    },
+}
+
+
+def t(key: str, lang: str = "TH"):
+    """Small real translation lookup — falls back to Thai if the key or language isn't covered yet."""
+    entry = UI_TEXT.get(key, {})
+    return entry.get(lang) or entry.get("TH")
+
+
+def get_greeting_message(user_name="คุณ", lang="TH"):
     now = get_bangkok_time()
-    time_greeting = "สวัสดี"
-    if 5 <= now.hour < 10:
-        time_greeting = "อรุณสวัสดิ์"
-    
+    time_greeting = t("greeting_time_morning", lang) if 5 <= now.hour < 10 else t("greeting_time_default", lang)
+
+    services = t("greeting_services", lang)
+    services_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(services))
+
     text = (
         f"{time_greeting} คุณ {user_name}\n"
-        "ผมคือ FLOODCARE AI ผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินครับ\n\n"
-        "รายการบริการที่ผมช่วยคุณได้:\n"
-        "1. เบอร์โทรฉุกเฉินและสายด่วน\n"
-        "2. SOS แจ้งเหตุขอความช่วยเหลือกู้ภัย\n"
-        "3. ค้นหาศูนย์พักพิงและจุดอพยพ\n"
-        "4. ตรวจสอบระดับน้ำและสภาพอากาศ\n"
-        "5. แจ้งความต้องการสิ่งของบรรเทาทุกข์\n"
-        "6. ติดตามสถานะเคสที่เคยแจ้งไว้\n"
-        "7. คู่มือเตรียมความพร้อมและปฐมพยาบาล\n"
-        "8. สอบถามข้อมูลภัยพิบัติผ่านระบบ AI\n\n"
-        "ยินดีช่วยเหลือคุณตลอด 24 ชั่วโมงครับ"
+        f"{t('greeting_intro', lang)}\n\n"
+        f"{t('greeting_services_label', lang)}\n"
+        f"{services_text}\n\n"
+        f"{t('greeting_footer', lang)}"
     )
+    note = t("note_ai_replies_thai", lang)
+    if note:
+        text += f"\n\n{note}"
     return TextSendMessage(text=text)
 
 
