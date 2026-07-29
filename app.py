@@ -1242,13 +1242,13 @@ def api_dashboard_data():
         stored_last = (rec.get("last_name") or "").strip()
         if stored_first or stored_last:
             rec["reporter_name"] = f"{stored_first} {stored_last}".strip()
-            rec["reporter_phone"] = rec.get("phone", "-") or "-"
+            rec["reporter_phone"] = bot_config.format_phone_th(rec.get("phone", "-") or "-")
         else:
             u = users_by_id.get(str(rec.get("user_id", "")), {})
             first = u.get("first_name", "") or ""
             last = u.get("last_name", "") or ""
             rec["reporter_name"] = f"{first} {last}".strip() or "ไม่ระบุชื่อ"
-            rec["reporter_phone"] = u.get("phone", "-") or "-"
+            rec["reporter_phone"] = bot_config.format_phone_th(u.get("phone", "-") or "-")
 
         # The dashboard filters/labels by English enum (CRITICAL/HIGH/NORMAL);
         # the sheet stores the Thai text the LIFF form sends. Keep the sheet
@@ -1294,7 +1294,7 @@ def api_dashboard_data():
             "request_id": rec.get("request_id", "-"),
             "first_name": user.get("first_name", "") or "ไม่ระบุชื่อ",
             "last_name": user.get("last_name", "") or "",
-            "phone": user.get("phone", "-") or "-",
+            "phone": bot_config.format_phone_th(user.get("phone", "-") or "-"),
             "people_count": people_count,
             "bedridden": "YES" if _is_yes(rec.get("bedridden")) else "NO",
             "pets": "YES" if _is_yes(rec.get("pets")) else "NO",
@@ -1700,7 +1700,7 @@ def api_need_submit():
             "user_id": user_id,
             "first_name": user_record.get("first_name", "") or "-",
             "last_name": user_record.get("last_name", "") or "-",
-            "phone": user_record.get("phone", "-") or "-",
+            "phone": bot_config.format_phone_th(user_record.get("phone", "-") or "-"),
             "latitude": data.get("latitude", "0"),
             "longitude": data.get("longitude", "0"),
             "categories": data.get("categories", ""),
