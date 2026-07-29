@@ -1187,6 +1187,36 @@ def extract_sheet_id(sheet_var: str) -> str:
     return sheet_var.strip()
 
 
+def format_phone_th(value) -> str:
+    """
+    Repairs a Thai phone number that lost its leading '0'.
+
+    Root cause of the bug: gspread's get_all_records() auto-numericises any
+    cell that *looks* like a number, so a phone number stored as text
+    ("0812345678") comes back as the int 812345678 — the leading zero is a
+    no-op in a number and silently disappears. We now pass
+    numericise_ignore=['all'] everywhere we call get_all_records(), which
+    stops this at the source for anything written going forward. This
+    helper is a second line of defense for rows that were already saved
+    with the zero missing (e.g. from before that fix, or from a manual
+    paste into the sheet that Google auto-converted to a number).
+
+    Thai mobile numbers are always 10 digits starting with 0. If we see
+    exactly 9 digits, that's the unmistakable signature of a dropped
+    leading zero, so we restore it. Anything else (already 10 digits,
+    landlines, blank/'-', or malformed input) is returned unchanged.
+    """
+    if value is None:
+        return value
+    s = str(value).strip()
+    if not s or s == "-":
+        return s
+    digits = "".join(filter(str.isdigit, s))
+    if digits and len(digits) == 9 and not s.startswith("0"):
+        return "0" + digits
+    return s
+
+
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371
     dlat = math.radians(lat2 - lat1)
@@ -1412,7 +1442,13 @@ class SheetsManager:
         try:
             sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             ws = sheet.worksheet(worksheet_name)
-            records = ws.get_all_records()
+            # numericise_ignore=['all'] stops gspread from auto-converting
+            # number-looking cells (like phone numbers) into int/float,
+            # which is what strips a leading '0' off a phone number. All
+            # numeric fields we actually need as numbers (Capacity, lat/lon,
+            # etc.) are already cast explicitly with int()/float() by the
+            # calling code, so this is safe to apply everywhere.
+            records = ws.get_all_records(numericise_ignore=['all'])
             cache.sheets.set(cache_key, records, ttl=300)
             return records
         except Exception as e:
@@ -1493,7 +1529,7 @@ class SheetsManager:
         try:
             sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             ws = sheet.worksheet("sos_requests")
-            records = ws.get_all_records()
+            records = ws.get_all_records(numericise_ignore=['all'])
             now = get_bangkok_time()
 
             best_row, best_record, best_time = None, None, None
@@ -1555,7 +1591,7 @@ class SheetsManager:
         try:
             sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             ws = sheet.worksheet("sos_requests")
-            records = ws.get_all_records()
+            records = ws.get_all_records(numericise_ignore=['all'])
             row_number = None
             matched_record = None
             for idx, rec in enumerate(records, start=2):
@@ -1596,7 +1632,7 @@ class SheetsManager:
         try:
             sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             ws = sheet.worksheet("user_needs")
-            records = ws.get_all_records()
+            records = ws.get_all_records(numericise_ignore=['all'])
             row_number, matched_record = None, None
             for idx, rec in enumerate(records, start=2):
                 if str(rec.get("need_id", "")) == need_id:
@@ -1632,7 +1668,7 @@ class SheetsManager:
         try:
             sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
             ws = sheet.worksheet("Shelters")
-            records = ws.get_all_records()
+            records = ws.get_all_records(numericise_ignore=['all'])
             row_number, matched_record = None, None
             for idx, rec in enumerate(records, start=2):
                 if str(rec.get("ShelterID", "")) == shelter_id:
@@ -2556,19 +2592,27 @@ def build_language_selector_flex():
     as fully supported and the rest as clearly labeled 'in development' so
     tapping them can't be mistaken for a real language change.
     """
-    def _lang_row(label: str, status_label: str, bg: str, text_color: str, msg_text: str):
+    # Flag emoji as a leading icon instead of relying on the text label —
+    # someone who can't read Thai (the whole point of switching language)
+    # can still recognize their flag and tap the right row without being
+    # able to read "ภาษาไทย" / "ใช้งานได้" first. The label stays alongside
+    # for people who *can* read it, and the tap target is the whole row.
+    def _lang_row(flag: str, label: str, status_label: str, bg: str, text_color: str, msg_text: str):
         return BoxComponent(
             layout="horizontal",
             margin="md",
+            spacing="md",
             action=MessageAction(label=label, text=msg_text),
+            align_items="center",
             contents=[
+                TextComponent(text=flag, size="xxl", flex=0, gravity="center"),
                 TextComponent(text=label, size="sm", weight="bold", color="#111827", flex=1, gravity="center"),
                 _pill_badge(status_label, bg, text_color),
             ]
         )
 
     return FlexSendMessage(
-        alt_text="ภาษา",
+        alt_text="🌐 ภาษา / Language",
         contents=BubbleContainer(
             size="kilo",
             body=BoxComponent(
@@ -2576,14 +2620,14 @@ def build_language_selector_flex():
                 padding_all="lg",
                 spacing="sm",
                 contents=[
-                    TextComponent(text="ภาษา", weight="bold", size="md", color="#111827"),
-                    TextComponent(text="ขณะนี้ภาษาไทยและมลายูพร้อมใช้งาน ภาษาอื่นอยู่ระหว่างการพัฒนาครับ",
+                    TextComponent(text="🌐 ภาษา / Language", weight="bold", size="md", color="#111827"),
+                    TextComponent(text="แตะธงเพื่อเลือกภาษา · Tap a flag to choose your language",
                                   size="xs", color="#9CA3AF", margin="xs", wrap=True),
                     _dashed_rule(),
-                    _lang_row("ภาษาไทย", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: TH"),
-                    _lang_row("Bahasa Melayu", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: MY"),
-                    _lang_row("English", "กำลังพัฒนา", "#FEF3C7", "#92400E", "ตั้งค่าภาษา: EN"),
-                    _lang_row("日本語", "กำลังพัฒนา", "#FEF3C7", "#92400E", "ตั้งค่าภาษา: JP"),
+                    _lang_row("🇹🇭", "ภาษาไทย", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: TH"),
+                    _lang_row("🇲🇾", "Bahasa Melayu", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: MY"),
+                    _lang_row("🇬🇧", "English", "กำลังพัฒนา", "#FEF3C7", "#92400E", "ตั้งค่าภาษา: EN"),
+                    _lang_row("🇯🇵", "日本語", "กำลังพัฒนา", "#FEF3C7", "#92400E", "ตั้งค่าภาษา: JP"),
                 ]
             )
         )
@@ -2759,6 +2803,21 @@ def _has_facility(value) -> bool:
     return str(value).strip().lower() in ("true", "1", "y", "yes", "มี", "✓")
 
 
+# The dashboard's "เพิ่มศูนย์พักพิงใหม่" form has 6 optional-amenity checkboxes
+# beyond the 3 core ones (เตียง/ห้องน้ำ/ที่จอดรถ, which have their own Beds/
+# Toilets/Parking columns). Those 6 are saved as a single comma-joined string
+# in the 'Facilities' column (e.g. "ไฟฟ้า, น้ำสะอาด"). Keep this list in the
+# exact same order/labels as the dashboard's `FACILITIES` JS array so a
+# checkbox ticked in the dashboard always shows up ticked on the LINE card.
+EXTRA_FACILITIES = ['ไฟฟ้า', 'น้ำสะอาด', 'อินเทอร์เน็ต', 'รองรับผู้พิการ', 'รับสัตว์เลี้ยง', 'มีแพทย์ประจำ']
+
+
+def _has_extra_facility(shelter: dict, label: str) -> bool:
+    """Checks whether `label` (e.g. 'ไฟฟ้า') is present in the shelter's comma-joined Facilities cell."""
+    raw = str(shelter.get("Facilities", "") or "")
+    return label in [part.strip() for part in raw.split(",")]
+
+
 def build_contact_flex_message(contacts: list) -> FlexSendMessage:
     """
     All emergency hotlines in ONE pricing-card-style bubble: dark header with
@@ -2851,10 +2910,10 @@ _WATER_SEVERITY_COLORS = {
 }
 
 _SHELTER_SEVERITY_COLORS = {
-    "เปิดรับ":  {"bg": "#A7F0D2", "text": "#0F172A"},
-    "ใกล้เต็ม": {"bg": "#FDE68A", "text": "#0F172A"},
-    "เต็ม":     {"bg": "#FBC7D4", "text": "#0F172A"},
-    "ปิด":      {"bg": "#E5E7EB", "text": "#0F172A"},
+    "เปิดรับ":  {"bg": "#CFF3E3", "text": "#047857"},
+    "ใกล้เต็ม": {"bg": "#FDECC8", "text": "#92400E"},
+    "เต็ม":     {"bg": "#FBD9DD", "text": "#B91C1C"},
+    "ปิด":      {"bg": "#E5E7EB", "text": "#4B5563"},
 }
 
 
@@ -3022,8 +3081,6 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
             ]
         )
 
-        facilities_note = str(sh.get("Facilities", "")).strip()
-
         body_contents = [
             BoxComponent(
                 layout="horizontal",
@@ -3060,34 +3117,48 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                             ),
                         ]
                     ),
-                    _pill_button("นำทาง", nav_action),
-                ]
-            ),
-            BoxComponent(
-                layout="horizontal",
-                margin="lg",
-                spacing="md",
-                contents=[
-                    BoxComponent(layout="vertical", flex=1, contents=[
-                        TextComponent(text="เตียง", size="xxs", color="#9CA3AF", align="center"),
-                        _facility_mark(_has_facility(sh.get("Beds"))),
-                    ]),
-                    BoxComponent(layout="vertical", flex=1, contents=[
-                        TextComponent(text="ห้องน้ำ", size="xxs", color="#9CA3AF", align="center"),
-                        _facility_mark(_has_facility(sh.get("Toilets"))),
-                    ]),
-                    BoxComponent(layout="vertical", flex=1, contents=[
-                        TextComponent(text="ที่จอดรถ", size="xxs", color="#9CA3AF", align="center"),
-                        _facility_mark(_has_facility(sh.get("Parking"))),
-                    ]),
+                    _pill_button("นำทาง", nav_action, bg="#0D9488"),
                 ]
             ),
         ]
 
-        if facilities_note and facilities_note != "-":
-            body_contents.append(
-                TextComponent(text=facilities_note, size="xs", color="#374151", margin="md", wrap=True)
-            )
+        # Facilities: only show the ones that are actually present, as small
+        # tinted chips, instead of a 3x3 grid of every possible amenity with
+        # a dash for whatever's missing. A shelter usually has 2-4 amenities
+        # checked, so this keeps the card short and easy to scan instead of
+        # forcing every card to render the same 9 rows regardless.
+        present_facilities = [
+            label for label, has in [
+                ("เตียง", _has_facility(sh.get("Beds"))),
+                ("ห้องน้ำ", _has_facility(sh.get("Toilets"))),
+                ("ที่จอดรถ", _has_facility(sh.get("Parking"))),
+                *[(label, _has_extra_facility(sh, label)) for label in EXTRA_FACILITIES],
+            ] if has
+        ]
+
+        if present_facilities:
+            body_contents.append(_dashed_rule())
+            for row_start in range(0, len(present_facilities), 3):
+                row_labels = present_facilities[row_start:row_start + 3]
+                body_contents.append(
+                    BoxComponent(
+                        layout="horizontal",
+                        margin="md" if row_start == 0 else "xs",
+                        spacing="xs",
+                        contents=[
+                            BoxComponent(
+                                layout="vertical", flex=1,
+                                background_color="#ECFDF5", corner_radius="8px",
+                                padding_top="6px", padding_bottom="6px", padding_start="4px", padding_end="4px",
+                                contents=[TextComponent(
+                                    text=f"✓ {label}", size="xxs", weight="bold", color="#047857",
+                                    align="center", wrap=True, max_lines=1
+                                )]
+                            )
+                            for label in row_labels
+                        ]
+                    )
+                )
 
         body_contents.append(
             TextComponent(
