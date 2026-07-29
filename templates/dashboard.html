@@ -1715,6 +1715,14 @@ document.getElementById('f_geoBtn').addEventListener('click',()=>{
     err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>เบราว์เซอร์ของคุณไม่รองรับการดึงพิกัด GPS ปัจจุบัน</div>`;
     return; 
   }
+  // Geolocation only works on a "secure context" (HTTPS, or localhost while
+  // developing). If the dashboard is being served over plain HTTP, every
+  // browser will silently refuse the request — surface that clearly instead
+  // of the generic "can't get your location" message.
+  if(!window.isSecureContext){
+    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>ต้องเปิดหน้านี้ผ่าน HTTPS จึงจะดึงพิกัด GPS ได้ กรุณาปักหมุดเองบนแผนที่แทน</div>`;
+    return;
+  }
   const btn=document.getElementById('f_geoBtn');
   btn.innerHTML = '<i class="ph ph-spinner"></i> กำลังค้นหาตำแหน่ง...'; btn.disabled=true;
   
@@ -1739,10 +1747,17 @@ document.getElementById('f_geoBtn').addEventListener('click',()=>{
     }
     btn.innerHTML='<i class="ph ph-crosshair"></i> ใช้ตำแหน่งปัจจุบันของฉัน'; btn.disabled=false;
     reverseGeocodeAndFill(lat, lon);
-  },()=>{ 
+  },(geoErr)=>{ 
     btn.innerHTML='<i class="ph ph-crosshair"></i> ใช้ตำแหน่งปัจจุบันของฉัน'; btn.disabled=false; 
-    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>ไม่สามารถดึงพิกัดตำแหน่งของคุณได้ในขณะนี้ กรุณาคลิกปักหมุดเองบนแผนที่</div>`;
-  });
+    // geoErr.code tells us *why* it failed instead of a one-size-fits-all
+    // message: 1 = user/browser blocked permission, 2 = device couldn't
+    // resolve a position, 3 = it took too long and timed out.
+    let reason = 'ไม่สามารถดึงพิกัดตำแหน่งของคุณได้ในขณะนี้';
+    if(geoErr && geoErr.code === 1) reason = 'ไม่ได้รับอนุญาตให้เข้าถึงตำแหน่ง กรุณาอนุญาตการเข้าถึงตำแหน่งในตั้งค่าเบราว์เซอร์';
+    else if(geoErr && geoErr.code === 2) reason = 'อุปกรณ์นี้ไม่สามารถระบุตำแหน่งได้ในขณะนี้';
+    else if(geoErr && geoErr.code === 3) reason = 'ค้นหาตำแหน่งนานเกินไป (timeout)';
+    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>${reason} กรุณาคลิกปักหมุดเองบนแผนที่แทน</div>`;
+  },{enableHighAccuracy:true, timeout:15000, maximumAge:0});
 });
 
 function renderCoreFacOptions(){
