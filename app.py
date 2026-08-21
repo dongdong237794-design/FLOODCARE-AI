@@ -45,6 +45,7 @@ from bot_config import (
     build_register_form_flex, build_snake_bite_flex, build_help_flex,
     build_weather_flex, build_faq_response_flex,
     build_shelter_flex_message, build_prep_guide_flex, build_accident_flex_message,
+    MORE_SHELTERS_TRIGGERS,
     build_contact_flex_message, build_my_cases_flex_message,
     # Shelter data
     find_nearest_shelters,
@@ -60,7 +61,7 @@ from bot_config import (
     USER_STATES, USER_DATA, update_legacy_state,
     # Config
     SOS_LIFF_URL, NEED_LIFF_URL,
-    SOS_LIFF_ID, NEED_LIFF_ID,
+    SOS_LIFF_ID, NEED_LIFF_ID, TRACK_LIFF_ID,
     REGISTER_LIFF_URL, REGISTER_LIFF_ID,
     WATER_LEVEL_SOURCE_URL, SNAKE_BITE_HOTLINE, SNAKE_BITE_INFO_URL, TMD_SOURCE_URL,
     DASHBOARD_PASSWORD, FLASK_SECRET_KEY, DASHBOARD_API_KEY,
@@ -79,6 +80,25 @@ from linebot.models import (
 
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY or os.urandom(32)
+
+SHELTER_NOT_FOUND_TEXT = {
+    "TH": (
+        "📍 ขออภัยครับ ตอนนี้ยังไม่พบศูนย์พักพิงในระบบที่อยู่ใกล้ตำแหน่งของคุณ\n\n"
+        "เพื่อความปลอดภัย รบกวนติดต่อสายด่วน ปภ. 1784 เพื่อสอบถามจุดอพยพที่ใกล้ที่สุดในพื้นที่ได้เลยครับ "
+        "น้องบอทจะรีบอัปเดตข้อมูลศูนย์พักพิงเพิ่มเติมโดยเร็วที่สุดครับ"
+    ),
+    "EN": (
+        "📍 Sorry, we couldn't find any shelters in our system near your location right now.\n\n"
+        "For your safety, please call the DDPM hotline 1784 to ask about the nearest evacuation "
+        "point in your area. We'll update our shelter database as soon as possible."
+    ),
+    "MY": (
+        "📍 Maaf, tiada tempat perlindungan dijumpai berhampiran lokasi anda buat masa ini.\n\n"
+        "Demi keselamatan anda, sila hubungi talian hotline DDPM 1784 untuk bertanya lokasi "
+        "pemindahan terdekat di kawasan anda. Kami akan mengemas kini pangkalan data secepat mungkin."
+    ),
+}
+
 
 def _get_display_name(user_id: str) -> str:
     """
@@ -167,6 +187,46 @@ def _push_save_confirmation(user_id: Optional[str], message: str, track_id: Opti
         line_bot_api.push_message(user_id, TextSendMessage(text=message, quick_reply=quick_reply))
     except Exception as e:
         Logger.info("Push", f"Failed to send save-confirmation: {e}")
+
+
+def broadcast_alert_to_all_users(message: str) -> dict:
+    """
+    Admin-triggered flood alert broadcast (dashboard button, not automatic).
+    Pulls every distinct user_id from the 'users' sheet and pushes the
+    message via LINE's multicast API, chunked at 500 recipients per call
+    since that's LINE's hard limit per multicast request.
+    Returns {"sent": n, "failed_chunks": n} so the dashboard can show a
+    clear result instead of a silent success/failure.
+    """
+    if not line_bot_api:
+        return {"sent": 0, "failed_chunks": 0, "error": "line_bot_api not configured"}
+
+    try:
+        users = sheets_mgr.get_all_records("users")
+    except Exception as e:
+        Logger.error("Broadcast", f"Failed to load users sheet: {e}")
+        return {"sent": 0, "failed_chunks": 0, "error": "failed_to_load_users"}
+
+    user_ids = sorted({
+        str(u.get("user_id", "")).strip() for u in users
+        if str(u.get("user_id", "")).strip() and str(u.get("user_id", "")).strip() != "unknown"
+    })
+    if not user_ids:
+        return {"sent": 0, "failed_chunks": 0, "error": "no_users"}
+
+    sent, failed_chunks = 0, 0
+    chunk_size = 500  # LINE multicast hard limit per call
+    for i in range(0, len(user_ids), chunk_size):
+        chunk = user_ids[i:i + chunk_size]
+        try:
+            line_bot_api.multicast(chunk, TextSendMessage(text=message))
+            sent += len(chunk)
+        except Exception as e:
+            failed_chunks += 1
+            Logger.error("Broadcast", f"multicast chunk failed ({len(chunk)} recipients): {e}")
+
+    Logger.info("Broadcast", f"Alert sent to {sent}/{len(user_ids)} users ({failed_chunks} chunk(s) failed)")
+    return {"sent": sent, "total_users": len(user_ids), "failed_chunks": failed_chunks}
 
 
 # =============================================================================
@@ -350,7 +410,7 @@ def handle_text_message(event):
     
     if user_text.startswith("ตั้งค่าภาษา: "):
         lang = user_text.replace("ตั้งค่าภาษา: ", "").strip()
-        if lang in ("TH", "MY"):
+        if lang in ("TH", "MY", "EN"):
             session.language = lang
             try:
                 sheets_mgr.update_row_by_id("users", "user_id", user_id, {"preferred_language": lang})
@@ -358,14 +418,31 @@ def handle_text_message(event):
                 Logger.error("Language", f"Could not persist preferred_language: {e}")
             line_bot_api.reply_message(event.reply_token, get_greeting_message(_get_display_name(user_id), lang))
         else:
-            lang_names = {"EN": "English", "JP": "日本語"}
+            lang_names = {"JP": "日本語"}
             reply_text = (
                 f"ขออภัยครับ {lang_names.get(lang, lang)} ยังอยู่ระหว่างการพัฒนา "
-                f"ตอนนี้ระบบให้บริการเต็มรูปแบบในภาษาไทยและมลายูครับ"
+                f"ตอนนี้ระบบให้บริการเต็มรูปแบบในภาษาไทย มลายู และอังกฤษครับ"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
     
+    if user_text in MORE_SHELTERS_TRIGGERS.values():
+        pending = session.data.get("more_shelters") or []
+        if not pending:
+            no_more_text = {
+                "TH": "ไม่มีศูนย์พักพิงเพิ่มเติมในระบบแล้วครับ",
+                "EN": "There are no more shelters in the system.",
+                "MY": "Tiada lagi tempat perlindungan dalam sistem.",
+            }.get(session.language, "ไม่มีศูนย์พักพิงเพิ่มเติมในระบบแล้วครับ")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=no_more_text))
+            return
+        shown, remaining = pending[:3], pending[3:]
+        flex_msg = build_shelter_flex_message(None, None, shown, lang=session.language, more_count=len(remaining))
+        line_bot_api.reply_message(event.reply_token, flex_msg)
+        session.data["more_shelters"] = remaining
+        session.updated_at = time.time()
+        return
+
     if user_text in ["ยกเลิก", "cancel", "หยุด", "stop"]:
         session.reset()
         update_legacy_state(user_id, "IDLE", {})
@@ -822,16 +899,17 @@ def _handle_faq_query(event, user_id, user_text, timestamp, pre_answer=None):
         sources = pre_answer.get("sources", [])
     else:
         show_loading_animation(user_id, loading_seconds=30)
-        result = ask_gemini_with_search(user_text, max_tokens=1500, lang=lang)
+        result = ask_gemini_with_search(user_text, max_tokens=600, lang=lang)
         answer = result.get("answer", "")
         sources = result.get("sources", [])
 
     if not answer:
-        answer = (
-            "Maaf, tiada maklumat berkaitan bencana atau keselamatan untuk soalan ini. Sila cuba tanya semula."
-            if lang == "MY" else
-            "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติหรือความปลอดภัยในคำถามนี้ กรุณาลองสอบถามใหม่อีกครั้งครับ"
-        )
+        if lang == "MY":
+            answer = "Maaf, tiada maklumat berkaitan bencana atau keselamatan untuk soalan ini. Sila cuba tanya semula."
+        elif lang == "EN":
+            answer = "Sorry, no disaster or safety information was found for this question. Please try asking again."
+        else:
+            answer = "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติหรือความปลอดภัยในคำถามนี้ กรุณาลองสอบถามใหม่อีกครั้งครับ"
 
     flex_msg = build_faq_response_flex(answer, sources, user_text)
     line_bot_api.reply_message(event.reply_token, flex_msg)
@@ -858,18 +936,19 @@ def _handle_ai_query(event, user_id, user_text, timestamp, pre_answer=None):
             "ความปลอดภัย และสุขภาพของผู้เจ็บป่วยหรือเครียดเท่านั้น ปฏิเสธเรื่องนอกขอบเขตอย่างสุภาพและอบอุ่น "
             "และตอบคำถามดังต่อไปนี้โดยไม่ใช้เครื่องหมายดอกจันเด็ดขาด:\n\n"
             f"คำถาม: {user_text}",
-            max_tokens=1500,
+            max_tokens=600,
             lang=lang
         )
         ai_response = result.get("answer", "")
         sources = result.get("sources", [])
 
     if not ai_response:
-        ai_response = (
-            "Maaf, sistem tidak tersedia buat masa ini. Jika kecemasan, sila hubungi 1784 dengan serta-merta."
-            if lang == "MY" else
-            "น้องบอทไม่พร้อมใช้งานชั่วคราวครับ หากฉุกเฉินรบกวนโทร ปภ. 1784 ได้ทันทีครับ"
-        )
+        if lang == "MY":
+            ai_response = "Maaf, sistem tidak tersedia buat masa ini. Jika kecemasan, sila hubungi 1784 dengan serta-merta."
+        elif lang == "EN":
+            ai_response = "The bot is temporarily unavailable. If this is an emergency, please call the DDPM hotline 1784 right away."
+        else:
+            ai_response = "น้องบอทไม่พร้อมใช้งานชั่วคราวครับ หากฉุกเฉินรบกวนโทร ปภ. 1784 ได้ทันทีครับ"
 
     if sources:
         flex_msg = build_faq_response_flex(ai_response, sources, user_text)
@@ -893,31 +972,35 @@ def _handle_ai_query(event, user_id, user_text, timestamp, pre_answer=None):
 
 def _process_shelter_search(event, lat, lon, user_id):
     session = sessions.get(user_id)
+    lang = session.language
 
-    shelters = find_nearest_shelters(lat, lon, limit=5)
+    # Fetch a larger pool once, but only show the first 3 up front (per the
+    # agreed design) — the rest sit in session.data so a tap on the "see
+    # more" bubble can page through them without re-querying location.
+    shelters = find_nearest_shelters(lat, lon, limit=9)
 
     if not shelters:
-        reply = (
-            "📍 ขออภัยครับ ตอนนี้ยังไม่พบศูนย์พักพิงในระบบที่อยู่ใกล้ตำแหน่งของคุณ\n\n"
-            "เพื่อความปลอดภัย รบกวนติดต่อสายด่วน ปภ. 1784 เพื่อสอบถามจุดอพยพที่ใกล้ที่สุดในพื้นที่ได้เลยครับ "
-            "น้องบอทจะรีบอัปเดตข้อมูลศูนย์พักพิงเพิ่มเติมโดยเร็วที่สุดครับ"
-        )
+        reply = SHELTER_NOT_FOUND_TEXT.get(lang, SHELTER_NOT_FOUND_TEXT["TH"])
         session.reset()
         update_legacy_state(user_id, "IDLE", {})
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
+    shown, remaining = shelters[:3], shelters[3:]
+
     try:
-        flex_msg = build_shelter_flex_message(lat, lon, shelters)
+        flex_msg = build_shelter_flex_message(lat, lon, shown, lang=lang, more_count=len(remaining))
         line_bot_api.reply_message(event.reply_token, flex_msg)
     except Exception as e:
         Logger.error("Shelter", f"Flex failed: {e}")
         lines = ["ศูนย์พักพิงใกล้คุณ:\n"]
-        for sh in shelters:
+        for sh in shown:
             lines.append(f"• {sh.get('Name', 'ไม่ระบุชื่อ')} (ห่าง {sh.get('distance_km', 0):.1f} กม.) — {sh.get('Status', 'เปิดรับ')}")
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="\n".join(lines)))
 
-    session.reset()
+    session.state = "IDLE"
+    session.data = {"more_shelters": remaining, "more_shelters_lang": lang} if remaining else {}
+    session.updated_at = time.time()
     update_legacy_state(user_id, "IDLE", {})
 
 
@@ -1087,6 +1170,8 @@ def _render_liff_page(template_name: str, page_label: str):
             liff_id = NEED_LIFF_ID
         elif "register" in template_name:
             liff_id = REGISTER_LIFF_ID
+        elif "track" in template_name:
+            liff_id = TRACK_LIFF_ID
 
         return render_template(template_name, liff_id=liff_id, register_liff_id=REGISTER_LIFF_ID)
     except Exception as e:
@@ -1358,6 +1443,17 @@ def api_dashboard_update_sos_status(case_id):
         return jsonify({"error": "invalid status"}), 400
 
     responder_name = data.get("responder_name", "-") or "-"
+
+    if responder_name != "-" and new_status == "IN_PROGRESS":
+        existing = sheets_mgr.get_all_records("sos_requests")
+        current = next((r for r in existing if str(r.get("request_id", "")) == case_id), None)
+        current_responder = str((current or {}).get("responder_name", "") or "").strip()
+        if current_responder and current_responder not in ("-", responder_name):
+            return jsonify({
+                "success": False, "error": "already_claimed",
+                "responder_name": current_responder
+            }), 409
+
     case_record = sheets_mgr.update_sos_status(case_id, new_status, responder_name)
     if not case_record:
         return jsonify({"success": False, "error": "case_not_found_or_sheet_error"}), 404
@@ -1385,6 +1481,29 @@ def api_dashboard_update_sos_status(case_id):
         sheets_mgr.update_row_by_id("sos_requests", "request_id", case_id, {"last_notified_status": new_status})
 
     return jsonify({"success": True, "case_id": case_id, "status": new_status})
+
+
+@app.route("/api/dashboard/alerts/broadcast", methods=["POST"])
+def api_dashboard_broadcast_alert():
+    """
+    Admin manually composes and sends a flood-alert message to every
+    registered user — nothing automatic here by design (see feature
+    discussion): the admin decides what to say and when to send it.
+    """
+    if not _dashboard_api_authed():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        return jsonify({"success": False, "error": "empty_message"}), 400
+    if len(message) > 1000:
+        return jsonify({"success": False, "error": "message_too_long"}), 400
+
+    result = broadcast_alert_to_all_users(f"📢 แจ้งเตือนจากทีมงาน FLOODCARE AI\n\n{message}")
+    if result.get("error"):
+        return jsonify({"success": False, **result}), 500
+    return jsonify({"success": True, **result})
 
 
 @app.route("/api/dashboard/shelters", methods=["POST"])
@@ -1453,11 +1572,28 @@ def api_dashboard_update_need_status(need_id):
     if not new_status:
         return jsonify({"error": "invalid status"}), 400
 
-    record = sheets_mgr.update_need_status(need_id, new_status)
+    volunteer_name = (data.get("volunteer_name") or "").strip() or None
+
+    # If this is a claim (PENDING -> IN_PROGRESS with a volunteer name attached),
+    # guard against two volunteers tapping "รับเคส" on the same request at
+    # nearly the same time — whoever's claim actually lands in the sheet
+    # first wins; the second tap is told it's already taken instead of
+    # silently overwriting the first volunteer's name.
+    if volunteer_name and new_status.upper() == "IN_PROGRESS":
+        existing = sheets_mgr.get_all_records("user_needs")
+        current = next((r for r in existing if str(r.get("need_id", "")) == need_id), None)
+        current_volunteer = str((current or {}).get("volunteer_name", "") or "").strip()
+        if current_volunteer and current_volunteer not in ("-", volunteer_name):
+            return jsonify({
+                "success": False, "error": "already_claimed",
+                "volunteer_name": current_volunteer
+            }), 409
+
+    record = sheets_mgr.update_need_status(need_id, new_status, volunteer_name)
     if not record:
         return jsonify({"success": False, "error": "need_not_found_or_sheet_error"}), 404
 
-    return jsonify({"success": True, "need_id": need_id, "status": new_status})
+    return jsonify({"success": True, "need_id": need_id, "status": new_status, "volunteer_name": volunteer_name or "-"})
 
 
 @app.route("/api/dashboard/shelters/<shelter_id>/occupancy", methods=["POST"])
@@ -1727,6 +1863,46 @@ def api_need_submit():
     except Exception as e:
         Logger.error("Need_API", f"Submit error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/my-cases", methods=["GET"])
+@_require_liff_auth(TRACK_LIFF_ID)
+def api_my_cases():
+    """
+    Lists the requesting LINE user's own SOS + need-request cases, newest
+    first, so /liff/track can show a tappable list instead of making them
+    remember/paste a case ID. Only returns anything meaningful once
+    TRACK_LIFF_ID is configured — with no LIFF ID, _require_liff_auth can't
+    verify who's asking, so g.verified_user_id stays None and we return an
+    empty list (frontend falls back to manual entry, unchanged).
+    """
+    user_id = getattr(g, "verified_user_id", None)
+    if not user_id or user_id == "unknown":
+        return jsonify({"success": True, "cases": []})
+
+    cases = []
+    for r in sheets_mgr.get_all_records("sos_requests"):
+        if str(r.get("user_id", "")).strip() == user_id:
+            status = str(r.get("status", "OPEN")).upper()
+            cases.append({
+                "case_id": r.get("request_id", ""), "type": "sos",
+                "status_label": {"OPEN": "รอดำเนินการ", "IN_PROGRESS": "ทีมกำลังช่วยเหลือ", "CLOSED": "ช่วยเหลือสำเร็จ"}.get(status, status),
+                "timestamp": r.get("timestamp", ""),
+                "closed": status == "CLOSED",
+            })
+    for r in sheets_mgr.get_all_records("user_needs"):
+        if str(r.get("user_id", "")).strip() == user_id:
+            status = str(r.get("status", "PENDING")).upper()
+            delivered = status in ("DELIVERED", "DONE", "COMPLETED")
+            cases.append({
+                "case_id": r.get("need_id", ""), "type": "need",
+                "status_label": "ส่งมอบแล้ว" if delivered else ("กำลังจัดเตรียม" if status not in ("PENDING", "") else "รอดำเนินการ"),
+                "timestamp": r.get("timestamp", ""),
+                "closed": delivered,
+            })
+
+    cases.sort(key=lambda c: str(c.get("timestamp", "")), reverse=True)
+    return jsonify({"success": True, "cases": cases})
 
 
 @app.route("/api/track", methods=['GET'])
