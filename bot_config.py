@@ -139,6 +139,13 @@ DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "")
 
 # Performance Tuning
 WATER_DATA_MAX_AGE_MINUTES = int(os.environ.get("WATER_DATA_MAX_AGE_MINUTES", "10"))
+
+# ── Water Alert Engine ──
+# See FLOODCARE_AI_Water_Map_and_Alert_Implementation_Spec: proactive LINE
+# push when a station near an opted-in user crosses into มาก/ล้นตลิ่ง.
+WATER_ALERT_ENABLED = os.environ.get("WATER_ALERT_ENABLED", "true").strip().lower() == "true"
+WATER_ALERT_RADIUS_KM = float(os.environ.get("WATER_ALERT_RADIUS_KM", "20"))
+WATER_ALERT_COOLDOWN_MINUTES = int(os.environ.get("WATER_ALERT_COOLDOWN_MINUTES", "60"))
 MAX_CASES_PER_SECTION = int(os.environ.get("MAX_CASES_PER_SECTION", "10"))
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
 RATE_LIMIT_REQUESTS = int(os.environ.get("RATE_LIMIT_REQUESTS", "30"))
@@ -1351,7 +1358,8 @@ class SheetsManager:
                          "housing_type", "house_no", "condo_floor", "condo_room",
                          "province", "district", "sub_district", "gps_lat", "gps_lon",
                          "member_count", "emergency_contact", "sms_enabled",
-                         "consent_pdpa", "register_date", "status", "preferred_language"],
+                         "consent_pdpa", "register_date", "status", "preferred_language",
+                         "water_alert_enabled", "water_alert_radius_km"],
                 "sos_requests": ["request_id", "household_id", "user_id", "timestamp", "latitude", "longitude",
                                 "people_count", "children", "elderly", "bedridden", "pets",
                                 "water_level", "note", "priority", "status",
@@ -1367,6 +1375,12 @@ class SheetsManager:
                 "Contacts": ["ContactID", "Name", "Role", "Phone"],
                 "AI_Logs": ["Timestamp", "UserID", "Intent", "Question", "Answer", "ResponseTimeMs"],
                 "System_Logs": ["Timestamp", "Level", "Module", "Message", "UserID"],
+                # Durable dedup state for the Water Alert Engine — one row per
+                # (user_id, station_code) pair. Kept as its own sheet (not
+                # in-memory) specifically so alert history survives an app/
+                # Render restart, per the implementation spec's requirement.
+                "Water_Alert_State": ["user_id", "station_code", "last_situation",
+                                     "last_alert_at", "last_measure_time", "updated_at"],
             }
             
             for name, headers in required_sheets.items():
@@ -1783,6 +1797,65 @@ class SheetsManager:
             return True
         except Exception as e:
             Logger.error("Sheets", f"overwrite_water_levels error: {e}")
+            return False
+
+    def get_water_alert_state_map(self) -> dict:
+        """
+        Reads the entire Water_Alert_State sheet into a dict keyed by
+        (user_id, station_code) for O(1) lookup while the alert engine
+        walks every user/station pair in a single refresh cycle, instead of
+        one sheet read per pair.
+        """
+        records = self.get_all_records("Water_Alert_State")
+        return {(str(r.get("user_id", "")), str(r.get("station_code", ""))): r for r in records}
+
+    def upsert_water_alert_state(self, user_id: str, station_code: str, situation: str,
+                                   alert_sent: bool, measure_time: str) -> bool:
+        """
+        Writes/updates the durable dedup row for one (user_id, station_code)
+        pair after the alert engine evaluates it. last_alert_at only moves
+        forward when alert_sent is True — situation/measure_time are always
+        updated so the next cycle compares against the latest reading even
+        on a poll where nothing was actually sent (e.g. still cooling down).
+        """
+        client = self.get_client()
+        if not client:
+            return False
+        try:
+            sheet = client.open_by_key(extract_sheet_id(GOOGLE_SHEET_ID))
+            ws = sheet.worksheet("Water_Alert_State")
+            records = ws.get_all_records(numericise_ignore=['all'])
+            now_str = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
+            row_number = None
+            for idx, rec in enumerate(records, start=2):
+                if str(rec.get("user_id", "")) == user_id and str(rec.get("station_code", "")) == station_code:
+                    row_number = idx
+                    break
+
+            header = ws.row_values(1)
+            col_map = {name: i + 1 for i, name in enumerate(header)}
+            values = {
+                "user_id": user_id,
+                "station_code": station_code,
+                "last_situation": situation,
+                "last_measure_time": measure_time,
+                "updated_at": now_str,
+            }
+            if alert_sent:
+                values["last_alert_at"] = now_str
+
+            if row_number:
+                cells = [gspread.Cell(row_number, col_map[k], str(v)) for k, v in values.items() if k in col_map]
+                ws.update_cells(cells, value_input_option='RAW')
+            else:
+                if not alert_sent:
+                    values.setdefault("last_alert_at", "")
+                row = [str(values.get(h, "")) for h in header]
+                ws.append_row(row, value_input_option='RAW')
+            cache.sheets.delete("sheets:Water_Alert_State")
+            return True
+        except Exception as e:
+            Logger.error("Sheets", f"upsert_water_alert_state error: {e}")
             return False
 
 sheets_mgr = SheetsManager()
@@ -2205,6 +2278,218 @@ if LINE_CHANNEL_ACCESS_TOKEN and LineBotApi:
     line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 if LINE_CHANNEL_SECRET and WebhookHandler:
     handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+
+# =============================================================================
+# WATER ALERT ENGINE
+# =============================================================================
+# Proactive LINE push when a station near an opted-in, located user crosses
+# into a risky situation (มาก / ล้นตลิ่ง). Called from water_level_refresh_loop
+# right after Water_Levels is overwritten with a fresh ThaiWater pull, reusing
+# that same `stations` list — this file never calls ThaiWater a second time
+# just for alerting (see spec §5.3).
+
+_WATER_ALERT_RISK_SITUATIONS = {"มาก", "ล้นตลิ่ง"}
+# Situations worth telling someone about even when it's not a fresh risk —
+# recovering out of a risky state is genuinely useful to know, per spec §5.4's
+# "should support" cases. Anything not in either set (e.g. น้อย, ปกติ<-น้อย)
+# is a normal/quiet transition and never generates a push.
+_WATER_ALERT_TRACKED_TRANSITIONS = {
+    ("ปกติ", "มาก"): "risk_up",
+    ("น้อย", "มาก"): "risk_up",
+    ("น้อยวิกฤต", "มาก"): "risk_up",
+    ("มาก", "ล้นตลิ่ง"): "risk_up_critical",
+    ("ล้นตลิ่ง", "มาก"): "recovering",
+    ("มาก", "ปกติ"): "recovered",
+    ("มาก", "น้อย"): "recovered",
+}
+
+
+def _build_water_alert_text(kind: str, station: dict, distance_km: float) -> str:
+    """
+    Message copy per spec §12. Deliberately never claims flooding has
+    reached the user's own location — only reports the station's reading
+    and distance, and always points them to official channels for anything
+    beyond that (spec §12's explicit prohibition).
+    """
+    name = station.get("Name", "ไม่ระบุ")
+    area = station.get("Location", "-") or "-"
+    wl = station.get("WaterLevel", "-")
+    measure_time = station.get("Time", "-")
+
+    if kind == "risk_up":
+        return (
+            f"⚠️ แจ้งเตือนระดับน้ำสูง\n\n"
+            f"สถานี: {name}\nพื้นที่: {area}\nระดับน้ำ: {wl}\nสถานะ: มาก\n"
+            f"ระยะห่างจากคุณ: {distance_km:.1f} กม.\nเวลาอัปเดต: {measure_time}\n\n"
+            f"ระดับน้ำที่สถานีอยู่ในระดับสูง โปรดติดตามสถานการณ์อย่างใกล้ชิดครับ"
+        )
+    if kind == "risk_up_critical":
+        return (
+            f"🚨 แจ้งเตือนระดับน้ำวิกฤต\n\n"
+            f"สถานี: {name}\nพื้นที่: {area}\nระดับน้ำ: {wl}\nสถานะ: ล้นตลิ่ง\n"
+            f"ระยะห่างจากคุณ: {distance_km:.1f} กม.\nเวลาอัปเดต: {measure_time}\n\n"
+            f"โปรดติดตามประกาศและคำแนะนำจากหน่วยงานในพื้นที่อย่างใกล้ชิด "
+            f"และเตรียมพร้อมปฏิบัติตามคำแนะนำด้านความปลอดภัยครับ"
+        )
+    if kind == "recovering":
+        return (
+            f"ℹ️ อัปเดตสถานการณ์น้ำ\n\n"
+            f"สถานี: {name}\nพื้นที่: {area}\nระดับน้ำ: {wl}\nสถานะ: มาก (ลดลงจากล้นตลิ่ง)\n"
+            f"ระยะห่างจากคุณ: {distance_km:.1f} กม.\nเวลาอัปเดต: {measure_time}\n\n"
+            f"ระดับน้ำลดลงจากระดับล้นตลิ่งแล้ว แต่ยังอยู่ในระดับสูง โปรดเฝ้าระวังต่อเนื่องครับ"
+        )
+    if kind == "recovered":
+        return (
+            f"✅ อัปเดตสถานการณ์น้ำ\n\n"
+            f"สถานี: {name}\nพื้นที่: {area}\nระดับน้ำ: {wl}\nสถานะ: กลับสู่ปกติ\n"
+            f"ระยะห่างจากคุณ: {distance_km:.1f} กม.\nเวลาอัปเดต: {measure_time}\n\n"
+            f"ระดับน้ำที่สถานีนี้กลับสู่ภาวะปกติแล้วครับ"
+        )
+    return ""
+
+
+def run_water_alert_engine(stations: list) -> dict:
+    """
+    Entry point called once per background refresh cycle with the stations
+    list that refresh cycle just fetched (no second ThaiWater call — spec
+    §5.3). For every opted-in, located, ACTIVE user within their alert
+    radius of a station whose situation changed in a way worth telling them
+    about, sends one LINE push and records the transition in
+    Water_Alert_State so a repeat situation (e.g. มาก -> มาก) never re-sends,
+    and the record survives an app restart.
+
+    Returns {"sent": n, "skipped": n, "failed": n} for logging/reporting —
+    this function never raises; a single bad user/station row is caught and
+    skipped so it can't take down the whole cycle (spec §5.7, acceptance
+    criteria #14).
+    """
+    result = {"sent": 0, "skipped": 0, "failed": 0}
+    if not WATER_ALERT_ENABLED:
+        return result
+    if not line_bot_api:
+        Logger.error("WaterAlert", "line_bot_api not configured — skipping alert cycle")
+        return result
+
+    risky_or_recovering_stations = [
+        s for s in (stations or [])
+        if s.get("Situation") in _WATER_ALERT_RISK_SITUATIONS or True
+        # (kept simple: we still need last-known state for stations that
+        # *used* to be risky to detect recovery, so we don't pre-filter by
+        # current situation alone — the transition table below does that.)
+    ]
+    if not risky_or_recovering_stations:
+        return result
+
+    try:
+        users = sheets_mgr.get_all_records("users")
+    except Exception as e:
+        Logger.error("WaterAlert", f"Failed to load users: {e}")
+        return result
+
+    located_users = []
+    for u in users:
+        try:
+            if str(u.get("status", "ACTIVE")).strip().upper() not in ("", "ACTIVE"):
+                continue
+            if str(u.get("water_alert_enabled", "TRUE")).strip().upper() in ("FALSE", "0", "NO"):
+                continue
+            lat = float(u.get("gps_lat", 0) or 0)
+            lon = float(u.get("gps_lon", 0) or 0)
+            if lat == 0 and lon == 0:
+                continue  # spec §7: no valid GPS -> never enters proximity alerting
+            radius = float(u.get("water_alert_radius_km", 0) or 0) or WATER_ALERT_RADIUS_KM
+            located_users.append({"user_id": str(u.get("user_id", "")), "lat": lat, "lon": lon, "radius": radius})
+        except (ValueError, TypeError):
+            result["skipped"] += 1
+            continue
+
+    if not located_users:
+        return result
+
+    try:
+        state_map = sheets_mgr.get_water_alert_state_map()
+    except Exception as e:
+        Logger.error("WaterAlert", f"Failed to load Water_Alert_State: {e}")
+        return result
+
+    cooldown_seconds = WATER_ALERT_COOLDOWN_MINUTES * 60
+    now = get_bangkok_time()
+
+    for station in risky_or_recovering_stations:
+        try:
+            st_code = str(station.get("StationCode", "")).strip()
+            st_lat = float(station.get("Lat", 0) or 0)
+            st_lon = float(station.get("Lon", 0) or 0)
+            if not st_code or (st_lat == 0 and st_lon == 0):
+                continue  # spec §7 / test case 9: station with no GPS is skipped, not errored
+            current_situation = str(station.get("Situation", "ปกติ")).strip()
+            measure_time = str(station.get("Time", "-"))
+        except (ValueError, TypeError):
+            result["skipped"] += 1
+            continue
+
+        for u in located_users:
+            try:
+                distance = calculate_distance(u["lat"], u["lon"], st_lat, st_lon)
+                if distance > u["radius"]:
+                    continue
+
+                key = (u["user_id"], st_code)
+                prior = state_map.get(key)
+                last_situation = str((prior or {}).get("last_situation", "")).strip()
+
+                if not prior:
+                    # First time this engine has ever seen this pair — just
+                    # establish the baseline. Don't alert on it: otherwise
+                    # every user within radius of an already-risky station
+                    # gets paged the moment they register, which isn't a
+                    # real state *change*.
+                    sheets_mgr.upsert_water_alert_state(u["user_id"], st_code, current_situation, False, measure_time)
+                    continue
+
+                if last_situation == current_situation:
+                    result["skipped"] += 1
+                    continue  # e.g. มาก -> มาก / ล้นตลิ่ง -> ล้นตลิ่ง: no repeat alert
+
+                transition_kind = _WATER_ALERT_TRACKED_TRANSITIONS.get((last_situation, current_situation))
+                if not transition_kind:
+                    # Situation changed but not in a way worth a push (e.g.
+                    # ปกติ -> น้อย). Still record the new baseline so the
+                    # *next* change is compared against the right value.
+                    sheets_mgr.upsert_water_alert_state(u["user_id"], st_code, current_situation, False, measure_time)
+                    continue
+
+                last_alert_at = str((prior or {}).get("last_alert_at", "")).strip()
+                if last_alert_at:
+                    try:
+                        last_alert_dt = datetime.datetime.strptime(last_alert_at, "%Y-%m-%d %H:%M:%S")
+                        if (now.replace(tzinfo=None) - last_alert_dt).total_seconds() < cooldown_seconds:
+                            result["skipped"] += 1
+                            continue  # still cooling down from the last push to this user for this station
+                    except ValueError:
+                        pass
+
+                text = _build_water_alert_text(transition_kind, station, distance)
+                if not text:
+                    continue
+
+                try:
+                    line_bot_api.push_message(u["user_id"], TextSendMessage(text=text))
+                    sheets_mgr.upsert_water_alert_state(u["user_id"], st_code, current_situation, True, measure_time)
+                    result["sent"] += 1
+                except Exception as e:
+                    # One user's push failing (blocked bot, invalid token, etc.)
+                    # must never stop the rest of the batch — spec §5.7 / acceptance #14.
+                    Logger.error("WaterAlert", f"Push failed for {u['user_id']} / {st_code}: {e}")
+                    result["failed"] += 1
+            except Exception as e:
+                Logger.error("WaterAlert", f"Pair evaluation error ({u.get('user_id')}, {station.get('StationCode')}): {e}")
+                result["failed"] += 1
+                continue
+
+    Logger.info("WaterAlert", f"Cycle done: sent={result['sent']} skipped={result['skipped']} failed={result['failed']}")
+    return result
 
 
 def show_loading_animation(user_id: str, loading_seconds: int = 30) -> bool:
@@ -3546,6 +3831,10 @@ def start_background_tasks():
                         global _last_water_refresh_ts
                         _last_water_refresh_ts = time.time()
                         Logger.info("WaterLevelRefresh", f"Updated {len(stations)} stations in Water_Levels sheet")
+                        try:
+                            run_water_alert_engine(stations)
+                        except Exception as e:
+                            Logger.error("WaterAlert", f"run_water_alert_engine failed: {e}")
                     else:
                         Logger.error("WaterLevelRefresh", "Failed to write stations to sheet")
                 else:
