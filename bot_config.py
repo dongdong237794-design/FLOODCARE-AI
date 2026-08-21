@@ -96,6 +96,12 @@ NEED_LIFF_URL = os.environ.get("NEED_LIFF_URL", "https://floodcare-ai-2.onrender
 # NOTE: the register link you sent had "liffld=" (typo) — corrected to "liffId=" here to match the other two.
 REGISTER_LIFF_ID = os.environ.get("REGISTER_LIFF_ID", "2010532052-JZ9Fz0Uv")
 REGISTER_LIFF_URL = os.environ.get("REGISTER_LIFF_URL", "https://floodcare-ai-2.onrender.com/liff/register?liffId=2010532052-JZ9Fz0Uv")
+# TRACK_LIFF_ID has no hardcoded default — unlike the other three LIFF apps
+# above, this one doesn't exist yet in the LINE Developers console. The
+# /liff/track page works fine without it (manual case-ID entry, like a
+# shipping tracking number — no login needed). Setting this env var turns
+# on the extra "ดูคำขอของฉัน" auto-list, which needs to know who's asking.
+TRACK_LIFF_ID = os.environ.get("TRACK_LIFF_ID", "")
 
 WATER_LEVEL_SOURCE_URL = os.environ.get(
     "WATER_LEVEL_SOURCE_URL", "https://www.thaiwater.net/water/wl"
@@ -568,10 +574,15 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "- CONTACT: ขอเบอร์โทรฉุกเฉิน/หน่วยงาน\n"
     "- SHELTER: ถามเกี่ยวกับศูนย์พักพิง/ที่อพยพ/ที่ควรไปหลบภัย รวมถึงคำถามที่ไม่ได้พูดคำว่า 'ศูนย์พักพิง' ตรงๆ "
     "แต่ความหมายคือต้องการรู้ว่าตนเอง ณ ตอนนี้ควรไปที่ไหน/อพยพไปทางไหน (เช่น \"ตอนนี้ผมควรอพยพไปที่ไหน\", "
-    "\"ควรไปหลบที่ไหนดี\") ให้ถือเป็น SHELTER เช่นกัน — ถ้าถามหาที่ใกล้ตัวเอง (แถวนี้ ใกล้ฉัน บ้านฉัน ตอนนี้) "
-    "ให้ scope=NEARBY, ถ้าถามภาพรวม/ทั่วไป/จำนวน/ต่างจังหวัด-ต่างภาค ให้ scope=GENERAL\n"
-    "- WATER_LEVEL: ถามเกี่ยวกับระดับน้ำ — ถ้าถามระดับน้ำใกล้ตัวเอง (บ้าน แถวนี้ ตอนนี้ตรงนี้) "
-    "ให้ scope=NEARBY, ถ้าถามภาพรวมภูมิภาค/จังหวัด/ประเทศ/สถานการณ์ทั่วไปที่ไม่เจาะจงตัวผู้ใช้ ให้ scope=GENERAL\n"
+    "\"ควรไปหลบที่ไหนดี\") ให้ถือเป็น SHELTER เช่นกัน — ให้ scope=NEARBY ก็ต่อเมื่อถามถึงตำแหน่งของผู้ใช้เองเท่านั้น "
+    "(แถวนี้ ใกล้ฉัน บ้านฉัน ตอนนี้ตรงนี้ โดยไม่ได้ระบุชื่อสถานที่ใดๆ) ส่วนกรณีอื่นทั้งหมดให้ scope=GENERAL "
+    "รวมถึงเมื่อถามถึงสถานที่ที่ระบุชื่อเจาะจง (เช่น ชื่อเขต/อำเภอ/จังหวัด/ตำบล) แม้จะเจาะจงแค่จุดเดียวก็ตาม "
+    "เพราะไม่ใช่ตำแหน่งของผู้ใช้เอง ต้องตอบด้วยการค้นหาข้อมูลเกี่ยวกับสถานที่นั้นแทนการขอพิกัด\n"
+    "- WATER_LEVEL: ถามเกี่ยวกับระดับน้ำ — ให้ scope=NEARBY ก็ต่อเมื่อถามถึงตำแหน่งของผู้ใช้เองเท่านั้น "
+    "(บ้าน แถวนี้ ตอนนี้ตรงนี้ โดยไม่ได้ระบุชื่อสถานที่ใดๆ) ส่วนกรณีอื่นทั้งหมดให้ scope=GENERAL รวมถึงเมื่อถามถึง "
+    "สถานที่ที่ระบุชื่อเจาะจง (เช่น \"หาดใหญ่\" \"อำเภอเมืองสงขลา\") แม้จะเป็นจุดเดียวไม่ใช่ภาพรวมทั้งภาค/จังหวัดก็ตาม "
+    "— กติกาคือ: มีชื่อสถานที่ระบุมาในคำถามชัดเจน = GENERAL เสมอ (ค้นหาข้อมูลเกี่ยวกับที่นั้นแทนการขอพิกัดผู้ใช้), "
+    "ไม่มีชื่อสถานที่และหมายถึงตัวผู้ใช้เอง = NEARBY (ต้องขอพิกัดผู้ใช้จริง)\n"
     "- WEATHER: ถามสภาพอากาศ/พยากรณ์อากาศ\n"
     "- REGISTRATION: ต้องการลงทะเบียนข้อมูลส่วนตัว\n"
     "- LANGUAGE: ต้องการเปลี่ยนภาษา\n"
@@ -582,7 +593,8 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "ให้จัดเป็น AI_QUERY เสมอเช่นกัน (ระบบปลายทางจะปฏิเสธอย่างสุภาพเองตามขอบเขตที่กำหนดไว้)\n\n"
     "สำหรับ intent ที่ไม่ใช่ SHELTER หรือ WATER_LEVEL ให้ใส่ scope เป็น \"NONE\" เสมอ\n"
     "ตัวอย่าง: \"ภาคเหนือระดับน้ำเป็นอย่างไร\" -> WATER_LEVEL / GENERAL (เพราะถามภาพรวมภูมิภาค ไม่ใช่ใกล้ตัวผู้ใช้)\n"
-    "ตัวอย่าง: \"น้ำแถวบ้านผมเป็นไงบ้าง\" -> WATER_LEVEL / NEARBY (เพราะถามใกล้ตัวผู้ใช้)\n"
+    "ตัวอย่าง: \"ระดับน้ำหาดใหญ่เป็นอย่างไร\" -> WATER_LEVEL / GENERAL (ระบุชื่อสถานที่ \"หาดใหญ่\" ชัดเจน แม้เป็นจุดเดียว ก็ไม่ใช่ตำแหน่งผู้ใช้เอง จึงตอบด้วยการค้นหาแทนการขอพิกัด)\n"
+    "ตัวอย่าง: \"น้ำแถวบ้านผมเป็นไงบ้าง\" -> WATER_LEVEL / NEARBY (เพราะถามใกล้ตัวผู้ใช้ ไม่มีชื่อสถานที่)\n"
     "ตัวอย่าง: \"ตอนนี้ผมควรอพยพไปที่ไหน\" -> SHELTER / NEARBY (แม้ไม่มีคำว่าศูนย์พักพิง แต่ความหมายคือถามหาที่ปลอดภัยใกล้ตัวตอนนี้)"
 )
 
@@ -628,7 +640,10 @@ COMBINED_CLASSIFY_ANSWER_SYSTEM_INSTRUCTION = (
     "4. ห้ามระบุแหล่งที่มา/อ้างอิงในเนื้อความคำตอบเด็ดขาด ระบบจะแสดงแหล่งอ้างอิงแยกให้เอง\n"
     "5. จบประโยคให้ครบเสมอ ห้ามตัดจบกลางประโยค\n"
     "6. ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ ความปลอดภัย และสุขภาพกาย/ใจของผู้เจ็บป่วยหรือเครียดจากภัยพิบัติเท่านั้น "
-    "ถ้าคำถามอยู่นอกขอบเขตนี้เลย (เช่น ขอเลขหวย แต่งกลอน สูตรอาหาร) ให้ปฏิเสธอย่างสุภาพและอบอุ่นแทนการตอบคำถามนั้นจริงๆ\n\n"
+    "ถ้าคำถามอยู่นอกขอบเขตนี้เลย (เช่น ขอเลขหวย แต่งกลอน สูตรอาหาร) ให้ปฏิเสธอย่างสุภาพและอบอุ่นแทนการตอบคำถามนั้นจริงๆ\n"
+    "7. ก่อนตอบทุกครั้งที่มีคำตอบ (answer_part ไม่ว่าง) ต้องเรียกใช้เครื่องมือ Google Search อย่างน้อยหนึ่งครั้งเสมอ "
+    "แม้จะคิดว่ารู้คำตอบอยู่แล้วก็ตาม ห้ามตอบจากความรู้เดิมเพียงอย่างเดียวโดยไม่ค้นหาก่อนเด็ดขาด "
+    "เพราะระบบต้องมีแหล่งอ้างอิงแนบให้ผู้ใช้ตรวจสอบข้อมูลด้านความปลอดภัยได้เสมอ\n\n"
     f"ถ้า intent ไม่ใช่ FAQ หรือ AI_QUERY ให้จบคำตอบแค่บรรทัด JSON บรรทัดเดียวเท่านั้น "
     f"ห้ามใส่ {_ANSWER_DELIMITER} หรือคำตอบใดๆ ต่อท้ายเด็ดขาด เพราะ intent เหล่านั้นระบบอื่นจะจัดการเอง"
 )
@@ -655,7 +670,9 @@ def classify_and_maybe_answer(text: str, lang: str = "TH"):
     start_time = time.time()
     try:
         lang_note = (
-            "\n\nถ้ามีคำตอบ ให้ตอบเป็นภาษามลายู (Bahasa Melayu) แทนภาษาไทย ยกเว้นชื่อเฉพาะ" if lang == "MY" else ""
+            "\n\nถ้ามีคำตอบ ให้ตอบเป็นภาษามลายู (Bahasa Melayu) แทนภาษาไทย ยกเว้นชื่อเฉพาะ" if lang == "MY"
+            else "\n\nIf answering, respond in English instead of Thai, except proper nouns (place names, station names)." if lang == "EN"
+            else ""
         )
         response = gemini_model.models.generate_content(
             model="gemini-2.5-flash",
@@ -665,6 +682,12 @@ def classify_and_maybe_answer(text: str, lang: str = "TH"):
                 max_output_tokens=2048,
                 temperature=0.2,
                 tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+                # gemini-2.5-flash "thinks" before answering by default, which
+                # adds a couple of extra seconds per call for a task (intent
+                # classification + short grounded answer) that doesn't need
+                # deep reasoning. Disabling it is the single biggest lever
+                # for response speed here.
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
         raw = (response.text or "").strip()
@@ -752,6 +775,7 @@ def classify_intent_ai(text: str) -> dict:
                 max_output_tokens=200,
                 temperature=0.0,
                 response_mime_type="application/json",
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
         raw = (response.text or "").strip()
@@ -1029,18 +1053,29 @@ def ask_gemini(prompt: str, max_tokens: int = 8192, system_instruction: str = No
     """
     start_time = time.time()
     if not init_gemini():
-        return (
-            "Maaf, sistem AI tidak tersedia buat masa ini. Jika dalam keadaan bahaya segera, "
-            "sila hubungi talian kecemasan 1784 dengan serta-merta."
-            if lang == "MY" else
-            "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
-        )
-    
+        if lang == "MY":
+            return (
+                "Maaf, sistem AI tidak tersedia buat masa ini. Jika dalam keadaan bahaya segera, "
+                "sila hubungi talian kecemasan 1784 dengan serta-merta."
+            )
+        if lang == "EN":
+            return (
+                "Sorry, the AI system is temporarily unavailable. If this is an urgent emergency, "
+                "please call the DDPM hotline 1784 right away."
+            )
+        return "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
+
     effective_system_instruction = system_instruction or FLOODCARE_SYSTEM_INSTRUCTION
     if lang == "MY":
         effective_system_instruction += (
             "\n\nสำคัญ: ตอบเป็นภาษามลายู (Bahasa Melayu) เท่านั้น ห้ามตอบเป็นภาษาไทยหรืออังกฤษ "
             "ยกเว้นชื่อเฉพาะ เช่น ชื่อสถานที่ ชื่อสถานีวัดน้ำ ที่ไม่มีคำแปล ให้คงเป็นภาษาไทยตามเดิม"
+        )
+    elif lang == "EN":
+        effective_system_instruction += (
+            "\n\nIMPORTANT: Respond in English only, never Thai or Malay — except proper nouns "
+            "like place names or water-station names that have no English equivalent, which "
+            "should stay in their original Thai form."
         )
 
     cache_key = f"gemini:{lang}:{hashlib.md5((effective_system_instruction + '|' + prompt).encode()).hexdigest()}"
@@ -1064,6 +1099,7 @@ def ask_gemini(prompt: str, max_tokens: int = 8192, system_instruction: str = No
                         threshold="BLOCK_ONLY_HIGH",
                     ),
                 ],
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
         result = clean_text_for_line((response.text or "").strip())
@@ -1094,12 +1130,18 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192, lang: str = "T
       data stay as-is since they don't have a Malay equivalent.
     """
     if not init_gemini():
-        fallback_text = (
-            "Maaf, sistem AI tidak tersedia buat masa ini. Jika dalam keadaan bahaya segera, "
-            "sila hubungi talian kecemasan 1784 dengan serta-merta."
-            if lang == "MY" else
-            "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
-        )
+        if lang == "MY":
+            fallback_text = (
+                "Maaf, sistem AI tidak tersedia buat masa ini. Jika dalam keadaan bahaya segera, "
+                "sila hubungi talian kecemasan 1784 dengan serta-merta."
+            )
+        elif lang == "EN":
+            fallback_text = (
+                "Sorry, the AI system is temporarily unavailable. If this is an urgent emergency, "
+                "please call the DDPM hotline 1784 right away."
+            )
+        else:
+            fallback_text = "⚠️ ขออภัยครับ ระบบ AI ไม่พร้อมใช้งานชั่วคราว หากอยู่ในอันตรายเร่งด่วน โทร ปภ. 1784 ได้ทันทีครับ"
         return {"answer": fallback_text, "sources": []}
 
     start_time = time.time()
@@ -1122,13 +1164,22 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192, lang: str = "T
             config=genai_types.GenerateContentConfig(
                 system_instruction=(
                     "You are FLOODCARE AI. "
-                    + ("Always respond in Bahasa Melayu (Malay), never Thai or English."
-                       if lang == "MY" else "Always respond in Thai.")
+                    + (
+                        "Always respond in Bahasa Melayu (Malay), never Thai or English."
+                        if lang == "MY" else
+                        "Always respond in English, never Thai or Malay."
+                        if lang == "EN" else
+                        "Always respond in Thai."
+                    )
                     + " Be concise — answer only what "
                     "was asked, skip background info or details the user didn't request. Structure "
                     "the answer as a numbered list (1. 2. 3. ...) with a line break between each "
                     "point, max 4-5 points, each point 1-2 short lines, total answer roughly 60-80 "
                     "words unless the question genuinely requires a complete step-by-step procedure. "
+                    "This length limit applies with equal strictness no matter which language you "
+                    "answer in — do not become more thorough, add extra sections, or cover more "
+                    "sub-topics (e.g. separate full sections for causes, remedies, and when to see a "
+                    "doctor) just because you were asked to answer in a different language. "
                     "Only skip numbering for a genuinely single-point, very short answer. No "
                     "asterisks. Never state or cite sources inline in the answer text (no "
                     "'(ที่มา: ...)' or similar) — the system displays the reference sources "
@@ -1137,11 +1188,16 @@ def ask_gemini_with_search(question: str, max_tokens: int = 8192, lang: str = "T
                     "mid-sentence — but plan for a concise answer up front rather than writing long "
                     "and cutting it off. Place names, station names, and other proper nouns from the "
                     "source data should stay in their original Thai form even when responding in "
-                    "Bahasa Melayu, since they don't have a translated equivalent."
+                    "Bahasa Melayu, since they don't have a translated equivalent. You MUST call the "
+                    "Google Search tool at least once for every question before answering, even if "
+                    "you believe you already know the answer from your own training — an answer with "
+                    "no search sources is not acceptable for this application, since users rely on "
+                    "the cited sources to verify safety-critical information themselves."
                 ),
                 max_output_tokens=max_tokens,
                 temperature=0.2,
                 tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
         raw_text = clean_text_for_line((response.text or "").strip())
@@ -1623,9 +1679,10 @@ class SheetsManager:
             Logger.error("Sheets", f"update_sos_status error: {e}")
             return None
 
-    def update_need_status(self, need_id: str, new_status: str) -> Optional[dict]:
+    def update_need_status(self, need_id: str, new_status: str, volunteer_name: str = None) -> Optional[dict]:
         """Updates a user_needs row's status by need_id — used by the dashboard's
-        need-fulfillment actions. Stamps delivered_at when marked delivered/done."""
+        need-fulfillment actions. Stamps delivered_at when marked delivered/done.
+        volunteer_name (if given) records who claimed/is handling the request."""
         client = self.get_client()
         if not client:
             return None
@@ -1644,6 +1701,8 @@ class SheetsManager:
             updates = {"status": new_status}
             if new_status.upper() in ("DELIVERED", "DONE", "COMPLETED"):
                 updates["delivered_at"] = get_bangkok_time().strftime("%Y-%m-%d %H:%M:%S")
+            if volunteer_name:
+                updates["volunteer_name"] = volunteer_name
 
             header = ws.row_values(1)
             col_map = {name: i + 1 for i, name in enumerate(header)}
@@ -2626,7 +2685,7 @@ def build_language_selector_flex():
                     _dashed_rule(),
                     _lang_row("🇹🇭", "ภาษาไทย", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: TH"),
                     _lang_row("🇲🇾", "Bahasa Melayu", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: MY"),
-                    _lang_row("🇬🇧", "English", "กำลังพัฒนา", "#FEF3C7", "#92400E", "ตั้งค่าภาษา: EN"),
+                    _lang_row("🇬🇧", "English", "ใช้งานได้", "#A7F0D2", "#047857", "ตั้งค่าภาษา: EN"),
                     _lang_row("🇯🇵", "日本語", "กำลังพัฒนา", "#FEF3C7", "#92400E", "ตั้งค่าภาษา: JP"),
                 ]
             )
@@ -3033,32 +3092,116 @@ def build_water_level_flex_message(user_lat, user_lon, timestamp, stations, lang
     return FlexSendMessage(alt_text=f"รายงานระดับน้ำ ({len(stations)} สถานีใกล้คุณ)", contents=carousel)
 
 
-def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
+MORE_SHELTERS_TRIGGERS = {
+    "TH": "ดูศูนย์พักพิงเพิ่มเติม",
+    "EN": "See more shelters",
+    "MY": "Lihat lagi tempat perlindungan",
+}
+
+_SHELTER_CARD_I18N = {
+    "TH": {
+        "no_data_title": "ข้อมูลศูนย์พักพิง",
+        "no_data_body": "ไม่พบข้อมูลศูนย์พักพิงในพื้นที่ใกล้เคียง",
+        "alt_text": "ข้อมูลศูนย์พักพิง ({n} แห่งใกล้คุณ)",
+        "rank": "อันดับ {i}",
+        "distance": "ห่าง {d:.1f} กม.",
+        "type_prefix": "ศูนย์พักพิง",
+        "available": "จำนวนที่ว่าง",
+        "unit": "ที่",
+        "unspecified": "ไม่ระบุ",
+        "nav": "นำทาง",
+        "footer": "ข้อมูลจากฐานข้อมูลศูนย์พักพิง FLOODCARE AI",
+        "facility_labels": {
+            "เตียง": "เตียง", "ห้องน้ำ": "ห้องน้ำ", "ที่จอดรถ": "ที่จอดรถ",
+            "ไฟฟ้า": "ไฟฟ้า", "น้ำสะอาด": "น้ำสะอาด", "อินเทอร์เน็ต": "อินเทอร์เน็ต",
+            "รองรับผู้พิการ": "รองรับผู้พิการ", "รับสัตว์เลี้ยง": "รับสัตว์เลี้ยง", "มีแพทย์ประจำ": "มีแพทย์ประจำ",
+        },
+        "status_labels": {"เปิดรับ": "เปิดรับ", "ใกล้เต็ม": "ใกล้เต็ม", "เต็ม": "เต็ม", "ปิด": "ปิด"},
+        "more_title": "ดูเพิ่มเติม",
+        "more_body": "ยังมีศูนย์พักพิงใกล้คุณอีก {n} แห่ง",
+        "more_button": "ดูเพิ่มเติม",
+    },
+    "EN": {
+        "no_data_title": "Shelter Information",
+        "no_data_body": "No shelters found near your location right now.",
+        "alt_text": "Shelter info ({n} nearby)",
+        "rank": "#{i}",
+        "distance": "{d:.1f} km away",
+        "type_prefix": "Shelter",
+        "available": "Spots available",
+        "unit": "spots",
+        "unspecified": "Not specified",
+        "nav": "Navigate",
+        "footer": "Data from the FLOODCARE AI shelter database",
+        "facility_labels": {
+            "เตียง": "Beds", "ห้องน้ำ": "Restroom", "ที่จอดรถ": "Parking",
+            "ไฟฟ้า": "Electricity", "น้ำสะอาด": "Clean water", "อินเทอร์เน็ต": "Internet",
+            "รองรับผู้พิการ": "Wheelchair access", "รับสัตว์เลี้ยง": "Pets allowed", "มีแพทย์ประจำ": "On-site medic",
+        },
+        "status_labels": {"เปิดรับ": "Open", "ใกล้เต็ม": "Nearly full", "เต็ม": "Full", "ปิด": "Closed"},
+        "more_title": "See more",
+        "more_body": "There are {n} more shelters near you",
+        "more_button": "See more",
+    },
+    "MY": {
+        "no_data_title": "Maklumat Tempat Perlindungan",
+        "no_data_body": "Tiada tempat perlindungan dijumpai berhampiran lokasi anda buat masa ini.",
+        "alt_text": "Maklumat tempat perlindungan ({n} berhampiran)",
+        "rank": "#{i}",
+        "distance": "{d:.1f} km jauhnya",
+        "type_prefix": "Tempat perlindungan",
+        "available": "Tempat kosong",
+        "unit": "tempat",
+        "unspecified": "Tidak dinyatakan",
+        "nav": "Navigasi",
+        "footer": "Data daripada pangkalan data tempat perlindungan FLOODCARE AI",
+        "facility_labels": {
+            "เตียง": "Katil", "ห้องน้ำ": "Tandas", "ที่จอดรถ": "Tempat letak kereta",
+            "ไฟฟ้า": "Elektrik", "น้ำสะอาด": "Air bersih", "อินเทอร์เน็ต": "Internet",
+            "รองรับผู้พิการ": "Mesra OKU", "รับสัตว์เลี้ยง": "Terima haiwan peliharaan", "มีแพทย์ประจำ": "Ada petugas perubatan",
+        },
+        "status_labels": {"เปิดรับ": "Dibuka", "ใกล้เต็ม": "Hampir penuh", "เต็ม": "Penuh", "ปิด": "Ditutup"},
+        "more_title": "Lihat lagi",
+        "more_body": "Terdapat {n} lagi tempat perlindungan berhampiran anda",
+        "more_button": "Lihat lagi",
+    },
+}
+
+
+def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH", more_count=0):
     """
     Ticket-card carousel — one swipeable card per shelter, same visual
     language as build_water_level_flex_message. Header color maps to real
     availability (green=เปิดรับ, yellow=ใกล้เต็ม, pink=เต็ม, gray=ปิด).
+
+    lang picks TH/EN/MY card text via _SHELTER_CARD_I18N (falls back to TH
+    for any other/unset value). more_count, if > 0, appends a trailing
+    "see more" bubble whose button re-triggers the search for the next
+    batch — see MORE_SHELTERS_TRIGGERS / the /callback handler for how the
+    tap is picked back up.
     """
+    t = _SHELTER_CARD_I18N.get(lang, _SHELTER_CARD_I18N["TH"])
+
     if not shelters:
         bubble = BubbleContainer(
             body=BoxComponent(
                 layout="vertical", padding_all="lg",
                 contents=[
-                    TextComponent(text="ข้อมูลศูนย์พักพิง", weight="bold", size="lg", color="#111827"),
+                    TextComponent(text=t["no_data_title"], weight="bold", size="lg", color="#111827"),
                     TextComponent(
-                        text="ไม่พบข้อมูลศูนย์พักพิงในพื้นที่ใกล้เคียง",
+                        text=t["no_data_body"],
                         size="sm", color="#6B7280", margin="md", wrap=True
                     ),
                 ]
             )
         )
-        return FlexSendMessage(alt_text="ข้อมูลศูนย์พักพิง", contents=bubble)
+        return FlexSendMessage(alt_text=t["no_data_title"], contents=bubble)
 
     bubbles = []
     for i, sh in enumerate(shelters):
         status_key = sh.get("Status", "เปิดรับ")
         sev = _SHELTER_SEVERITY_COLORS.get(status_key, _SHELTER_SEVERITY_COLORS["เปิดรับ"])
-        status_label = SHELTER_STATUS_MAP.get(status_key, SHELTER_STATUS_MAP["เปิดรับ"]).get("label", status_key)
+        status_label = t["status_labels"].get(status_key, status_key)
 
         dist = sh.get("distance_km", 0)
         capacity = sh.get("Capacity", 0)
@@ -3068,7 +3211,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
         location_text = " ".join(location_text)
 
         nav_action = URIAction(
-            label="นำทาง",
+            label=t["nav"],
             uri=f"https://www.google.com/maps/search/?api=1&query={sh.get('Latitude')},{sh.get('Longitude')}"
         )
 
@@ -3076,8 +3219,8 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
             layout="horizontal",
             padding_all="lg",
             contents=[
-                TextComponent(text=f"อันดับ {i + 1}", size="sm", weight="bold", color="#0F172A", flex=1),
-                TextComponent(text=f"ห่าง {dist:.1f} กม.", size="sm", weight="bold", color="#0F172A", align="end", flex=1),
+                TextComponent(text=t["rank"].format(i=i + 1), size="sm", weight="bold", color="#0F172A", flex=1),
+                TextComponent(text=t["distance"].format(d=dist), size="sm", weight="bold", color="#0F172A", align="end", flex=1),
             ]
         )
 
@@ -3086,7 +3229,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                 layout="horizontal",
                 contents=[
                     TextComponent(
-                        text=f"ศูนย์พักพิง{' · ' + location_text if location_text else ''}",
+                        text=f"{t['type_prefix']}{' · ' + location_text if location_text else ''}",
                         size="xs", color="#9CA3AF", flex=1, gravity="center", wrap=True, max_lines=1
                     ),
                     _pill_badge(status_label, sev["bg"], sev["text"]),
@@ -3096,7 +3239,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                 layout="vertical", height="54px", justify_content="flex-start", margin="sm",
                 contents=[
                     TextComponent(
-                        text=sh.get("Name", "ไม่ระบุชื่อ"), weight="bold", size="lg",
+                        text=sh.get("Name", t["unspecified"]), weight="bold", size="lg",
                         color="#111827", wrap=True, max_lines=2
                     ),
                 ]
@@ -3110,14 +3253,14 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                     BoxComponent(
                         layout="vertical", flex=1,
                         contents=[
-                            TextComponent(text="จำนวนที่ว่าง", size="xs", color="#9CA3AF"),
+                            TextComponent(text=t["available"], size="xs", color="#9CA3AF"),
                             TextComponent(
-                                text=f"{remaining}/{capacity} ที่" if remaining is not None else "ไม่ระบุ",
+                                text=f"{remaining}/{capacity} {t['unit']}" if remaining is not None else t["unspecified"],
                                 size="xl", weight="bold", color="#111827", margin="xs", wrap=True, max_lines=1
                             ),
                         ]
                     ),
-                    _pill_button("นำทาง", nav_action, bg="#0D9488"),
+                    _pill_button(t["nav"], nav_action, bg="#0D9488"),
                 ]
             ),
         ]
@@ -3151,7 +3294,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
                                 background_color="#ECFDF5", corner_radius="8px",
                                 padding_top="6px", padding_bottom="6px", padding_start="4px", padding_end="4px",
                                 contents=[TextComponent(
-                                    text=f"✓ {label}", size="xxs", weight="bold", color="#047857",
+                                    text=f"✓ {t['facility_labels'].get(label, label)}", size="xxs", weight="bold", color="#047857",
                                     align="center", wrap=True, max_lines=1
                                 )]
                             )
@@ -3162,7 +3305,7 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
 
         body_contents.append(
             TextComponent(
-                text="ข้อมูลจากฐานข้อมูลศูนย์พักพิง FLOODCARE AI",
+                text=t["footer"],
                 size="xxs", color="#9CA3AF", margin="lg", wrap=True
             )
         )
@@ -3181,21 +3324,40 @@ def build_shelter_flex_message(user_lat, user_lon, shelters, lang="TH"):
             body=body,
         ))
 
+    if more_count > 0:
+        more_trigger = MORE_SHELTERS_TRIGGERS.get(lang, MORE_SHELTERS_TRIGGERS["TH"])
+        bubbles.append(BubbleContainer(
+            size="mega",
+            body=BoxComponent(
+                layout="vertical", padding_all="lg", justify_content="center",
+                align_items="center", spacing="md",
+                contents=[
+                    TextComponent(text="➕", size="3xl", align="center"),
+                    TextComponent(text=t["more_title"], weight="bold", size="lg", color="#111827", align="center"),
+                    TextComponent(text=t["more_body"].format(n=more_count), size="xs", color="#6B7280",
+                                  align="center", wrap=True),
+                    _pill_button(t["more_button"], MessageAction(label=t["more_button"], text=more_trigger), bg="#0D9488"),
+                ]
+            )
+        ))
+
     carousel = CarouselContainer(contents=bubbles)
-    return FlexSendMessage(alt_text=f"ข้อมูลศูนย์พักพิง ({len(shelters)} แห่งใกล้คุณ)", contents=carousel)
+    return FlexSendMessage(alt_text=t["alt_text"].format(n=len(shelters)), contents=carousel)
 
 
 
 UI_TEXT = {
-    "greeting_time_morning": {"TH": "อรุณสวัสดิ์", "MY": "Selamat pagi"},
-    "greeting_time_default": {"TH": "สวัสดี", "MY": "Salam sejahtera"},
+    "greeting_time_morning": {"TH": "อรุณสวัสดิ์", "MY": "Selamat pagi", "EN": "Good morning"},
+    "greeting_time_default": {"TH": "สวัสดี", "MY": "Salam sejahtera", "EN": "Hello"},
     "greeting_intro": {
         "TH": "ผมคือ FLOODCARE AI ผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินครับ",
         "MY": "Saya FLOODCARE AI, pembantu pintar untuk banjir dan kecemasan.",
+        "EN": "I'm FLOODCARE AI, your smart assistant for flood and emergency situations.",
     },
     "greeting_services_label": {
         "TH": "รายการบริการที่ผมช่วยคุณได้:",
         "MY": "Perkhidmatan yang boleh saya bantu:",
+        "EN": "Here's what I can help you with:",
     },
     "greeting_services": {
         "TH": [
@@ -3218,15 +3380,31 @@ UI_TEXT = {
             "Panduan persediaan dan pertolongan cemas",
             "Tanya soalan tentang bencana melalui AI",
         ],
+        "EN": [
+            "Emergency numbers and hotlines",
+            "SOS — report an emergency and request rescue",
+            "Find nearby shelters and evacuation points",
+            "Check water levels and weather",
+            "Request relief supplies",
+            "Track the status of a case you've reported",
+            "Preparedness and first-aid guides",
+            "Ask disaster-related questions via AI",
+        ],
     },
     "greeting_footer": {
         "TH": "ยินดีช่วยเหลือคุณตลอด 24 ชั่วโมงครับ",
         "MY": "Sedia membantu anda 24 jam sehari.",
+        "EN": "Happy to help you 24 hours a day.",
     },
-    "help_title": {"TH": "FLOODCARE AI ทำอะไรได้บ้าง", "MY": "Apa yang FLOODCARE AI boleh buat"},
+    "help_title": {
+        "TH": "FLOODCARE AI ทำอะไรได้บ้าง",
+        "MY": "Apa yang FLOODCARE AI boleh buat",
+        "EN": "What FLOODCARE AI can do",
+    },
     "note_ai_replies_thai": {
         "TH": None,
         "MY": "หมายเหตุ: คำตอบจาก AI และข้อมูลสถานี/ศูนย์พักพิงยังเป็นภาษาไทยเป็นหลัก (Nota: jawapan AI dan data stesen/pusat perlindungan masih dalam Bahasa Thai buat masa ini)",
+        "EN": "Note: station/shelter names in the data are still shown in their original Thai form.",
     },
 }
 
