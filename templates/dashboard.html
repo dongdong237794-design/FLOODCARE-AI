@@ -225,6 +225,37 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .maplegend span { display: flex; align-items: center; gap: 5px; }
 .maplegend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 
+.map-shelter-search {
+  position: absolute; top: 14px; right: 14px; z-index: 500; width: 260px;
+}
+.mss-inputwrap {
+  background: rgba(255,255,255,.97); backdrop-filter: blur(8px);
+  border-radius: 12px; box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  font-size: 13px; color: #14181F;
+}
+.mss-inputwrap i { color: var(--muted); font-size: 15px; }
+.mss-inputwrap input {
+  border: none; outline: none; background: transparent; flex: 1;
+  font-family: inherit; font-size: 13px; color: #14181F;
+}
+.mss-results {
+  margin-top: 6px; background: #fff; border-radius: 12px;
+  box-shadow: var(--shadow-md); max-height: 260px; overflow-y: auto;
+  display: none;
+}
+.mss-results.show { display: block; }
+.mss-item {
+  padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--line);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+}
+.mss-item:last-child { border-bottom: none; }
+.mss-item:hover { background: rgba(249,115,22,.08); }
+.mss-item .mss-name { font-size: 12.5px; font-weight: 700; color: #14181F; }
+.mss-item .mss-meta { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.mss-item .mss-occ { font-size: 10.5px; font-weight: 800; padding: 3px 8px; border-radius: 10px; white-space: nowrap; }
+.mss-empty { padding: 12px 14px; font-size: 12px; color: var(--muted); text-align: center; }
+
 .expand-map-btn {
   position: absolute; bottom: 14px; right: 14px; z-index: 500;
   background: var(--surface); border-radius: 12px; width: 42px; height: 42px;
@@ -598,6 +629,81 @@ input:checked + .slider:before { transform: translateX(21px); }
 }
 @keyframes slide-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
+/* ── New-case notifications ── */
+.notif-bell-wrap { position: relative; margin-right: 14px; }
+.notif-bell {
+  width: 38px; height: 38px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; color: var(--text); position: relative;
+  transition: background .15s, border-color .15s;
+}
+.notif-bell:hover { background: var(--line); }
+.notif-bell.has-unread { border-color: var(--crit); color: var(--crit); }
+.notif-badge {
+  position: absolute; top: -5px; right: -5px; min-width: 17px; height: 17px;
+  border-radius: 999px; background: var(--crit); color: #fff;
+  font-size: 10px; font-weight: 800; display: none;
+  align-items: center; justify-content: center; padding: 0 4px;
+  border: 2px solid var(--surface); line-height: 1;
+}
+.notif-badge.show { display: flex; }
+
+.notif-panel {
+  position: absolute; top: 48px; right: 0; width: 340px; max-height: 420px;
+  background: var(--surface); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg); border: 1px solid var(--border);
+  z-index: 900; display: none; flex-direction: column; overflow: hidden;
+}
+.notif-panel.open { display: flex; }
+.notif-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
+}
+.notif-panel-head h4 { font-size: 13px; font-weight: 800; color: var(--text); }
+.notif-sound-toggle {
+  width: 28px; height: 28px; border-radius: 8px; display: flex;
+  align-items: center; justify-content: center; font-size: 14px;
+  color: var(--muted); background: var(--line);
+}
+.notif-sound-toggle.on { color: var(--accent-dark); background: var(--accent-light); }
+.notif-list { overflow-y: auto; flex: 1; }
+.notif-empty { padding: 32px 16px; text-align: center; color: var(--faint); font-size: 12px; }
+.notif-item {
+  display: flex; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  cursor: pointer; transition: background .12s;
+}
+.notif-item:hover { background: var(--line); }
+.notif-item:last-child { border-bottom: none; }
+.notif-item-icon {
+  width: 32px; height: 32px; border-radius: 10px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; font-size: 15px;
+}
+.notif-item-body { flex: 1; min-width: 0; }
+.notif-item-title { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.notif-item-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.notif-item-time { font-size: 10px; color: var(--faint); margin-top: 3px; }
+
+.notif-toast-stack {
+  position: fixed; top: 20px; right: 20px; z-index: 2000;
+  display: flex; flex-direction: column; gap: 10px; width: 320px;
+  pointer-events: none;
+}
+.notif-toast {
+  background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-lg);
+  border-left: 4px solid var(--crit); padding: 12px 14px;
+  display: flex; gap: 10px; align-items: flex-start;
+  pointer-events: auto; cursor: pointer;
+  animation: notif-slide-in .35s cubic-bezier(.16,1,.3,1) forwards;
+}
+.notif-toast.leaving { animation: notif-slide-out .25s ease-in forwards; }
+.notif-toast.type-need { border-left-color: var(--info); }
+@keyframes notif-slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes notif-slide-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(24px); } }
+.notif-toast-icon { font-size: 18px; flex: 0 0 auto; margin-top: 1px; }
+.notif-toast-title { font-size: 12.5px; font-weight: 800; color: var(--text); }
+.notif-toast-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
 .bottom-nav {
   display: none;
   position: fixed; bottom: 0; left: 0; right: 0;
@@ -774,6 +880,26 @@ input:checked + .slider:before { transform: translateX(21px); }
         <div class="topbar-title">FLOODCARE AI — Command Center</div>
       </div>
       <div class="topbar-right">
+        <div class="notif-bell-wrap">
+          <button class="notif-bell" id="notifBell" title="การแจ้งเตือนเคสใหม่">
+            <i class="ph-bold ph-bell"></i>
+            <span class="notif-badge" id="notifBadge">0</span>
+          </button>
+          <div class="notif-panel" id="notifPanel">
+            <div class="notif-panel-head">
+              <h4>การแจ้งเตือน</h4>
+              <button class="notif-sound-toggle" id="notifSoundToggle" title="เปิด/ปิดเสียงแจ้งเตือน">
+                <i class="ph-bold ph-speaker-high"></i>
+              </button>
+            </div>
+            <div class="notif-list" id="notifList">
+              <div class="notif-empty">ยังไม่มีการแจ้งเตือน</div>
+            </div>
+          </div>
+        </div>
+        <button id="openAlertModal" style="background:#DC2626;color:#fff;padding:9px 16px;border-radius:12px;font-weight:800;display:flex;gap:6px;font-size:12.5px;align-items:center;border:none;cursor:pointer;margin-right:10px;">
+          <i class="ph-bold ph-megaphone"></i> ส่งแจ้งเตือน
+        </button>
         <span class="pill online" id="statusPill"><span class="dot"></span> Realtime</span>
       </div>
     </div>
@@ -823,6 +949,13 @@ input:checked + .slider:before { transform: translateX(21px); }
         </div>
         <div class="map-container-relative">
           <div class="maplegend" id="fullLegend"></div>
+          <div class="map-shelter-search" id="mapShelterSearch">
+            <div class="mss-inputwrap">
+              <i class="ph ph-magnifying-glass"></i>
+              <input type="text" id="mapShelterSearchInput" placeholder="ค้นหาศูนย์พักพิง..." autocomplete="off">
+            </div>
+            <div class="mss-results" id="mapShelterSearchResults"></div>
+          </div>
           <div id="fullMap"></div>
           <div id="mapDetailPanel" class="map-detail-panel">
             <div class="mdp-header">
@@ -988,6 +1121,8 @@ input:checked + .slider:before { transform: translateX(21px); }
   <span id="toastMsg">บันทึกข้อมูลเสร็จสิ้น</span>
 </div>
 
+<div class="notif-toast-stack" id="notifToastStack"></div>
+
 <!-- SHELTER MODAL -->
 <div class="modal-bg" id="shelterModalBg">
   <div class="modal">
@@ -1091,7 +1226,199 @@ input:checked + .slider:before { transform: translateX(21px); }
   </div>
 </div>
 
+<!-- BROADCAST ALERT MODAL -->
+<div class="modal-bg" id="alertModalBg">
+  <div class="modal">
+    <div class="mhead">
+      <h3><i class="ph-bold ph-megaphone" style="color:#DC2626;"></i> ส่งแจ้งเตือนให้สมาชิกทั้งหมด</h3>
+      <button class="mclose" id="closeAlertModal"><i class="ph ph-x"></i></button>
+    </div>
+    <div class="mbody">
+      <div id="alertFormErr"></div>
+      <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:12px 14px;margin-bottom:16px;font-size:12.5px;color:#991B1B;line-height:1.6;">
+        <i class="ph-bold ph-warning-circle"></i>
+        ข้อความนี้จะถูกส่งเป็น LINE push message ให้ผู้ใช้ทุกคนที่เคยลงทะเบียนกับบอททันที
+        ไม่มีการยกเลิกหลังกดส่ง กรุณาตรวจทานให้แน่ใจก่อน
+      </div>
+      <div class="fgroup">
+        <label>ข้อความแจ้งเตือน *</label>
+        <textarea id="alertMessage" rows="5" maxlength="1000"
+          placeholder="เช่น ระดับน้ำที่สถานี... เข้าใกล้จุดวิกฤต กรุณาเตรียมพร้อมอพยพและติดตามประกาศอย่างใกล้ชิด"
+          style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--border);font-family:inherit;font-size:13.5px;resize:vertical;"></textarea>
+        <div style="text-align:right;font-size:11px;color:var(--muted);margin-top:4px;"><span id="alertCharCount">0</span>/1000</div>
+      </div>
+      <button class="fullbtn" id="alertSendBtn" style="background:#DC2626;color:#fff;margin-top:8px;">
+        <i class="ph-bold ph-paper-plane-tilt"></i> ส่งแจ้งเตือนตอนนี้
+      </button>
+    </div>
+  </div>
+</div>
+
 <script>
+// ── Volunteer identity — asked once, then remembered on this device ──
+// No login system: whoever taps "รับเคส"/"ดำเนินการ" on this browser is
+// asked their name the first time, then it's reused for every claim from
+// here on. Good enough to know who's handling what without building a
+// full account system; a volunteer using a different phone/browser will
+// just be asked again there.
+// ── New-case notifications (bell + toast stack) ──
+// Diffs each 30s poll against the previous poll's case IDs; anything new
+// spawns a toast + list entry. First load only records the baseline (no
+// notification storm for cases that already existed before the dashboard
+// was opened).
+const notifState = {
+  items: [],
+  unread: 0,
+  knownSos: new Set(),
+  knownNeeds: new Set(),
+  initialized: false,
+  soundOn: localStorage.getItem('floodcare_notif_sound') !== 'off',
+};
+
+function notifPlayChime(){
+  if(!notifState.soundOn) return;
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    [880, 1320].forEach((freq, i)=>{
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.frequency.value = freq; osc.type = 'sine';
+      const t0 = ctx.currentTime + i*0.12;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.15, t0+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0+0.25);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0); osc.stop(t0+0.3);
+    });
+  }catch(e){ /* Web Audio unavailable — fail silently, sound is a nicety */ }
+}
+
+function notifRenderBadge(){
+  const badge = document.getElementById('notifBadge');
+  const bell = document.getElementById('notifBell');
+  if(!badge || !bell) return;
+  if(notifState.unread > 0){
+    badge.textContent = notifState.unread > 99 ? '99+' : notifState.unread;
+    badge.classList.add('show');
+    bell.classList.add('has-unread');
+  } else {
+    badge.classList.remove('show');
+    bell.classList.remove('has-unread');
+  }
+}
+
+function notifRenderList(){
+  const list = document.getElementById('notifList');
+  if(!list) return;
+  if(notifState.items.length === 0){
+    list.innerHTML = `<div class="notif-empty">ยังไม่มีการแจ้งเตือน</div>`;
+    return;
+  }
+  list.innerHTML = notifState.items.slice(0, 30).map(n=>{
+    const iconStyle = n.kind==='sos' ? 'background:var(--crit-bg);color:var(--crit);' : 'background:var(--info-bg);color:var(--info);';
+    const icon = n.kind==='sos' ? 'ph-siren' : 'ph-package';
+    return `
+      <div class="notif-item" data-page="${n.kind==='sos'?'sos':'needs'}" data-id="${esc(n.id)}">
+        <div class="notif-item-icon" style="${iconStyle}"><i class="ph-fill ${icon}"></i></div>
+        <div class="notif-item-body">
+          <div class="notif-item-title">${esc(n.title)}</div>
+          <div class="notif-item-sub">${esc(n.sub)}</div>
+          <div class="notif-item-time">${esc(n.time)}</div>
+        </div>
+      </div>`;
+  }).join('');
+  list.querySelectorAll('.notif-item').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      document.getElementById('notifPanel').classList.remove('open');
+      state.selectedId = el.dataset.id;
+      switchPage(el.dataset.page);
+      renderAll();
+    });
+  });
+}
+
+function notifSpawnToast(n){
+  const stack = document.getElementById('notifToastStack');
+  if(!stack) return;
+  const el = document.createElement('div');
+  el.className = `notif-toast ${n.kind==='need'?'type-need':''}`;
+  const icon = n.kind==='sos' ? 'ph-siren' : 'ph-package';
+  const color = n.kind==='sos' ? 'var(--crit)' : 'var(--info)';
+  el.innerHTML = `
+    <div class="notif-toast-icon"><i class="ph-fill ${icon}" style="color:${color};"></i></div>
+    <div>
+      <div class="notif-toast-title">${esc(n.title)}</div>
+      <div class="notif-toast-sub">${esc(n.sub)}</div>
+    </div>`;
+  el.addEventListener('click', ()=>{
+    state.selectedId = n.id;
+    switchPage(n.kind==='sos'?'sos':'needs');
+    renderAll();
+    el.remove();
+  });
+  stack.appendChild(el);
+  setTimeout(()=>{ el.classList.add('leaving'); setTimeout(()=>el.remove(), 260); }, 6000);
+  while(stack.children.length > 4) stack.removeChild(stack.firstChild);
+}
+
+function notifCheckForNewCases(sosCases, needs){
+  const newSosIds = new Set((sosCases||[]).map(c=>c.request_id));
+  const newNeedIds = new Set((needs||[]).map(n=>n.need_id));
+
+  if(!notifState.initialized){
+    notifState.knownSos = newSosIds;
+    notifState.knownNeeds = newNeedIds;
+    notifState.initialized = true;
+    return;
+  }
+
+  let gotNew = false;
+  (sosCases||[]).forEach(c=>{
+    if(!notifState.knownSos.has(c.request_id)){
+      gotNew = true;
+      const n = {
+        id: c.request_id, kind: 'sos',
+        title: `SOS ใหม่ · ${PRIORITY_LABEL[c.priority]||''}`,
+        sub: `${c.first_name||''} ${c.last_name||''} · ${c.people_count||1} คน`.trim(),
+        time: 'เมื่อสักครู่',
+      };
+      notifState.items.unshift(n);
+      notifState.unread++;
+      notifSpawnToast(n);
+    }
+  });
+  (needs||[]).forEach(nd=>{
+    if(!notifState.knownNeeds.has(nd.need_id)){
+      gotNew = true;
+      const n = {
+        id: nd.need_id, kind: 'need',
+        title: `คำขอสิ่งของใหม่`,
+        sub: `${nd.reporter_name||'ไม่ระบุ'} · ${nd.categories||'-'}`,
+        time: 'เมื่อสักครู่',
+      };
+      notifState.items.unshift(n);
+      notifState.unread++;
+      notifSpawnToast(n);
+    }
+  });
+
+  notifState.knownSos = newSosIds;
+  notifState.knownNeeds = newNeedIds;
+  notifState.items = notifState.items.slice(0, 30);
+  notifRenderBadge();
+  notifRenderList();
+  if(gotNew) notifPlayChime();
+}
+
+const VOLUNTEER_NAME_KEY = 'floodcare_volunteer_name';
+function getVolunteerName(){
+  let name = localStorage.getItem(VOLUNTEER_NAME_KEY);
+  if(!name){
+    name = (prompt('กรุณาระบุชื่อของคุณ (จะจำไว้ในเครื่องนี้ ไม่ต้องกรอกซ้ำครั้งหน้า)') || '').trim();
+    if(name) localStorage.setItem(VOLUNTEER_NAME_KEY, name);
+  }
+  return name || 'ไม่ระบุชื่อ';
+}
+
 const PRIORITY_COLOR = { CRITICAL:'#EF4444', HIGH:'#F59E0B', NORMAL:'#10B981' };
 const PRIORITY_LABEL = { CRITICAL:'วิกฤต', HIGH:'เร่งด่วน', NORMAL:'ปกติ' };
 const STATUS_LABEL   = { OPEN:'รอรับเคส', IN_PROGRESS:'กำลังช่วย', CLOSED:'เสร็จสิ้น' };
@@ -1361,6 +1688,64 @@ function renderMapMarkers(map, clusterGroup, isDash){
 
 let mdpActiveTab = 'info';
 let mdpCaseId = null;
+
+function initMapShelterSearch(){
+  const input = document.getElementById('mapShelterSearchInput');
+  const results = document.getElementById('mapShelterSearchResults');
+  if(!input || !results) return;
+
+  function renderResults(query){
+    const q = query.trim().toLowerCase();
+    if(!q){ results.classList.remove('show'); results.innerHTML=''; return; }
+    const matches = (state.data.shelters||[])
+      .filter(s => (s.name||'').toLowerCase().includes(q) || (s.province||'').toLowerCase().includes(q) || (s.district||'').toLowerCase().includes(q))
+      .slice(0, 20);
+
+    if(matches.length === 0){
+      results.innerHTML = `<div class="mss-empty">ไม่พบศูนย์พักพิงที่ตรงกับ "${esc(query)}"</div>`;
+      results.classList.add('show');
+      return;
+    }
+    results.innerHTML = matches.map(s=>{
+      const isFull = s.occupancy >= s.capacity;
+      return `
+        <div class="mss-item" data-lat="${s.latitude}" data-lng="${s.longitude}" data-name="${esc(s.name)}">
+          <div>
+            <div class="mss-name">${esc(s.name)}</div>
+            <div class="mss-meta">${esc(s.province||'')} ${esc(s.district||'')}</div>
+          </div>
+          <span class="mss-occ" style="background:${isFull?'#FEE2E2':'#D1FAE5'};color:${isFull?'#991B1B':'#065F46'};">${isFull?'เต็ม':(s.occupancy||0)+'/'+(s.capacity||0)}</span>
+        </div>`;
+    }).join('');
+    results.classList.add('show');
+
+    results.querySelectorAll('.mss-item').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const lat = parseFloat(el.dataset.lat), lng = parseFloat(el.dataset.lng);
+        if(!isNaN(lat) && !isNaN(lng) && fullMap){
+          fullMap.flyTo([lat,lng], 16, {animate:true, duration:.6});
+          setTimeout(()=>{
+            fullClusterGroup.eachLayer(m=>{
+              if(m.options.isShelter && Math.abs(m.getLatLng().lat-lat)<0.0001 && Math.abs(m.getLatLng().lng-lng)<0.0001){
+                if(fullClusterGroup.zoomToShowLayer) fullClusterGroup.zoomToShowLayer(m, ()=>m.openPopup());
+                else m.openPopup();
+              }
+            });
+          }, 650);
+        }
+        results.classList.remove('show');
+        input.value = el.dataset.name;
+      });
+    });
+  }
+
+  input.addEventListener('input', ()=>renderResults(input.value));
+  input.addEventListener('focus', ()=>{ if(input.value.trim()) renderResults(input.value); });
+  document.addEventListener('click', (e)=>{
+    if(!document.getElementById('mapShelterSearch').contains(e.target)) results.classList.remove('show');
+  });
+}
+document.addEventListener('DOMContentLoaded', initMapShelterSearch);
 
 function mdpTabContent(c, tab){
   const nearby=(state.data.sos_cases||[])
@@ -1707,6 +2092,78 @@ document.getElementById('openShelterModal').addEventListener('click',()=>{
 });
 document.getElementById('closeShelterModal').addEventListener('click',()=>shelterModal.classList.remove('show'));
 shelterModal.addEventListener('click',e=>{ if(e.target===shelterModal) shelterModal.classList.remove('show'); });
+
+/* ── Notification bell ── */
+document.getElementById('notifBell').addEventListener('click', (e)=>{
+  e.stopPropagation();
+  const panel = document.getElementById('notifPanel');
+  panel.classList.toggle('open');
+  if(panel.classList.contains('open')){
+    notifState.unread = 0;
+    notifRenderBadge();
+  }
+});
+document.addEventListener('click', (e)=>{
+  const panel = document.getElementById('notifPanel');
+  const bell = document.getElementById('notifBell');
+  if(panel.classList.contains('open') && !bell.contains(e.target) && !panel.contains(e.target)){
+    panel.classList.remove('open');
+  }
+});
+const notifSoundBtn = document.getElementById('notifSoundToggle');
+notifSoundBtn.classList.toggle('on', notifState.soundOn);
+notifSoundBtn.innerHTML = `<i class="ph-bold ${notifState.soundOn ? 'ph-speaker-high' : 'ph-speaker-slash'}"></i>`;
+notifSoundBtn.addEventListener('click', (e)=>{
+  e.stopPropagation();
+  notifState.soundOn = !notifState.soundOn;
+  localStorage.setItem('floodcare_notif_sound', notifState.soundOn ? 'on' : 'off');
+  notifSoundBtn.classList.toggle('on', notifState.soundOn);
+  notifSoundBtn.innerHTML = `<i class="ph-bold ${notifState.soundOn ? 'ph-speaker-high' : 'ph-speaker-slash'}"></i>`;
+});
+
+/* ── Broadcast alert modal ── */
+const alertModal=document.getElementById('alertModalBg');
+const alertMessageEl=document.getElementById('alertMessage');
+const alertCharCountEl=document.getElementById('alertCharCount');
+
+document.getElementById('openAlertModal').addEventListener('click',()=>{
+  alertMessageEl.value='';
+  alertCharCountEl.textContent='0';
+  document.getElementById('alertFormErr').innerHTML='';
+  alertModal.classList.add('show');
+});
+document.getElementById('closeAlertModal').addEventListener('click',()=>alertModal.classList.remove('show'));
+alertModal.addEventListener('click',e=>{ if(e.target===alertModal) alertModal.classList.remove('show'); });
+alertMessageEl.addEventListener('input',()=>{ alertCharCountEl.textContent=alertMessageEl.value.length; });
+
+document.getElementById('alertSendBtn').addEventListener('click', async ()=>{
+  const err=document.getElementById('alertFormErr');
+  const btn=document.getElementById('alertSendBtn');
+  const message=alertMessageEl.value.trim();
+  err.innerHTML='';
+  if(!message){
+    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>กรุณาพิมพ์ข้อความแจ้งเตือนก่อนส่ง</div>`;
+    return;
+  }
+  if(!confirm(`ยืนยันส่งแจ้งเตือนนี้ให้สมาชิกทั้งหมดใช่ไหมครับ?\n\n"${message}"`)) return;
+
+  btn.disabled=true; btn.innerHTML='<i class="ph ph-spinner"></i> กำลังส่ง...';
+  try{
+    const res=await fetch('/api/dashboard/alerts/broadcast',{
+      method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message})
+    });
+    const j=await res.json().catch(()=>({}));
+    if(!res.ok || !j.success) throw new Error(j.error||'send failed');
+    showToast(`ส่งแจ้งเตือนสำเร็จ ${j.sent||0}/${j.total_users||0} คน`);
+    alertModal.classList.remove('show');
+  }catch(e){
+    err.innerHTML=`<div class="form-err"><i class="ph ph-warning-circle"></i>ส่งแจ้งเตือนไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</div>`;
+  }
+  finally{
+    btn.disabled=false; btn.innerHTML='<i class="ph-bold ph-paper-plane-tilt"></i> ส่งแจ้งเตือนตอนนี้';
+  }
+});
 
 document.getElementById('f_geoBtn').addEventListener('click',()=>{
   const err=document.getElementById('shelterFormErr');
@@ -2163,6 +2620,7 @@ async function loadData(){
     const json=await res.json();
     state.data={stats:json.stats||{},sos_cases:json.sos_cases||[],shelters:json.shelters||[],needs:json.needs||[]};
     state.ok=true;
+    notifCheckForNewCases(state.data.sos_cases, state.data.needs);
   }catch(e){ state.ok=false; }
   renderAll();
 }
@@ -2170,11 +2628,19 @@ async function loadData(){
 /* ── 2. เปลี่ยนสถานะ SOS ── */
 async function updateSosStatus(id,status){
   state.pending[id]=true; renderAll();
+  const isClaim = status === 'IN_PROGRESS';
+  const responder_name = isClaim ? getVolunteerName() : undefined;
   try{
     const res=await fetch(`/api/dashboard/sos/${encodeURIComponent(id)}/status`,{
       method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({status})
+      body:JSON.stringify(isClaim ? {status, responder_name} : {status})
     });
+    if(res.status===409){
+      const j=await res.json().catch(()=>({}));
+      showToast(`เคสนี้ถูก ${j.responder_name||'คนอื่น'} รับไปแล้วครับ`);
+      await loadData();
+      return;
+    }
     if(!res.ok) throw new Error('update failed');
     showToast(`อัปเดตรหัส #${id} เป็น ${STATUS_LABEL[status]} สำเร็จ`);
     await loadData();
@@ -2230,11 +2696,19 @@ document.getElementById('f_submit').addEventListener('click',async()=>{
 /* ── 4. อัปเดตสถานะการส่งสิ่งของ (Needs) ── */
 async function updateNeedStatus(id, status) {
   state.pending[id] = true; renderAll();
+  const isClaim = status === 'IN_PROGRESS';
+  const volunteer_name = isClaim ? getVolunteerName() : undefined;
   try{
     const res=await fetch(`/api/dashboard/needs/${encodeURIComponent(id)}/status`,{
       method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({status})
+      body:JSON.stringify(isClaim ? {status, volunteer_name} : {status})
     });
+    if(res.status===409){
+      const j=await res.json().catch(()=>({}));
+      showToast(`รายการนี้ถูก ${j.volunteer_name||'คนอื่น'} รับไปแล้วครับ`);
+      await loadData();
+      return;
+    }
     if(!res.ok) throw new Error('update failed');
     showToast(`อัปเดตคำร้องขอส่งของสำเร็จ`);
     await loadData();
