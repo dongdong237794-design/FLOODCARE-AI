@@ -1044,6 +1044,7 @@ def _build_nearest_water_stations(lat, lon, limit=3):
             trend = r.get("Trend", "คงที่")
 
             stations.append({
+                "stationCode": r.get("StationCode", ""),
                 "stationName": r.get("Name", "ไม่ระบุ"),
                 "provinceName": r.get("Location", ""),
                 "riverName": r.get("River", ""),
@@ -1062,6 +1063,115 @@ def _build_nearest_water_stations(lat, lon, limit=3):
 
     stations.sort(key=lambda x: x["distance_km"])
     return stations[:limit]
+
+
+def _water_record_to_public(r: dict, source_label: str) -> dict:
+    """Shapes one Water_Levels row into the field names the Public Water Map / API consumers use."""
+    return {
+        "station_code": r.get("StationCode", ""),
+        "station_name": r.get("Name", "ไม่ระบุ"),
+        "river": r.get("River", ""),
+        "province": r.get("Location", ""),
+        "latitude": float(r.get("Lat", 0) or 0),
+        "longitude": float(r.get("Lon", 0) or 0),
+        "water_level": r.get("WaterLevel", "-"),
+        "bank_level": r.get("BankLevel", "-"),
+        "situation": r.get("Situation", "ปกติ"),
+        "trend": r.get("Trend", "คงที่"),
+        "measure_time": r.get("Time", "-"),
+        "updated_at": r.get("Time", "-"),
+        "source": source_label,
+    }
+
+
+def _load_water_records_for_public_api():
+    """
+    Same sheet-first / stale-fallback pattern as _build_nearest_water_stations,
+    factored out so all 3 public water-station endpoints (list/nearest/detail)
+    share one code path instead of three copies. Never calls ThaiWater from
+    the browser — only this server-side function does, and only as a
+    fallback when the sheet itself is empty or stale (spec §4.4 / §4.8).
+    """
+    records = sheets_mgr.get_all_records("Water_Levels")
+    source_label = "sheets"
+    if not records:
+        records = get_live_water_levels_from_api()
+        source_label = "live_api_fallback"
+    elif is_water_data_stale():
+        records = get_live_water_levels_from_api()
+        source_label = "live_api_fallback_stale"
+    return records, source_label
+
+
+@app.route("/api/water-stations", methods=["GET"])
+def api_water_stations_list():
+    """
+    All stations for the Public Water Map, sourced only from Water_Levels
+    (never ThaiWater directly from a browser — spec §4.4/acceptance #2).
+    Optional ?situation=มาก to filter by current status.
+    """
+    records, source_label = _load_water_records_for_public_api()
+    situation_filter = request.args.get("situation", "").strip()
+    out = []
+    for r in records:
+        try:
+            item = _water_record_to_public(r, source_label)
+            if item["latitude"] == 0 and item["longitude"] == 0:
+                continue
+            if situation_filter and item["situation"] != situation_filter:
+                continue
+            out.append(item)
+        except (ValueError, TypeError):
+            continue
+    return jsonify({"success": True, "count": len(out), "stations": out, "source": source_label})
+
+
+@app.route("/api/water-stations/nearest", methods=["GET"])
+def api_water_stations_nearest():
+    """?lat=&lon=&limit= — stations closest to a given point, for the "สถานีใกล้ฉัน" feature."""
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "lat and lon query params are required"}), 400
+    try:
+        limit = max(1, min(int(request.args.get("limit", 10)), 50))
+    except (TypeError, ValueError):
+        limit = 10
+
+    stations = _build_nearest_water_stations(lat, lon, limit=limit)
+    out = [{
+        "station_code": s.get("stationCode", ""),
+        "station_name": s.get("stationName"),
+        "river": s.get("riverName"),
+        "province": s.get("provinceName"),
+        "latitude": s.get("latitude"),
+        "longitude": s.get("longitude"),
+        "water_level": (s.get("water_level") or {}).get("value"),
+        "bank_level": s.get("bank_level"),
+        "situation": s.get("situation"),
+        "trend": s.get("trend"),
+        "measure_time": s.get("measure_time"),
+        "distance_km": round(s.get("distance_km", 0), 2),
+        "source": s.get("source"),
+    } for s in stations]
+    return jsonify({"success": True, "count": len(out), "stations": out})
+
+
+@app.route("/api/water-stations/<station_code>", methods=["GET"])
+def api_water_station_detail(station_code):
+    """Single-station lookup by StationCode, for a map popup's "ดูรายละเอียด" or a shared deep link."""
+    records, source_label = _load_water_records_for_public_api()
+    for r in records:
+        if str(r.get("StationCode", "")).strip() == station_code.strip():
+            return jsonify({"success": True, "station": _water_record_to_public(r, source_label)})
+    return jsonify({"success": False, "error": "station_not_found"}), 404
+
+
+@app.route("/map")
+def public_water_map_page():
+    """Public Water Map — no login required, same as the LIFF pages but reachable from any browser."""
+    return render_template("water_map.html")
 
 
 def _process_water_level(event, lat, lon, user_id, timestamp):
@@ -2041,6 +2151,12 @@ def api_register_submit():
             "consent_pdpa": "TRUE" if data.get("consent_pdpa") else "FALSE",
             "register_date": register_date,
             "status": "ACTIVE",
+            # Water Alert Engine opt-in — on by default (matches sms_enabled's
+            # existing default-on convention); a future settings UI can flip
+            # this off per-user. Radius left blank so the engine falls back
+            # to the global WATER_ALERT_RADIUS_KM until per-user tuning exists.
+            "water_alert_enabled": "TRUE",
+            "water_alert_radius_km": "",
         })
 
         cache.sheets.delete("sheets:users")
@@ -2095,7 +2211,7 @@ def debug_status():
 # =============================================================================
 
 def _startup_self_check():
-    required_templates = ["sos_liff.html", "need_liff.html", "register_liff.html", "dashboard.html", "track_liff.html"]
+    required_templates = ["sos_liff.html", "need_liff.html", "register_liff.html", "dashboard.html", "track_liff.html", "water_map.html"]
     templates_dir = os.path.join(app.root_path, app.template_folder or "templates")
 
     Logger.info("Startup", f"Checking LIFF templates in: {templates_dir}")
