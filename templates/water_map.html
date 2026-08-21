@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>แผนที่ระดับน้ำ — FLOODCARE AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+<style>
+  :root{
+    --ink:#14181F; --muted:#6B7280; --faint:#9CA3AF;
+    --surface:#fff; --bg:#F5F4F0; --border:rgba(0,0,0,.08); --line:#EEF0F2;
+    --accent:#F97316; --accent-dark:#EA580C; --accent-light:#FFF7ED;
+    --shadow-sm:0 2px 12px rgba(0,0,0,.07); --shadow-md:0 8px 28px rgba(0,0,0,.12); --shadow-lg:0 20px 50px rgba(0,0,0,.16);
+    --s-low-crit:#F97316; --s-low:#EAB308; --s-normal:#10B981; --s-high:#3B82F6; --s-over:#EF4444;
+  }
+  *{box-sizing:border-box;}
+  html,body{ height:100%; margin:0; }
+  body{ font-family:'Noto Sans Thai','Inter',-apple-system,sans-serif; color:var(--ink); background:var(--bg); overflow:hidden; }
+
+  #map{ position:fixed; inset:0; z-index:0; }
+
+  .topbar{
+    position:fixed; top:0; left:0; right:0; z-index:600;
+    background:rgba(255,255,255,.92); backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--border); padding:12px 16px;
+    display:flex; align-items:center; gap:12px;
+  }
+  .topbar .brand{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+  .topbar .brand .logo{ width:32px; height:32px; border-radius:9px; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-size:16px; }
+  .topbar .brand h1{ font-size:13.5px; font-weight:800; line-height:1.2; }
+  .topbar .brand .sub{ font-size:10.5px; color:var(--muted); }
+
+  .searchwrap{ flex:1; position:relative; max-width:420px; }
+  .searchbox{
+    display:flex; align-items:center; gap:8px; background:var(--surface);
+    border:1px solid var(--border); border-radius:12px; padding:9px 14px; box-shadow:var(--shadow-sm);
+  }
+  .searchbox input{ border:none; outline:none; flex:1; font-family:inherit; font-size:13px; background:transparent; }
+  .searchbox i{ color:var(--faint); font-size:16px; }
+  .searchresults{
+    position:absolute; top:calc(100% + 6px); left:0; right:0; background:var(--surface);
+    border-radius:12px; box-shadow:var(--shadow-md); max-height:280px; overflow-y:auto; display:none;
+  }
+  .searchresults.show{ display:block; }
+  .sr-item{ padding:10px 14px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .sr-item:last-child{ border-bottom:none; }
+  .sr-item:hover{ background:var(--accent-light); }
+  .sr-name{ font-size:12.5px; font-weight:700; }
+  .sr-meta{ font-size:10.5px; color:var(--muted); margin-top:2px; }
+
+  .updated-pill{
+    flex:0 0 auto; font-size:10.5px; font-weight:700; color:var(--muted);
+    background:var(--line); padding:6px 10px; border-radius:20px; display:flex; align-items:center; gap:5px; white-space:nowrap;
+  }
+  .updated-pill .dot{ width:6px; height:6px; border-radius:50%; background:#10B981; }
+
+  /* Filter chips */
+  .filterbar{
+    position:fixed; top:64px; left:16px; z-index:550;
+    display:flex; gap:6px; flex-wrap:wrap; max-width:calc(100% - 32px);
+  }
+  .chip{
+    font-size:11.5px; font-weight:700; padding:7px 13px; border-radius:20px;
+    background:var(--surface); color:var(--muted); border:1px solid var(--border);
+    box-shadow:var(--shadow-sm); cursor:pointer; display:flex; align-items:center; gap:6px; white-space:nowrap;
+  }
+  .chip .swatch{ width:8px; height:8px; border-radius:50%; }
+  .chip.active{ background:var(--ink); color:#fff; border-color:var(--ink); }
+
+  /* Locate button */
+  .locate-btn{
+    position:fixed; bottom:28px; right:16px; z-index:550;
+    background:var(--accent); color:#fff; border:none; border-radius:16px;
+    padding:14px 20px; font-weight:800; font-size:13px; box-shadow:0 8px 24px rgba(249,115,22,.4);
+    display:flex; align-items:center; gap:8px; cursor:pointer;
+  }
+  .locate-btn:active{ transform:scale(.97); }
+  .locate-btn.loading i{ animation:spin 1s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* Legend */
+  .legend{
+    position:fixed; bottom:28px; left:16px; z-index:550;
+    background:rgba(255,255,255,.95); backdrop-filter:blur(8px); border-radius:14px;
+    padding:10px 14px; box-shadow:var(--shadow-sm); font-size:10.5px; font-weight:700;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .legend .row{ display:flex; align-items:center; gap:7px; color:var(--muted); }
+  .legend .swatch{ width:9px; height:9px; border-radius:50%; }
+
+  /* Nearest-stations bottom sheet */
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:700;
+    background:var(--surface); border-radius:20px 20px 0 0; box-shadow:0 -12px 40px rgba(0,0,0,.18);
+    max-height:60vh; overflow-y:auto; transform:translateY(100%); transition:transform .3s cubic-bezier(.16,1,.3,1);
+    padding:16px 16px 24px;
+  }
+  .sheet.open{ transform:translateY(0); }
+  .sheet-handle{ width:36px; height:4px; background:var(--line); border-radius:4px; margin:0 auto 14px; }
+  .sheet-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+  .sheet-head h3{ font-size:14px; font-weight:800; }
+  .sheet-close{ width:28px; height:28px; border-radius:8px; background:var(--line); display:flex; align-items:center; justify-content:center; color:var(--muted); }
+  .ns-item{ display:flex; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); cursor:pointer; align-items:center; }
+  .ns-item:last-child{ border-bottom:none; }
+  .ns-badge{ width:36px; height:36px; border-radius:12px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:12px; }
+  .ns-name{ font-size:13px; font-weight:700; }
+  .ns-meta{ font-size:11px; color:var(--muted); margin-top:2px; }
+  .ns-dist{ font-size:12px; font-weight:800; color:var(--accent-dark); white-space:nowrap; }
+
+  .toast{
+    position:fixed; bottom:28px; left:50%; transform:translateX(-50%) translateY(20px); z-index:900;
+    background:#1E293B; color:#fff; padding:11px 20px; border-radius:14px; font-size:12.5px; font-weight:600;
+    box-shadow:var(--shadow-md); opacity:0; pointer-events:none; transition:all .25s;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* Popup content */
+  .pop{ min-width:220px; font-family:'Noto Sans Thai',sans-serif; }
+  .pop-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:12px 14px 8px; }
+  .pop-name{ font-size:13.5px; font-weight:800; line-height:1.3; }
+  .pop-area{ font-size:11px; color:var(--muted); margin-top:2px; }
+  .pop-badge{ font-size:10px; font-weight:800; padding:3px 9px; border-radius:10px; white-space:nowrap; }
+  .pop-body{ padding:0 14px 10px; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .pop-stat-label{ font-size:9.5px; color:var(--faint); }
+  .pop-stat-val{ font-size:13px; font-weight:800; margin-top:1px; }
+  .pop-time{ font-size:10px; color:var(--faint); padding:0 14px 10px; }
+  .pop-note{ font-size:9.5px; color:var(--faint); padding:0 14px 10px; line-height:1.5; border-top:1px solid var(--line); padding-top:8px; margin-top:2px; }
+  .pop-gmaps{ display:block; margin:0 14px 12px; text-align:center; background:var(--ink); color:#fff; text-decoration:none; padding:9px; border-radius:10px; font-size:11.5px; font-weight:700; }
+
+  @media (max-width:560px){
+    .searchwrap{ max-width:none; }
+    .topbar .brand .sub{ display:none; }
+    .filterbar{ top:96px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="logo"><i class="ph-fill ph-drop"></i></div>
+    <div>
+      <h1>แผนที่ระดับน้ำ</h1>
+      <div class="sub">FLOODCARE AI · ข้อมูลสาธารณะ</div>
+    </div>
+  </div>
+  <div class="searchwrap">
+    <div class="searchbox">
+      <i class="ph ph-magnifying-glass"></i>
+      <input id="searchInput" type="text" placeholder="ค้นหาสถานี, แม่น้ำ, จังหวัด...">
+    </div>
+    <div class="searchresults" id="searchResults"></div>
+  </div>
+  <div class="updated-pill" id="updatedPill"><span class="dot"></span> <span id="updatedText">กำลังโหลด...</span></div>
+</div>
+
+<div class="filterbar" id="filterBar"></div>
+
+<div class="legend">
+  <div class="row"><span class="swatch" style="background:var(--s-low-crit);"></span> น้อยวิกฤต</div>
+  <div class="row"><span class="swatch" style="background:var(--s-low);"></span> น้อย</div>
+  <div class="row"><span class="swatch" style="background:var(--s-normal);"></span> ปกติ</div>
+  <div class="row"><span class="swatch" style="background:var(--s-high);"></span> มาก</div>
+  <div class="row"><span class="swatch" style="background:var(--s-over);"></span> ล้นตลิ่ง</div>
+</div>
+
+<button class="locate-btn" id="locateBtn"><i class="ph-bold ph-navigation-arrow"></i> สถานีใกล้ฉัน</button>
+
+<div class="sheet" id="nearestSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-head">
+    <h3>สถานีใกล้คุณ</h3>
+    <div class="sheet-close" id="sheetClose"><i class="ph-bold ph-x"></i></div>
+  </div>
+  <div id="nearestList"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SITUATION_COLOR = {
+  'น้อยวิกฤต': '#F97316', 'น้อย': '#EAB308', 'ปกติ': '#10B981', 'มาก': '#3B82F6', 'ล้นตลิ่ง': '#EF4444',
+};
+const SITUATIONS = ['น้อยวิกฤต','น้อย','ปกติ','มาก','ล้นตลิ่ง'];
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 3000);
+}
+
+let map, markers = {}, allStations = [], activeSituationFilter = null;
+
+function initMap(){
+  map = L.map('map', { zoomControl: false, attributionControl: false }).setView([13.75, 100.5], 6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+}
+
+function situationBadgeHtml(situation){
+  const c = SITUATION_COLOR[situation] || '#9CA3AF';
+  return `<span class="pop-badge" style="background:${c}22;color:${c};">${esc(situation)}</span>`;
+}
+
+function buildPopupHtml(s){
+  const gmaps = `https://www.google.com/maps/search/?api=1&query=${s.latitude},${s.longitude}`;
+  const bank = (s.bank_level && s.bank_level !== '-') ? s.bank_level : null;
+  return `
+    <div class="pop">
+      <div class="pop-head">
+        <div>
+          <div class="pop-name">${esc(s.station_name)}</div>
+          <div class="pop-area">${esc(s.province||'-')}${s.river ? ' · แม่น้ำ'+esc(s.river) : ''}</div>
+        </div>
+        ${situationBadgeHtml(s.situation)}
+      </div>
+      <div class="pop-body">
+        <div><div class="pop-stat-label">ระดับน้ำ</div><div class="pop-stat-val">${esc(s.water_level)} ม.</div></div>
+        ${bank ? `<div><div class="pop-stat-label">ระดับตลิ่ง</div><div class="pop-stat-val">${esc(bank)} ม.</div></div>` : ''}
+      </div>
+      <div class="pop-time">อัปเดตล่าสุด: ${esc(s.measure_time)}</div>
+      <div class="pop-note">ระดับน้ำนี้เป็นข้อมูลของสถานีที่เลือกเท่านั้น ไม่ได้หมายความว่าตำแหน่งของคุณกำลังถูกน้ำท่วม โปรดติดตามประกาศจากหน่วยงานในพื้นที่</div>
+      <a class="pop-gmaps" href="${gmaps}" target="_blank" rel="noopener"><i class="ph-bold ph-map-pin"></i> เปิดใน Google Maps</a>
+    </div>`;
+}
+
+function markerIcon(situation){
+  const c = SITUATION_COLOR[situation] || '#9CA3AF';
+  return L.divIcon({
+    className: '', html: `<div style="width:16px;height:16px;border-radius:50%;background:${c};border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);"></div>`,
+    iconSize: [16,16], iconAnchor: [8,8],
+  });
+}
+
+function renderMarkers(){
+  Object.values(markers).forEach(m=>map.removeLayer(m));
+  markers = {};
+  allStations.forEach(s=>{
+    if(activeSituationFilter && s.situation !== activeSituationFilter) return;
+    if(!s.latitude || !s.longitude) return;
+    const m = L.marker([s.latitude, s.longitude], { icon: markerIcon(s.situation) })
+      .bindPopup(buildPopupHtml(s), { maxWidth: 280 })
+      .addTo(map);
+    markers[s.station_code || (s.latitude+','+s.longitude)] = m;
+  });
+}
+
+function renderFilterChips(){
+  const bar = document.getElementById('filterBar');
+  const counts = {};
+  allStations.forEach(s=>{ counts[s.situation] = (counts[s.situation]||0)+1; });
+  let html = `<div class="chip ${!activeSituationFilter?'active':''}" data-sit="">ทั้งหมด (${allStations.length})</div>`;
+  SITUATIONS.forEach(sit=>{
+    if(!counts[sit]) return;
+    html += `<div class="chip ${activeSituationFilter===sit?'active':''}" data-sit="${esc(sit)}">
+      <span class="swatch" style="background:${SITUATION_COLOR[sit]};"></span>${esc(sit)} (${counts[sit]})
+    </div>`;
+  });
+  bar.innerHTML = html;
+  bar.querySelectorAll('.chip').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      activeSituationFilter = el.dataset.sit || null;
+      renderFilterChips();
+      renderMarkers();
+    });
+  });
+}
+
+async function loadStations(showToastOnFail){
+  try{
+    const res = await fetch('/api/water-stations');
+    const data = await res.json();
+    if(!data.success) throw new Error('bad response');
+    allStations = data.stations || [];
+    renderFilterChips();
+    renderMarkers();
+    document.getElementById('updatedText').textContent = `อัปเดตล่าสุดเมื่อสักครู่ · ${allStations.length} สถานี`;
+  }catch(e){
+    if(showToastOnFail) toast('โหลดข้อมูลสถานีไม่สำเร็จ กรุณาลองใหม่');
+    document.getElementById('updatedText').textContent = 'โหลดข้อมูลไม่สำเร็จ';
+  }
+}
+
+/* ── Search ── */
+const searchInput = document.getElementById('searchInput');
+const searchResults = document.getElementById('searchResults');
+searchInput.addEventListener('input', ()=>{
+  const q = searchInput.value.trim().toLowerCase();
+  if(!q){ searchResults.classList.remove('show'); return; }
+  const matches = allStations.filter(s=>
+    (s.station_name||'').toLowerCase().includes(q) ||
+    (s.province||'').toLowerCase().includes(q) ||
+    (s.river||'').toLowerCase().includes(q)
+  ).slice(0, 15);
+  if(matches.length === 0){
+    searchResults.innerHTML = `<div class="sr-item" style="cursor:default;color:var(--muted);">ไม่พบสถานีที่ตรงกับ "${esc(searchInput.value)}"</div>`;
+  } else {
+    searchResults.innerHTML = matches.map(s=>`
+      <div class="sr-item" data-code="${esc(s.station_code)}">
+        <div><div class="sr-name">${esc(s.station_name)}</div><div class="sr-meta">${esc(s.province||'')}</div></div>
+        <span class="pop-badge" style="background:${SITUATION_COLOR[s.situation]}22;color:${SITUATION_COLOR[s.situation]};">${esc(s.situation)}</span>
+      </div>`).join('');
+  }
+  searchResults.classList.add('show');
+  searchResults.querySelectorAll('.sr-item[data-code]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const s = allStations.find(x=>x.station_code === el.dataset.code);
+      if(s){
+        map.flyTo([s.latitude, s.longitude], 15, { animate: true, duration: .6 });
+        setTimeout(()=>{ const m = markers[s.station_code]; if(m) m.openPopup(); }, 650);
+      }
+      searchResults.classList.remove('show');
+      searchInput.value = s ? s.station_name : '';
+    });
+  });
+});
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.searchwrap')) searchResults.classList.remove('show');
+});
+
+/* ── Nearest station (locate me) ── */
+const sheet = document.getElementById('nearestSheet');
+document.getElementById('sheetClose').addEventListener('click', ()=>sheet.classList.remove('open'));
+
+document.getElementById('locateBtn').addEventListener('click', ()=>{
+  const btn = document.getElementById('locateBtn');
+  if(!navigator.geolocation){ toast('เบราว์เซอร์นี้ไม่รองรับการระบุตำแหน่ง'); return; }
+  if(!window.isSecureContext){ toast('ต้องเปิดผ่าน HTTPS จึงจะใช้ตำแหน่งปัจจุบันได้'); return; }
+  btn.classList.add('loading');
+  btn.innerHTML = '<i class="ph-bold ph-spinner"></i> กำลังค้นหา...';
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    const { latitude, longitude } = pos.coords;
+    map.setView([latitude, longitude], 11);
+    L.circleMarker([latitude, longitude], { radius: 8, color: '#F97316', fillColor: '#F97316', fillOpacity: .3, weight: 2 }).addTo(map);
+    try{
+      const res = await fetch(`/api/water-stations/nearest?lat=${latitude}&lon=${longitude}&limit=8`);
+      const data = await res.json();
+      const list = document.getElementById('nearestList');
+      list.innerHTML = (data.stations||[]).map(s=>`
+        <div class="ns-item" data-lat="${s.latitude}" data-lon="${s.longitude}">
+          <div class="ns-badge" style="background:${SITUATION_COLOR[s.situation]||'#9CA3AF'};">${(s.distance_km||0).toFixed(1)}<br><span style="font-size:8px;">กม.</span></div>
+          <div style="flex:1;">
+            <div class="ns-name">${esc(s.station_name)}</div>
+            <div class="ns-meta">${esc(s.province||'')} · ${esc(s.situation)} · ${esc(s.water_level)} ม.</div>
+          </div>
+        </div>`).join('') || `<div style="padding:20px 0;text-align:center;color:var(--muted);font-size:12px;">ไม่พบสถานีใกล้ตำแหน่งของคุณ</div>`;
+      list.querySelectorAll('.ns-item').forEach(el=>{
+        el.addEventListener('click', ()=>{
+          const lat = parseFloat(el.dataset.lat), lon = parseFloat(el.dataset.lon);
+          sheet.classList.remove('open');
+          map.flyTo([lat, lon], 15, { animate: true, duration: .6 });
+          setTimeout(()=>{
+            for(const m of Object.values(markers)){
+              if(Math.abs(m.getLatLng().lat-lat)<0.0005 && Math.abs(m.getLatLng().lng-lon)<0.0005){ m.openPopup(); break; }
+            }
+          }, 650);
+        });
+      });
+      sheet.classList.add('open');
+    }catch(e){ toast('ค้นหาสถานีใกล้เคียงไม่สำเร็จ'); }
+    btn.classList.remove('loading');
+    btn.innerHTML = '<i class="ph-bold ph-navigation-arrow"></i> สถานีใกล้ฉัน';
+  }, (err)=>{
+    btn.classList.remove('loading');
+    btn.innerHTML = '<i class="ph-bold ph-navigation-arrow"></i> สถานีใกล้ฉัน';
+    const reasons = { 1: 'ไม่ได้รับอนุญาตให้เข้าถึงตำแหน่ง', 2: 'ไม่สามารถระบุตำแหน่งได้ในขณะนี้', 3: 'ค้นหาตำแหน่งนานเกินไป' };
+    toast(reasons[err.code] || 'ไม่สามารถดึงตำแหน่งของคุณได้');
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+});
+
+/* ── Boot ── */
+initMap();
+loadStations(false);
+setInterval(()=>loadStations(true), 120000); // refresh every 2 min — never calls ThaiWater directly, only this app's own API
+</script>
+</body>
+</html>
