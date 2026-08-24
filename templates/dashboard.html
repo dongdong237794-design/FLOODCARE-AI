@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css"/>
 
 <!-- Google Fonts & Phosphor Icons -->
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+Thai:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
@@ -33,8 +33,9 @@
   --blue-light:  #EFF6FF;
   --blue-dark:   #1D4ED8;
 
-  --bg-start:    #C2DCE8;
-  --bg-end:      #EDD9C0;
+  /* Flat neutral canvas instead of a diagonal gradient — cards do the work
+     of creating depth, the page background stays quiet behind them. */
+  --bg:          #F3F1EC;
   --surface:     #FFFFFF;
   --sidebar-bg:  #FFFFFF;
   --nav-bg:      rgba(255,255,255,.94);
@@ -42,28 +43,32 @@
   --text:        #14181F;
   --muted:       #6B7280;
   --faint:       #B0B7C3;
-  --border:      rgba(0,0,0,.07);
-  --line:        #F3F4F6;
+  --border:      rgba(20,24,31,.08);
+  --line:        #F1F0EC;
 
   --crit:        #EF4444; --crit-bg: #FEF2F2; --crit-tx: #B91C1C;
   --warn:        #F59E0B; --warn-bg: #FFFBEB; --warn-tx: #92400E;
   --ok:          #22C55E; --ok-bg:   #F0FDF4; --ok-tx:   #15803D;
   --info:        #3B82F6; --info-bg: #EFF6FF; --info-tx: #1D4ED8;
 
-  --dark-card:   #1E2D3D;
-  --lime-card:   #D4EC6A;
+  --dark-card:   #14181F;
+  /* Was a lime-green "stat-lime" card that didn't match the brand anywhere
+     else in the product — reskinned to the orange-featured treatment the
+     reference uses for its one standout metric card. */
+  --feat-card:   var(--accent);
+  --feat-card-tx: #fff;
 
-  --radius:    24px;
-  --radius-sm: 20px;
-  --shadow-sm: 0 2px 16px rgba(0,0,0,.06);
-  --shadow-md: 0 8px 32px rgba(0,0,0,.10);
-  --shadow-lg: 0 20px 60px rgba(0,0,0,.14);
+  --radius:    20px;
+  --radius-sm: 16px;
+  --shadow-sm: 0 1px 2px rgba(20,24,31,.04), 0 1px 10px rgba(20,24,31,.05);
+  --shadow-md: 0 8px 24px rgba(20,24,31,.09);
+  --shadow-lg: 0 24px 56px rgba(20,24,31,.16);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%) fixed;
+  font-family: 'Inter', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
   color: var(--text);
   min-height: 100vh; overflow-x: hidden;
   font-size: 14px; line-height: 1.5;
@@ -87,25 +92,29 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
   align-items: center; padding: 20px 0 24px;
   gap: 4px; position: fixed; top: 0; left: 0;
   height: 100vh; z-index: 200;
-  box-shadow: 4px 0 24px rgba(0,0,0,.06);
+  border-right: 1px solid var(--border);
+  /* A quiet detached-capsule shadow on the seam, rather than a flat hairline,
+     is what makes the reference's icon rail read as a floating surface
+     instead of a bolted-on edge strip. */
+  box-shadow: 1px 0 0 var(--border), 6px 0 24px -8px rgba(20,24,31,.10);
   transition: background 0.3s;
 }
 .brand {
-  width: 44px; height: 44px; border-radius: 16px;
+  width: 44px; height: 44px; border-radius: 14px;
   background: var(--accent); color: #fff;
   display: flex; align-items: center; justify-content: center;
   font-size: 22px; margin-bottom: 20px; flex-shrink: 0;
-  box-shadow: 0 6px 16px rgba(249,115,22,.4);
+  box-shadow: 0 6px 16px rgba(249,115,22,.35);
 }
 .navlist { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 0 10px; flex: 1; }
 .navitem {
-  width: 100%; height: 48px; border-radius: 16px;
+  width: 100%; height: 46px; border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
-  color: var(--faint); font-size: 22px; cursor: pointer; position: relative;
+  color: var(--faint); font-size: 21px; cursor: pointer; position: relative;
   transition: all .18s;
 }
-.navitem:hover { background: rgba(0,0,0,.05); color: var(--muted); }
-.navitem.active { background: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(249,115,22,.35); }
+.navitem:hover { background: var(--line); color: var(--muted); }
+.navitem.active { background: var(--text); color: #fff; box-shadow: 0 6px 16px rgba(20,24,31,.22); }
 .navitem .tip {
   position: absolute; left: 68px;
   background: #1a1a1a; color: #fff;
@@ -127,7 +136,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
   height: 66px; background: var(--surface);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 28px; position: sticky; top: 0; z-index: 100;
-  border-bottom: 1px solid rgba(0,0,0,.05); gap: 12px;
+  border-bottom: 1px solid var(--border); gap: 12px;
   transition: background 0.3s, border-bottom 0.3s;
 }
 .topbar-left { display: flex; flex-direction: column; gap: 2px; }
@@ -161,8 +170,29 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 }
 .pagehead p { font-size: 13px; color: var(--muted); margin-left: 50px; }
 
+/* Dashboard hero — the reference's "Good morning, Sajibur" treatment,
+   adapted to a command-center brief: one bold operational headline plus
+   a quiet supporting line, set well apart from the utility topbar above
+   it so the page has a clear point of entry instead of starting flat
+   on a grid of stat cards. */
+.dash-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 24px; flex-wrap: wrap; }
+.dash-hero h1 { font-size: 26px; font-weight: 900; letter-spacing: -.02em; color: var(--text); line-height: 1.15; }
+.dash-hero p { font-size: 13px; color: var(--muted); margin-top: 5px; }
+.dash-hero .id-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 99px;
+  padding: 7px 14px 7px 7px; box-shadow: var(--shadow-sm); flex-shrink: 0;
+}
+.dash-hero .id-chip .av {
+  width: 28px; height: 28px; border-radius: 50%; background: var(--text); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex-shrink: 0;
+}
+.dash-hero .id-chip .name { font-size: 12px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.dash-hero .id-chip .role { font-size: 10px; color: var(--faint); line-height: 1.2; }
+
 .card {
   background: var(--surface); border-radius: var(--radius);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
   transition: background 0.3s;
 }
@@ -178,18 +208,19 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 
 .stat {
   background: var(--surface); border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
   padding: 20px 20px 18px; display: flex; flex-direction: column; gap: 12px;
   box-shadow: var(--shadow-sm); transition: box-shadow .15s, transform .15s, background 0.3s;
 }
 .stat:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
-.stat.stat-dark { background: var(--dark-card); }
+.stat.stat-dark { background: var(--dark-card); border-color: var(--dark-card); }
 .stat.stat-dark .lb { color: rgba(255,255,255,.55); }
 .stat.stat-dark .vl { color: #fff; }
 .stat.stat-dark .ic { background: rgba(255,255,255,.12); color: #fff; }
-.stat.stat-lime { background: var(--lime-card); }
-.stat.stat-lime .lb { color: rgba(30,45,20,.65); }
-.stat.stat-lime .vl { color: #2D4A0E; }
-.stat.stat-lime .ic { background: rgba(0,0,0,.10); color: #2D4A0E; }
+.stat.stat-lime { background: var(--feat-card); border-color: var(--feat-card); }
+.stat.stat-lime .lb { color: rgba(255,255,255,.75); }
+.stat.stat-lime .vl { color: var(--feat-card-tx); }
+.stat.stat-lime .ic { background: rgba(255,255,255,.18); color: #fff; }
 
 .stat .ic {
   width: 44px; height: 44px; border-radius: 12px;
@@ -202,7 +233,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 
 .mapwrap {
   position: relative; border-radius: var(--radius);
-  overflow: hidden; box-shadow: var(--shadow-sm); margin-bottom: 24px;
+  overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid var(--border); margin-bottom: 24px;
 }
 #dashMap { height: 320px; width: 100%; z-index: 10; border-radius: var(--radius); }
 #fullMap { width: 100%; height: 100%; z-index: 10; }
@@ -211,7 +242,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
   position: relative; width: 100%;
   height: calc(100vh - 196px); min-height: 480px;
   border-radius: var(--radius); overflow: hidden;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm); border: 1px solid var(--border);
 }
 
 .maplegend {
@@ -343,7 +374,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 /* MAP DETAIL PANEL */
 .map-detail-panel {
   position: absolute; top: 14px; bottom: 14px; right: -440px; width: 400px;
-  background: var(--surface); border-radius: 20px;
+  background: var(--surface); border-radius: 20px; border: 1px solid var(--border);
   box-shadow: var(--shadow-lg); z-index: 500;
   display: flex; flex-direction: column;
   transition: right .45s cubic-bezier(.16,.84,.44,1); overflow: hidden;
@@ -405,7 +436,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .sectionhead .more:hover { background: var(--accent); color: #fff; }
 
 .soslist { display: flex; flex-direction: column; gap: 10px; }
-.soscard { background: var(--surface); border-radius: 16px; padding: 14px 16px; cursor: pointer; transition: all .15s, background 0.3s; box-shadow: var(--shadow-sm); }
+.soscard { background: var(--surface); border-radius: 16px; border: 1px solid var(--border); padding: 14px 16px; cursor: pointer; transition: all .15s, background 0.3s; box-shadow: var(--shadow-sm); }
 .soscard:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .soscard.sel { background: var(--accent-light); box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm); }
 .soscard .top { display: flex; gap: 12px; align-items: flex-start; }
@@ -438,7 +469,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .legrow .cnt { font-size: 10px; color: var(--faint); margin-top: 2px; }
 
 /* SOS CASES PAGE (Card Grid) */
-.sos-toolbar { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; background: var(--surface); border-radius: var(--radius-sm); padding: 16px 20px; margin-bottom: 20px; box-shadow: var(--shadow-sm); transition: background 0.3s; }
+.sos-toolbar { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px 20px; margin-bottom: 20px; box-shadow: var(--shadow-sm); transition: background 0.3s; }
 .search { position: relative; flex: 1; min-width: 240px; }
 .search input { width: 100%; padding: 10px 14px 10px 40px; background: var(--line); border: 2px solid transparent; border-radius: 12px; font-size: 13px; transition: .15s; color: var(--text); }
 .search input:focus { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px rgba(249,115,22,.1); }
@@ -449,7 +480,7 @@ input, select, textarea { font-family: inherit; color: var(--text); outline: non
 .tabbtn.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 
 .sos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
-.sos-full-card { background: var(--surface); border-radius: var(--radius-sm); padding: 18px 20px; transition: box-shadow .15s, transform .15s, background 0.3s; position: relative; box-shadow: var(--shadow-sm); }
+.sos-full-card { background: var(--surface); border-radius: var(--radius-sm); border: 1px solid var(--border); padding: 18px 20px; transition: box-shadow .15s, transform .15s, background 0.3s; position: relative; box-shadow: var(--shadow-sm); }
 .sos-full-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .sos-full-card .sfc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .sos-full-card .sfc-id { font-size: 15px; font-weight: 900; color: var(--text); font-family: monospace; letter-spacing: .02em; }
@@ -908,6 +939,13 @@ input:checked + .slider:before { transform: translateX(21px); }
 
       <!-- DASHBOARD PAGE -->
       <div class="page active" id="page-dash">
+        <div class="dash-hero">
+          <div>
+            <h1 id="dashHeroTitle">ภาพรวมการปฏิบัติการ</h1>
+            <p>ติดตามสถานการณ์ ประสานงานเคส SOS และบริหารศูนย์พักพิงได้จากหน้านี้</p>
+          </div>
+          <div class="id-chip" id="dashIdChip"></div>
+        </div>
         <div class="mapwrap">
           <div class="maplegend" id="dashLegend"></div>
           <button class="expand-map-btn" onclick="switchPage('map')" title="ขยายแผนที่">
@@ -1543,8 +1581,7 @@ function toggleDarkMode(isDark){
   }
   
   if(isDark){
-    root.style.setProperty('--bg-start','#0F172A');
-    root.style.setProperty('--bg-end','#1E293B');
+    root.style.setProperty('--bg','#0F172A');
     root.style.setProperty('--surface','#1E293B');
     root.style.setProperty('--sidebar-bg','#0F172A');
     root.style.setProperty('--text','#F1F5F9');
@@ -1556,8 +1593,7 @@ function toggleDarkMode(isDark){
     if(dashTileLayer) dashTileLayer.setUrl(darkTile);
     if(fullTileLayer) fullTileLayer.setUrl(darkTile);
   } else {
-    root.style.removeProperty('--bg-start');
-    root.style.removeProperty('--bg-end');
+    root.style.removeProperty('--bg');
     root.style.removeProperty('--surface');
     root.style.removeProperty('--sidebar-bg');
     root.style.removeProperty('--text');
@@ -1853,7 +1889,25 @@ document.addEventListener('DOMContentLoaded',()=>{
     const btn=e.target.closest('.mdp-tab');
     if(btn&&btn.dataset.tab) switchMdpTab(btn.dataset.tab);
   });
+  renderIdChip();
 });
+
+// Quiet, read-only echo of the existing volunteer-name mechanism (used
+// elsewhere for case-claiming) — never prompts on its own, just reflects
+// whatever name is already remembered on this device, or a neutral
+// placeholder if nobody has claimed a case here yet.
+function renderIdChip(){
+  const el = document.getElementById('dashIdChip');
+  if(!el) return;
+  const name = (localStorage.getItem(VOLUNTEER_NAME_KEY) || '').trim();
+  const initial = name ? name.trim()[0] : 'A';
+  el.innerHTML = `
+    <div class="av">${esc(initial)}</div>
+    <div>
+      <div class="name">${esc(name || 'เจ้าหน้าที่')}</div>
+      <div class="role">${name ? 'อาสาสมัคร/เจ้าหน้าที่' : 'ยังไม่ระบุชื่อ'}</div>
+    </div>`;
+}
 
 function closeMapDetailPanel(){
   document.getElementById('mapDetailPanel').classList.remove('open');
