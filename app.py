@@ -1176,6 +1176,19 @@ def api_water_station_detail(station_code):
     return jsonify({"success": False, "error": "station_not_found"}), 404
 
 
+@app.route("/")
+def root_index():
+    """
+    Bare domain landing point. Previously undefined, so hitting the root
+    URL (as opposed to /health, /map, /dashboard, etc.) always returned
+    Flask's default 404 — indistinguishable from a real outage to anyone
+    checking the site from the top-level domain, including uptime monitors
+    pointed at "/" instead of "/health". Redirects to the public water map,
+    the most useful thing a random visitor to the bare domain could land on.
+    """
+    return redirect("/map")
+
+
 @app.route("/map")
 def public_water_map_page():
     """Public Water Map — no login required, same as the LIFF pages but reachable from any browser."""
