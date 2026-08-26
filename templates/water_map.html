@@ -2,382 +2,1562 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>แผนที่ระดับน้ำ — FLOODCARE AI</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>แผนที่ระดับน้ำและสถานการณ์น้ำ — FLOODCARE AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+Thai:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://unpkg.com/@phosphor-icons/web"></script>
 <style>
-  :root{
-    --ink:#14181F; --muted:#6B7280; --faint:#9CA3AF;
-    --surface:#fff; --bg:#F5F4F0; --border:rgba(0,0,0,.08); --line:#EEF0F2;
-    --accent:#F97316; --accent-dark:#EA580C; --accent-light:#FFF7ED;
-    --shadow-sm:0 2px 12px rgba(0,0,0,.07); --shadow-md:0 8px 28px rgba(0,0,0,.12); --shadow-lg:0 20px 50px rgba(0,0,0,.16);
-    --s-low-crit:#F97316; --s-low:#EAB308; --s-normal:#10B981; --s-high:#3B82F6; --s-over:#EF4444;
+  :root {
+    --ink: #0F172A;
+    --muted: #64748B;
+    --faint: #94A3B8;
+    --surface: #FFFFFF;
+    --surface-glass: rgba(255, 255, 255, 0.94);
+    --bg: #F8FAFC;
+    --border: rgba(15, 23, 42, 0.08);
+    --line: #E2E8F0;
+    --accent: #F97316;
+    --accent-dark: #EA580C;
+    --accent-light: #FFF7ED;
+    --accent-glow: rgba(249, 115, 22, 0.25);
+    --s-crit: #EF4444;
+    --s-crit-bg: #FEF2F2;
+    --s-over: #DC2626;
+    --s-over-bg: #FEE2E2;
+    --s-high: #F59E0B;
+    --s-high-bg: #FFFBEB;
+    --s-watch: #EAB308;
+    --s-watch-bg: #FEFCE8;
+    --s-normal: #10B981;
+    --s-normal-bg: #ECFDF5;
+    --s-low: #3B82F6;
+    --s-low-bg: #EFF6FF;
+    --radius-lg: 18px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 4px 16px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+    --shadow-lg: 0 20px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.05);
   }
-  *{box-sizing:border-box;}
-  html,body{ height:100%; margin:0; }
-  body{ font-family:'Noto Sans Thai','Inter',-apple-system,sans-serif; color:var(--ink); background:var(--bg); overflow:hidden; }
 
-  #map{ position:fixed; inset:0; z-index:0; }
-
-  .topbar{
-    position:fixed; top:0; left:0; right:0; z-index:600;
-    background:rgba(255,255,255,.92); backdrop-filter:blur(10px);
-    border-bottom:1px solid var(--border); padding:12px 16px;
-    display:flex; align-items:center; gap:12px;
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Noto Sans Thai', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  .topbar .brand{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
-  .topbar .brand .logo{ width:32px; height:32px; border-radius:9px; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-size:16px; }
-  .topbar .brand h1{ font-size:13.5px; font-weight:800; line-height:1.2; }
-  .topbar .brand .sub{ font-size:10.5px; color:var(--muted); }
 
-  .searchwrap{ flex:1; position:relative; max-width:420px; }
-  .searchbox{
-    display:flex; align-items:center; gap:8px; background:var(--surface);
-    border:1px solid var(--border); border-radius:12px; padding:9px 14px; box-shadow:var(--shadow-sm);
+  /* App Shell Flex Layout */
+  .app-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    width: 100vw;
+    overflow: hidden;
+    position: relative;
   }
-  .searchbox input{ border:none; outline:none; flex:1; font-family:inherit; font-size:13px; background:transparent; }
-  .searchbox i{ color:var(--faint); font-size:16px; }
-  .searchresults{
-    position:absolute; top:calc(100% + 6px); left:0; right:0; background:var(--surface);
-    border-radius:12px; box-shadow:var(--shadow-md); max-height:280px; overflow-y:auto; display:none;
-  }
-  .searchresults.show{ display:block; }
-  .sr-item{ padding:10px 14px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; justify-content:space-between; gap:8px; align-items:center; }
-  .sr-item:last-child{ border-bottom:none; }
-  .sr-item:hover{ background:var(--accent-light); }
-  .sr-name{ font-size:12.5px; font-weight:700; }
-  .sr-meta{ font-size:10.5px; color:var(--muted); margin-top:2px; }
 
-  .updated-pill{
-    flex:0 0 auto; font-size:10.5px; font-weight:700; color:var(--muted);
-    background:var(--line); padding:6px 10px; border-radius:20px; display:flex; align-items:center; gap:5px; white-space:nowrap;
+  /* 1. Header (Page Header) */
+  .page-header {
+    height: 60px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 1000;
+    flex-shrink: 0;
+    gap: 12px;
   }
-  .updated-pill .dot{ width:6px; height:6px; border-radius:50%; background:#10B981; }
-
-  /* Filter chips */
-  .filterbar{
-    position:fixed; top:64px; left:16px; z-index:550;
-    display:flex; gap:6px; flex-wrap:wrap; max-width:calc(100% - 32px);
+  .brand-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    color: inherit;
+    flex-shrink: 0;
   }
-  .chip{
-    font-size:11.5px; font-weight:700; padding:7px 13px; border-radius:20px;
-    background:var(--surface); color:var(--muted); border:1px solid var(--border);
-    box-shadow:var(--shadow-sm); cursor:pointer; display:flex; align-items:center; gap:6px; white-space:nowrap;
+  .brand-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 4px 10px var(--accent-glow);
   }
-  .chip .swatch{ width:8px; height:8px; border-radius:50%; }
-  .chip.active{ background:var(--ink); color:#fff; border-color:var(--ink); }
-
-  /* Locate button */
-  .locate-btn{
-    position:fixed; bottom:28px; right:16px; z-index:550;
-    background:var(--accent); color:#fff; border:none; border-radius:16px;
-    padding:14px 20px; font-weight:800; font-size:13px; box-shadow:0 8px 24px rgba(249,115,22,.4);
-    display:flex; align-items:center; gap:8px; cursor:pointer;
+  .brand-text h1 {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+    color: var(--ink);
   }
-  .locate-btn:active{ transform:scale(.97); }
-  .locate-btn.loading i{ animation:spin 1s linear infinite; }
-  @keyframes spin{ to{ transform:rotate(360deg); } }
-
-  /* Legend */
-  .legend{
-    position:fixed; bottom:28px; left:16px; z-index:550;
-    background:rgba(255,255,255,.95); backdrop-filter:blur(8px); border-radius:14px;
-    padding:10px 14px; box-shadow:var(--shadow-sm); font-size:10.5px; font-weight:700;
-    display:flex; flex-direction:column; gap:6px;
+  .brand-text .sub {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 500;
   }
-  .legend .row{ display:flex; align-items:center; gap:7px; color:var(--muted); }
-  .legend .swatch{ width:9px; height:9px; border-radius:50%; }
-
-  /* Nearest-stations bottom sheet */
-  .sheet{
-    position:fixed; left:0; right:0; bottom:0; z-index:700;
-    background:var(--surface); border-radius:20px 20px 0 0; box-shadow:0 -12px 40px rgba(0,0,0,.18);
-    max-height:60vh; overflow-y:auto; transform:translateY(100%); transition:transform .3s cubic-bezier(.16,1,.3,1);
-    padding:16px 16px 24px;
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
-  .sheet.open{ transform:translateY(0); }
-  .sheet-handle{ width:36px; height:4px; background:var(--line); border-radius:4px; margin:0 auto 14px; }
-  .sheet-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
-  .sheet-head h3{ font-size:14px; font-weight:800; }
-  .sheet-close{ width:28px; height:28px; border-radius:8px; background:var(--line); display:flex; align-items:center; justify-content:center; color:var(--muted); }
-  .ns-item{ display:flex; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); cursor:pointer; align-items:center; }
-  .ns-item:last-child{ border-bottom:none; }
-  .ns-badge{ width:36px; height:36px; border-radius:12px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:12px; }
-  .ns-name{ font-size:13px; font-weight:700; }
-  .ns-meta{ font-size:11px; color:var(--muted); margin-top:2px; }
-  .ns-dist{ font-size:12px; font-weight:800; color:var(--accent-dark); white-space:nowrap; }
-
-  .toast{
-    position:fixed; bottom:28px; left:50%; transform:translateX(-50%) translateY(20px); z-index:900;
-    background:#1E293B; color:#fff; padding:11px 20px; border-radius:14px; font-size:12.5px; font-weight:600;
-    box-shadow:var(--shadow-md); opacity:0; pointer-events:none; transition:all .25s;
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #F1F5F9;
+    border: 1px solid var(--line);
+    padding: 5px 12px;
+    border-radius: 99px;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--muted);
+    white-space: nowrap;
   }
-  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .status-pill .pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--s-normal);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  }
+  .btn-nav-dash {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--ink);
+    color: #fff;
+    padding: 7px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .btn-nav-dash:hover {
+    background: #1E293B;
+    transform: translateY(-1px);
+  }
+  .btn-refresh {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: #F1F5F9;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-refresh:hover {
+    color: var(--ink);
+    background: var(--line);
+  }
+  .btn-refresh.loading i {
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Popup content */
-  .pop{ min-width:220px; font-family:'Noto Sans Thai',sans-serif; }
-  .pop-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:12px 14px 8px; }
-  .pop-name{ font-size:13.5px; font-weight:800; line-height:1.3; }
-  .pop-area{ font-size:11px; color:var(--muted); margin-top:2px; }
-  .pop-badge{ font-size:10px; font-weight:800; padding:3px 9px; border-radius:10px; white-space:nowrap; }
-  .pop-body{ padding:0 14px 10px; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .pop-stat-label{ font-size:9.5px; color:var(--faint); }
-  .pop-stat-val{ font-size:13px; font-weight:800; margin-top:1px; }
-  .pop-time{ font-size:10px; color:var(--faint); padding:0 14px 10px; }
-  .pop-note{ font-size:9.5px; color:var(--faint); padding:0 14px 10px; line-height:1.5; border-top:1px solid var(--line); padding-top:8px; margin-top:2px; }
-  .pop-gmaps{ display:block; margin:0 14px 12px; text-align:center; background:var(--ink); color:#fff; text-decoration:none; padding:9px; border-radius:10px; font-size:11.5px; font-weight:700; }
+  /* 2. Control Bar (Search / Filter / Controls) */
+  .control-bar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    z-index: 900;
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+  .control-bar::-webkit-scrollbar { display: none; }
+  
+  .search-container {
+    position: relative;
+    width: 320px;
+    flex-shrink: 0;
+  }
+  .search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #F8FAFC;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 7px 12px;
+    transition: all 0.15s;
+  }
+  .search-box:focus-within {
+    background: #fff;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .search-box input {
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 12.5px;
+    color: var(--ink);
+    width: 100%;
+  }
+  .search-box i {
+    color: var(--muted);
+    font-size: 15px;
+  }
+  .search-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1100;
+    display: none;
+  }
+  .search-dropdown.show { display: block; }
+  .search-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .search-item:last-child { border-bottom: none; }
+  .search-item:hover { background: var(--accent-light); }
+  .search-item-info .title { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+  .search-item-info .desc { font-size: 11px; color: var(--muted); margin-top: 1px; }
 
-  @media (max-width:560px){
-    .searchwrap{ max-width:none; }
-    .topbar .brand .sub{ display:none; }
-    .filterbar{ top:96px; }
+  /* Filters */
+  .filter-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding: 2px 0;
+  }
+  .filter-chips::-webkit-scrollbar { display: none; }
+  .chip {
+    padding: 5px 12px;
+    border-radius: 99px;
+    font-size: 11.5px;
+    font-weight: 700;
+    background: #F1F5F9;
+    color: var(--muted);
+    border: 1px solid transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .chip:hover {
+    background: var(--line);
+    color: var(--ink);
+  }
+  .chip.active {
+    background: var(--ink);
+    color: #fff;
+  }
+  .chip .dot-indicator {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .quick-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .btn-quick {
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: #F8FAFC;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-size: 11.5px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-quick:hover {
+    background: var(--line);
+  }
+  .btn-quick.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn-quick.primary:hover {
+    background: var(--accent-dark);
+  }
+
+  /* 3. Main Workspace (Map + Side Panel) */
+  .main-workspace {
+    flex: 1;
+    position: relative;
+    display: flex;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Map Container */
+  #map {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    background: #E2E8F0;
+    z-index: 1;
+  }
+
+  /* Map Floating Legend */
+  .map-legend {
+    position: absolute;
+    bottom: 24px;
+    left: 20px;
+    z-index: 500;
+    background: var(--surface-glass);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    box-shadow: var(--shadow-md);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    pointer-events: auto;
+  }
+  .map-legend .leg-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+  }
+  .map-legend .leg-row .leg-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  /* Map Action Control Float */
+  .map-float-actions {
+    position: absolute;
+    bottom: 24px;
+    right: 20px;
+    z-index: 500;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: auto;
+  }
+  .map-action-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    border-radius: 12px;
+    padding: 10px 16px;
+    font-size: 12.5px;
+    font-weight: 800;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--shadow-md);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .map-action-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+  .map-action-btn.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    box-shadow: 0 6px 20px rgba(249, 115, 22, 0.35);
+  }
+  .map-action-btn.primary:hover {
+    background: var(--accent-dark);
+  }
+
+  /* Desktop Station Sidebar */
+  .station-sidebar {
+    width: 360px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 800;
+    flex-shrink: 0;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.04);
+    transition: transform 0.25s ease;
+  }
+  .sidebar-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .sidebar-header h2 {
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--ink);
+  }
+  .sidebar-header .count-badge {
+    background: #F1F5F9;
+    padding: 3px 8px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .sidebar-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+  }
+  .sidebar-body::-webkit-scrollbar { width: 4px; }
+  .sidebar-body::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+
+  /* Station Card in List */
+  .st-card {
+    background: #F8FAFC;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .st-card:hover {
+    background: #fff;
+    border-color: var(--accent);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+  }
+  .st-card.active {
+    background: var(--accent-light);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .st-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .st-card-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.25;
+  }
+  .st-card-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .sit-badge {
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10.5px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .st-card-metrics {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--line);
+    font-size: 11.5px;
+  }
+  .st-card-metrics .val {
+    font-weight: 800;
+    color: var(--ink);
+  }
+
+  /* Mobile Bottom Sheet */
+  .mobile-bottom-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+    z-index: 1200;
+    max-height: 70vh;
+    overflow-y: auto;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    padding: 16px 20px 30px;
+  }
+  .mobile-bottom-sheet.open {
+    transform: translateY(0);
+  }
+  .sheet-drag-handle {
+    width: 40px;
+    height: 5px;
+    background: var(--line);
+    border-radius: 99px;
+    margin: 0 auto 12px;
+  }
+  .sheet-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .sheet-header-row h3 {
+    font-size: 15px;
+    font-weight: 800;
+  }
+  .sheet-close-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: #F1F5F9;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+  }
+
+  /* Custom Leaflet Marker Styling */
+  .custom-water-marker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease;
+  }
+  .marker-pin-inner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 3px solid #FFFFFF;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 10px;
+  }
+  .custom-water-marker:hover .marker-pin-inner {
+    transform: scale(1.2);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  }
+
+  /* Popup Detailed Card */
+  .leaflet-popup-content-wrapper {
+    border-radius: 16px;
+    padding: 0;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .leaflet-popup-content {
+    margin: 0;
+    width: 300px !important;
+    font-family: 'Noto Sans Thai', sans-serif;
+  }
+  .pop-card-head {
+    padding: 14px 16px 10px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .pop-title { font-size: 14px; font-weight: 800; color: var(--ink); line-height: 1.3; }
+  .pop-subtitle { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .pop-grid {
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    background: #F8FAFC;
+  }
+  .pop-stat-box {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .pop-stat-lbl { font-size: 10px; color: var(--muted); font-weight: 600; }
+  .pop-stat-val { font-size: 14px; font-weight: 900; color: var(--ink); margin-top: 2px; }
+  .pop-footer {
+    padding: 12px 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .pop-time { font-size: 10.5px; color: var(--muted); text-align: center; }
+  .pop-btn-gmaps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--ink);
+    color: #fff;
+    text-decoration: none;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    font-weight: 700;
+    transition: background 0.15s;
+  }
+  .pop-btn-gmaps:hover { background: #1E293B; }
+
+  /* Loading Skeleton & Error state */
+  .skeleton-loader {
+    position: absolute;
+    inset: 0;
+    background: rgba(248, 250, 252, 0.85);
+    backdrop-filter: blur(4px);
+    z-index: 1500;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    transition: opacity 0.3s;
+  }
+  .skeleton-loader.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .spinner-circle {
+    width: 38px;
+    height: 38px;
+    border: 3.5px solid var(--line);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  .skeleton-text {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+
+  /* Empty state */
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .empty-state i {
+    font-size: 36px;
+    color: var(--faint);
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  /* Toast Notification */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(30px);
+    z-index: 2000;
+    background: #0F172A;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s ease;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* Responsive Rules */
+  @media (max-width: 900px) {
+    .station-sidebar { display: none; }
+    .search-container { width: 220px; }
+  }
+
+  @media (max-width: 640px) {
+    .page-header { padding: 0 14px; height: 56px; }
+    .brand-text .sub { display: none; }
+    .status-pill { display: none; }
+    .control-bar { padding: 8px 14px; gap: 8px; }
+    .search-container { width: 100%; max-width: none; }
+    .quick-controls { display: none; }
+    .map-legend { bottom: 80px; left: 14px; padding: 8px 10px; font-size: 10px; }
+    .map-float-actions { bottom: 20px; right: 14px; left: 14px; flex-direction: row; }
+    .map-action-btn { flex: 1; justify-content: center; }
   }
 </style>
 </head>
 <body>
 
-<div id="map"></div>
+<div class="app-layout">
+  
+  <!-- 1. Page Header -->
+  <header class="page-header">
+    <a href="/map" class="brand-group">
+      <div class="brand-logo"><i class="ph-fill ph-drop"></i></div>
+      <div class="brand-text">
+        <h1>แผนที่ระดับน้ำ</h1>
+        <div class="sub">FLOODCARE AI · Water Telemetry & Early Warning</div>
+      </div>
+    </a>
+    
+    <div class="header-actions">
+      <div class="status-pill" id="statusPill">
+        <span class="pulse-dot"></span>
+        <span id="statusText">เชื่อมต่อระบบตรวจวัดสด</span>
+      </div>
+      
+      <button class="btn-refresh" id="refreshBtn" title="รีเฟรชข้อมูล">
+        <i class="ph ph-arrows-clockwise"></i>
+      </button>
 
-<div class="topbar">
-  <div class="brand">
-    <div class="logo"><i class="ph-fill ph-drop"></i></div>
-    <div>
-      <h1>แผนที่ระดับน้ำ</h1>
-      <div class="sub">FLOODCARE AI · ข้อมูลสาธารณะ</div>
+      <a href="/dashboard" class="btn-nav-dash">
+        <i class="ph-bold ph-gauge"></i>
+        <span>Command Center</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- 2. Search / Filter / Controls Subheader -->
+  <div class="control-bar">
+    <div class="search-container">
+      <div class="search-box">
+        <i class="ph ph-magnifying-glass"></i>
+        <input type="text" id="searchInput" placeholder="ค้นหาสถานี, ลำน้ำ, จังหวัด..." autocomplete="off">
+        <i class="ph ph-x" id="searchClearBtn" style="cursor:pointer;display:none;"></i>
+      </div>
+      <div class="search-dropdown" id="searchDropdown"></div>
+    </div>
+
+    <div class="filter-chips" id="filterChips">
+      <!-- Generated Dynamically -->
+    </div>
+
+    <div class="quick-controls">
+      <button class="btn-quick" id="btnToggleLayer" title="เปลี่ยนรูปแบบแผนที่">
+        <i class="ph ph-map-trifold"></i>
+        <span id="layerLabel">แผนที่ถนน</span>
+      </button>
+      <button class="btn-quick primary" id="btnLocateMeTop">
+        <i class="ph-bold ph-crosshair"></i>
+        <span>สถานีใกล้ฉัน</span>
+      </button>
     </div>
   </div>
-  <div class="searchwrap">
-    <div class="searchbox">
-      <i class="ph ph-magnifying-glass"></i>
-      <input id="searchInput" type="text" placeholder="ค้นหาสถานี, แม่น้ำ, จังหวัด...">
+
+  <!-- 3. Workspace Layout (Map + Desktop Sidebar) -->
+  <div class="main-workspace">
+    <div id="map"></div>
+
+    <!-- Map Floating Legend -->
+    <div class="map-legend" id="mapLegend">
+      <div class="leg-row"><span class="leg-swatch" style="background:var(--s-crit);"></span> วิกฤต / ล้นตลิ่ง</div>
+      <div class="leg-row"><span class="leg-swatch" style="background:var(--s-high);"></span> น้ำมาก / เฝ้าระวัง</div>
+      <div class="leg-row"><span class="leg-swatch" style="background:var(--s-normal);"></span> ระดับน้ำปกติ</div>
+      <div class="leg-row"><span class="leg-swatch" style="background:var(--s-low);"></span> น้ำน้อย</div>
     </div>
-    <div class="searchresults" id="searchResults"></div>
+
+    <!-- Map Floating Actions (Mobile / Tablet Quick Access) -->
+    <div class="map-float-actions">
+      <button class="map-action-btn primary" id="locateBtnFloating">
+        <i class="ph-bold ph-navigation-arrow"></i>
+        <span>ค้นหาสถานีใกล้ฉัน</span>
+      </button>
+      <button class="map-action-btn" id="listBtnFloating">
+        <i class="ph ph-list-dashes"></i>
+        <span>รายการสถานี</span>
+      </button>
+    </div>
+
+    <!-- Desktop Sidebar List -->
+    <aside class="station-sidebar" id="stationSidebar">
+      <div class="sidebar-header">
+        <h2>สถานีวัดระดับน้ำ</h2>
+        <span class="count-badge" id="sidebarCount">0 สถานี</span>
+      </div>
+      <div class="sidebar-body" id="stationListContainer">
+        <!-- Rendered by JS -->
+      </div>
+    </aside>
   </div>
-  <div class="updated-pill" id="updatedPill"><span class="dot"></span> <span id="updatedText">กำลังโหลด...</span></div>
-</div>
 
-<div class="filterbar" id="filterBar"></div>
-
-<div class="legend">
-  <div class="row"><span class="swatch" style="background:var(--s-low-crit);"></span> น้อยวิกฤต</div>
-  <div class="row"><span class="swatch" style="background:var(--s-low);"></span> น้อย</div>
-  <div class="row"><span class="swatch" style="background:var(--s-normal);"></span> ปกติ</div>
-  <div class="row"><span class="swatch" style="background:var(--s-high);"></span> มาก</div>
-  <div class="row"><span class="swatch" style="background:var(--s-over);"></span> ล้นตลิ่ง</div>
-</div>
-
-<button class="locate-btn" id="locateBtn"><i class="ph-bold ph-navigation-arrow"></i> สถานีใกล้ฉัน</button>
-
-<div class="sheet" id="nearestSheet">
-  <div class="sheet-handle"></div>
-  <div class="sheet-head">
-    <h3>สถานีใกล้คุณ</h3>
-    <div class="sheet-close" id="sheetClose"><i class="ph-bold ph-x"></i></div>
+  <!-- Mobile Bottom Sheet for Station Details & Nearest List -->
+  <div class="mobile-bottom-sheet" id="mobileSheet">
+    <div class="sheet-drag-handle"></div>
+    <div class="sheet-header-row">
+      <h3 id="sheetTitle">สถานีวัดระดับน้ำใกล้คุณ</h3>
+      <button class="sheet-close-btn" id="sheetCloseBtn"><i class="ph-bold ph-x"></i></button>
+    </div>
+    <div id="sheetBody">
+      <!-- Dynamic content -->
+    </div>
   </div>
-  <div id="nearestList"></div>
-</div>
 
-<div class="toast" id="toast"></div>
+  <!-- Loading Skeleton -->
+  <div class="skeleton-loader" id="skeletonLoader">
+    <div class="spinner-circle"></div>
+    <div class="skeleton-text">กำลังโหลดข้อมูลแผนที่ระดับน้ำ...</div>
+  </div>
+
+  <!-- Global Toast -->
+  <div class="toast" id="toast"></div>
+
+</div>
 
 <script>
-const SITUATION_COLOR = {
-  'น้อยวิกฤต': '#F97316', 'น้อย': '#EAB308', 'ปกติ': '#10B981', 'มาก': '#3B82F6', 'ล้นตลิ่ง': '#EF4444',
+/* ── Color Mapping & Constants ── */
+const SITUATION_CONFIG = {
+  'วิกฤต':     { color: '#EF4444', bg: '#FEF2F2', border: '#B91C1C', text: '#991B1B' },
+  'ล้นตลิ่ง':   { color: '#DC2626', bg: '#FEE2E2', border: '#991B1B', text: '#7F1D1D' },
+  'มาก':       { color: '#F59E0B', bg: '#FFFBEB', border: '#D97706', text: '#92400E' },
+  'เฝ้าระวัง':   { color: '#EAB308', bg: '#FEFCE8', border: '#CA8A04', text: '#854D0E' },
+  'ปกติ':      { color: '#10B981', bg: '#ECFDF5', border: '#059669', text: '#065F46' },
+  'น้อย':      { color: '#3B82F6', bg: '#EFF6FF', border: '#2563EB', text: '#1E40AF' },
+  'น้อยวิกฤต':  { color: '#F97316', bg: '#FFF7ED', border: '#EA580C', text: '#9A3412' }
 };
-const SITUATIONS = ['น้อยวิกฤต','น้อย','ปกติ','มาก','ล้นตลิ่ง'];
 
-function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function toast(msg){
+const SITUATION_KEYS = ['ทั้งหมด', 'ล้นตลิ่ง', 'วิกฤต', 'มาก', 'เฝ้าระวัง', 'ปกติ', 'น้อย'];
+
+const TILE_LAYERS = {
+  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+};
+
+/* ── Application State ── */
+const appState = {
+  map: null,
+  tileLayer: null,
+  currentTile: 'light',
+  markers: new Map(), // station_code -> L.marker
+  allStations: [],
+  filteredStations: [],
+  activeFilter: 'ทั้งหมด',
+  searchQuery: '',
+  selectedStation: null,
+  cachedDataTime: 0,
+  refreshTimer: null,
+  abortController: null,
+  userLocationMarker: null,
+  userLocationAccuracyCircle: null
+};
+
+/* ── Utility Functions ── */
+function esc(str) {
+  if (str == null) return '';
+  return String(str).replace(/[&<>"']/g, m => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[m]));
+}
+
+function showToast(msg) {
   const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 3000);
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3200);
 }
 
-let map, markers = {}, allStations = [], activeSituationFilter = null;
-
-function initMap(){
-  map = L.map('map', { zoomControl: false, attributionControl: false }).setView([13.75, 100.5], 6);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
-  L.control.zoom({ position: 'bottomright' }).addTo(map);
+function getSituationStyle(situation) {
+  return SITUATION_CONFIG[situation] || { color: '#64748B', bg: '#F1F5F9', border: '#CBD5E1', text: '#334155' };
 }
 
-function situationBadgeHtml(situation){
-  const c = SITUATION_COLOR[situation] || '#9CA3AF';
-  return `<span class="pop-badge" style="background:${c}22;color:${c};">${esc(situation)}</span>`;
+/* ── 1. Map Initialization (Single-Instance Guarantee) ── */
+function initWaterMap() {
+  if (appState.map) return; // Prevent duplicate initialization
+
+  appState.map = L.map('map', {
+    zoomControl: false,
+    attributionControl: false,
+    maxZoom: 18,
+    minZoom: 5
+  }).setView([6.65, 101.30], 9); // Center Southern Thailand flood monitoring region
+
+  appState.tileLayer = L.tileLayer(TILE_LAYERS[appState.currentTile], {
+    maxZoom: 18,
+    subdomains: 'abcd'
+  }).addTo(appState.map);
+
+  // Clean Zoom Control on Top-Right
+  L.control.zoom({ position: 'topright' }).addTo(appState.map);
+
+  // Resize handling
+  setTimeout(() => {
+    if (appState.map) appState.map.invalidateSize();
+  }, 200);
 }
 
-function buildPopupHtml(s){
-  const gmaps = `https://www.google.com/maps/search/?api=1&query=${s.latitude},${s.longitude}`;
-  const bank = (s.bank_level && s.bank_level !== '-') ? s.bank_level : null;
-  return `
-    <div class="pop">
-      <div class="pop-head">
-        <div>
-          <div class="pop-name">${esc(s.station_name)}</div>
-          <div class="pop-area">${esc(s.province||'-')}${s.river ? ' · แม่น้ำ'+esc(s.river) : ''}</div>
-        </div>
-        ${situationBadgeHtml(s.situation)}
+/* ── 2. Marker Custom Icon Factory ── */
+function createMarkerIcon(situation) {
+  const cfg = getSituationStyle(situation);
+  const html = `
+    <div class="custom-water-marker">
+      <div class="marker-pin-inner" style="background: ${cfg.color};">
+        <i class="ph-fill ph-drop"></i>
       </div>
-      <div class="pop-body">
-        <div><div class="pop-stat-label">ระดับน้ำ</div><div class="pop-stat-val">${esc(s.water_level)} ม.</div></div>
-        ${bank ? `<div><div class="pop-stat-label">ระดับตลิ่ง</div><div class="pop-stat-val">${esc(bank)} ม.</div></div>` : ''}
-      </div>
-      <div class="pop-time">อัปเดตล่าสุด: ${esc(s.measure_time)}</div>
-      <div class="pop-note">ระดับน้ำนี้เป็นข้อมูลของสถานีที่เลือกเท่านั้น ไม่ได้หมายความว่าตำแหน่งของคุณกำลังถูกน้ำท่วม โปรดติดตามประกาศจากหน่วยงานในพื้นที่</div>
-      <a class="pop-gmaps" href="${gmaps}" target="_blank" rel="noopener"><i class="ph-bold ph-map-pin"></i> เปิดใน Google Maps</a>
-    </div>`;
-}
-
-function markerIcon(situation){
-  const c = SITUATION_COLOR[situation] || '#9CA3AF';
+    </div>
+  `;
   return L.divIcon({
-    className: '', html: `<div style="width:16px;height:16px;border-radius:50%;background:${c};border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);"></div>`,
-    iconSize: [16,16], iconAnchor: [8,8],
+    className: '',
+    html: html,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -14]
   });
 }
 
-function renderMarkers(){
-  Object.values(markers).forEach(m=>map.removeLayer(m));
-  markers = {};
-  allStations.forEach(s=>{
-    if(activeSituationFilter && s.situation !== activeSituationFilter) return;
-    if(!s.latitude || !s.longitude) return;
-    const m = L.marker([s.latitude, s.longitude], { icon: markerIcon(s.situation) })
-      .bindPopup(buildPopupHtml(s), { maxWidth: 280 })
-      .addTo(map);
-    markers[s.station_code || (s.latitude+','+s.longitude)] = m;
-  });
-}
-
-function renderFilterChips(){
-  const bar = document.getElementById('filterBar');
-  const counts = {};
-  allStations.forEach(s=>{ counts[s.situation] = (counts[s.situation]||0)+1; });
-  let html = `<div class="chip ${!activeSituationFilter?'active':''}" data-sit="">ทั้งหมด (${allStations.length})</div>`;
-  SITUATIONS.forEach(sit=>{
-    if(!counts[sit]) return;
-    html += `<div class="chip ${activeSituationFilter===sit?'active':''}" data-sit="${esc(sit)}">
-      <span class="swatch" style="background:${SITUATION_COLOR[sit]};"></span>${esc(sit)} (${counts[sit]})
-    </div>`;
-  });
-  bar.innerHTML = html;
-  bar.querySelectorAll('.chip').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      activeSituationFilter = el.dataset.sit || null;
-      renderFilterChips();
-      renderMarkers();
-    });
-  });
-}
-
-async function loadStations(showToastOnFail){
-  try{
-    const res = await fetch('/api/water-stations');
-    const data = await res.json();
-    if(!data.success) throw new Error('bad response');
-    allStations = data.stations || [];
-    renderFilterChips();
-    renderMarkers();
-    document.getElementById('updatedText').textContent = `อัปเดตล่าสุดเมื่อสักครู่ · ${allStations.length} สถานี`;
-  }catch(e){
-    if(showToastOnFail) toast('โหลดข้อมูลสถานีไม่สำเร็จ กรุณาลองใหม่');
-    document.getElementById('updatedText').textContent = 'โหลดข้อมูลไม่สำเร็จ';
+/* ── 3. Station Popup HTML Builder ── */
+function buildStationPopupHtml(s) {
+  const cfg = getSituationStyle(s.situation);
+  const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${s.latitude},${s.longitude}`;
+  const bank = (s.bank_level && s.bank_level !== '-' && s.bank_level !== 0) ? s.bank_level : null;
+  const water = typeof s.water_level === 'number' ? s.water_level.toFixed(2) : s.water_level;
+  
+  let diffHtml = '';
+  if (bank && typeof s.water_level === 'number') {
+    const diff = s.water_level - parseFloat(bank);
+    if (diff >= 0) {
+      diffHtml = `<span style="color:#DC2626;font-weight:800;">สูงกว่าตลิ่ง +${diff.toFixed(2)} ม.</span>`;
+    } else {
+      diffHtml = `<span style="color:#059669;font-weight:800;">ต่ำกว่าตลิ่ง ${Math.abs(diff).toFixed(2)} ม.</span>`;
+    }
   }
+
+  return `
+    <div class="pop-card">
+      <div class="pop-card-head">
+        <div>
+          <div class="pop-title">${esc(s.station_name)}</div>
+          <div class="pop-subtitle">${esc(s.location || s.province)} ${s.river ? '· ' + esc(s.river) : ''}</div>
+        </div>
+        <span class="sit-badge" style="background:${cfg.bg};color:${cfg.text};border:1px solid ${cfg.border};">
+          ${esc(s.situation)}
+        </span>
+      </div>
+      <div class="pop-grid">
+        <div class="pop-stat-box">
+          <div class="pop-stat-lbl">ระดับน้ำปัจจุบัน</div>
+          <div class="pop-stat-val" style="color:${cfg.color};">${water} ม.</div>
+        </div>
+        <div class="pop-stat-box">
+          <div class="pop-stat-lbl">ระดับตลิ่ง</div>
+          <div class="pop-stat-val">${bank ? bank + ' ม.' : '—'}</div>
+        </div>
+      </div>
+      <div class="pop-footer">
+        ${diffHtml ? `<div style="font-size:11px;text-align:center;">สถานะ: ${diffHtml}</div>` : ''}
+        <div class="pop-time"><i class="ph ph-clock"></i> อัปเดตล่าสุด: ${esc(s.measure_time || 'เมื่อสักครู่')} (แนวโน้ม: ${esc(s.trend || 'คงที่')})</div>
+        <a class="pop-btn-gmaps" href="${gmapsUrl}" target="_blank" rel="noopener">
+          <i class="ph-bold ph-navigation-arrow"></i> นำทางผ่าน Google Maps
+        </a>
+      </div>
+    </div>
+  `;
 }
 
-/* ── Search ── */
-const searchInput = document.getElementById('searchInput');
-const searchResults = document.getElementById('searchResults');
-searchInput.addEventListener('input', ()=>{
-  const q = searchInput.value.trim().toLowerCase();
-  if(!q){ searchResults.classList.remove('show'); return; }
-  const matches = allStations.filter(s=>
-    (s.station_name||'').toLowerCase().includes(q) ||
-    (s.province||'').toLowerCase().includes(q) ||
-    (s.river||'').toLowerCase().includes(q)
-  ).slice(0, 15);
-  if(matches.length === 0){
-    searchResults.innerHTML = `<div class="sr-item" style="cursor:default;color:var(--muted);">ไม่พบสถานีที่ตรงกับ "${esc(searchInput.value)}"</div>`;
-  } else {
-    searchResults.innerHTML = matches.map(s=>`
-      <div class="sr-item" data-code="${esc(s.station_code)}">
-        <div><div class="sr-name">${esc(s.station_name)}</div><div class="sr-meta">${esc(s.province||'')}</div></div>
-        <span class="pop-badge" style="background:${SITUATION_COLOR[s.situation]}22;color:${SITUATION_COLOR[s.situation]};">${esc(s.situation)}</span>
-      </div>`).join('');
+/* ── 4. Marker Synchronization (Diffing & Reusing) ── */
+function syncMarkers() {
+  if (!appState.map) return;
+
+  const visibleStations = appState.filteredStations;
+  const visibleCodes = new Set(visibleStations.map(s => s.station_code || (s.latitude + ',' + s.longitude)));
+
+  // Remove markers that are no longer visible
+  for (const [code, marker] of appState.markers.entries()) {
+    if (!visibleCodes.has(code)) {
+      appState.map.removeLayer(marker);
+      appState.markers.delete(code);
+    }
   }
-  searchResults.classList.add('show');
-  searchResults.querySelectorAll('.sr-item[data-code]').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const s = allStations.find(x=>x.station_code === el.dataset.code);
-      if(s){
-        map.flyTo([s.latitude, s.longitude], 15, { animate: true, duration: .6 });
-        setTimeout(()=>{ const m = markers[s.station_code]; if(m) m.openPopup(); }, 650);
-      }
-      searchResults.classList.remove('show');
-      searchInput.value = s ? s.station_name : '';
-    });
+
+  // Add or update visible markers
+  visibleStations.forEach(s => {
+    if (!s.latitude || !s.longitude) return;
+    const code = s.station_code || (s.latitude + ',' + s.longitude);
+
+    if (appState.markers.has(code)) {
+      // Re-use existing marker, just update popup & icon if needed
+      const marker = appState.markers.get(code);
+      marker.setLatLng([s.latitude, s.longitude]);
+      marker.setIcon(createMarkerIcon(s.situation));
+      marker.setPopupContent(buildStationPopupHtml(s));
+    } else {
+      // Create new marker
+      const marker = L.marker([s.latitude, s.longitude], {
+        icon: createMarkerIcon(s.situation)
+      });
+      marker.bindPopup(buildStationPopupHtml(s), { maxWidth: 320 });
+      marker.on('click', () => {
+        selectStation(s, false);
+      });
+      marker.addTo(appState.map);
+      appState.markers.set(code, marker);
+    }
   });
-});
-document.addEventListener('click', (e)=>{
-  if(!e.target.closest('.searchwrap')) searchResults.classList.remove('show');
-});
+}
 
-/* ── Nearest station (locate me) ── */
-const sheet = document.getElementById('nearestSheet');
-document.getElementById('sheetClose').addEventListener('click', ()=>sheet.classList.remove('open'));
+/* ── 5. Render Sidebar & Station List ── */
+function renderSidebarList() {
+  const container = document.getElementById('stationListContainer');
+  const countBadge = document.getElementById('sidebarCount');
+  if (!container) return;
 
-document.getElementById('locateBtn').addEventListener('click', ()=>{
-  const btn = document.getElementById('locateBtn');
-  if(!navigator.geolocation){ toast('เบราว์เซอร์นี้ไม่รองรับการระบุตำแหน่ง'); return; }
-  if(!window.isSecureContext){ toast('ต้องเปิดผ่าน HTTPS จึงจะใช้ตำแหน่งปัจจุบันได้'); return; }
-  btn.classList.add('loading');
-  btn.innerHTML = '<i class="ph-bold ph-spinner"></i> กำลังค้นหา...';
-  navigator.geolocation.getCurrentPosition(async (pos)=>{
-    const { latitude, longitude } = pos.coords;
-    map.setView([latitude, longitude], 11);
-    L.circleMarker([latitude, longitude], { radius: 8, color: '#F97316', fillColor: '#F97316', fillOpacity: .3, weight: 2 }).addTo(map);
-    try{
-      const res = await fetch(`/api/water-stations/nearest?lat=${latitude}&lon=${longitude}&limit=8`);
-      const data = await res.json();
-      const list = document.getElementById('nearestList');
-      list.innerHTML = (data.stations||[]).map(s=>`
-        <div class="ns-item" data-lat="${s.latitude}" data-lon="${s.longitude}">
-          <div class="ns-badge" style="background:${SITUATION_COLOR[s.situation]||'#9CA3AF'};">${(s.distance_km||0).toFixed(1)}<br><span style="font-size:8px;">กม.</span></div>
-          <div style="flex:1;">
-            <div class="ns-name">${esc(s.station_name)}</div>
-            <div class="ns-meta">${esc(s.province||'')} · ${esc(s.situation)} · ${esc(s.water_level)} ม.</div>
+  countBadge.textContent = `${appState.filteredStations.length} สถานี`;
+
+  if (appState.filteredStations.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <i class="ph ph-magnifying-glass"></i>
+        <div>ไม่พบสถานีวัดระดับน้ำตามเงื่อนไขที่เลือก</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = appState.filteredStations.map(s => {
+    const cfg = getSituationStyle(s.situation);
+    const isSelected = appState.selectedStation && appState.selectedStation.station_code === s.station_code;
+    return `
+      <div class="st-card ${isSelected ? 'active' : ''}" data-code="${esc(s.station_code)}">
+        <div class="st-card-top">
+          <div>
+            <div class="st-card-title">${esc(s.station_name)}</div>
+            <div class="st-card-sub">${esc(s.province || '')} ${s.river ? '· ' + esc(s.river) : ''}</div>
           </div>
-        </div>`).join('') || `<div style="padding:20px 0;text-align:center;color:var(--muted);font-size:12px;">ไม่พบสถานีใกล้ตำแหน่งของคุณ</div>`;
-      list.querySelectorAll('.ns-item').forEach(el=>{
-        el.addEventListener('click', ()=>{
-          const lat = parseFloat(el.dataset.lat), lon = parseFloat(el.dataset.lon);
-          sheet.classList.remove('open');
-          map.flyTo([lat, lon], 15, { animate: true, duration: .6 });
-          setTimeout(()=>{
-            for(const m of Object.values(markers)){
-              if(Math.abs(m.getLatLng().lat-lat)<0.0005 && Math.abs(m.getLatLng().lng-lon)<0.0005){ m.openPopup(); break; }
-            }
-          }, 650);
+          <span class="sit-badge" style="background:${cfg.bg};color:${cfg.text};border:1px solid ${cfg.border};">
+            ${esc(s.situation)}
+          </span>
+        </div>
+        <div class="st-card-metrics">
+          <span>ระดับน้ำ: <b class="val">${esc(s.water_level)} ม.</b></span>
+          <span>ตลิ่ง: <b>${s.bank_level && s.bank_level !== '-' ? esc(s.bank_level) + ' ม.' : '—'}</b></span>
+          <span>แนวโน้ม: <b>${esc(s.trend || 'คงที่')}</b></span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Attach event listeners
+  container.querySelectorAll('.st-card[data-code]').forEach(card => {
+    card.addEventListener('click', () => {
+      const code = card.dataset.code;
+      const s = appState.allStations.find(x => x.station_code === code);
+      if (s) selectStation(s, true);
+    });
+  });
+}
+
+/* ── 6. Filter Chips Component ── */
+function renderFilterChips() {
+  const container = document.getElementById('filterChips');
+  if (!container) return;
+
+  const counts = { 'ทั้งหมด': appState.allStations.length };
+  appState.allStations.forEach(s => {
+    counts[s.situation] = (counts[s.situation] || 0) + 1;
+  });
+
+  container.innerHTML = SITUATION_KEYS.map(key => {
+    const isActive = appState.activeFilter === key;
+    const cfg = key === 'ทั้งหมด' ? null : getSituationStyle(key);
+    const dot = cfg ? `<span class="dot-indicator" style="background:${cfg.color}"></span>` : '';
+    const count = counts[key] || 0;
+    return `
+      <div class="chip ${isActive ? 'active' : ''}" data-filter="${esc(key)}">
+        ${dot}
+        <span>${esc(key)}</span>
+        <span style="opacity:0.75;font-size:10px;">(${count})</span>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.chip[data-filter]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      appState.activeFilter = chip.dataset.filter;
+      applyFilters();
+      renderFilterChips();
+    });
+  });
+}
+
+/* ── 7. Apply Search & Filter Pipeline ── */
+function applyFilters() {
+  let list = appState.allStations;
+
+  // 1. Situation Filter
+  if (appState.activeFilter !== 'ทั้งหมด') {
+    list = list.filter(s => s.situation === appState.activeFilter);
+  }
+
+  // 2. Search Query
+  const q = appState.searchQuery.trim().toLowerCase();
+  if (q) {
+    list = list.filter(s => 
+      (s.station_name || '').toLowerCase().includes(q) ||
+      (s.station_code || '').toLowerCase().includes(q) ||
+      (s.province || '').toLowerCase().includes(q) ||
+      (s.river || '').toLowerCase().includes(q) ||
+      (s.location || '').toLowerCase().includes(q)
+    );
+  }
+
+  appState.filteredStations = list;
+  syncMarkers();
+  renderSidebarList();
+}
+
+/* ── 8. Station Selection Action ── */
+function selectStation(station, flyTo = true) {
+  appState.selectedStation = station;
+  
+  // Highlight active in sidebar
+  document.querySelectorAll('.st-card').forEach(card => {
+    card.classList.toggle('active', card.dataset.code === station.station_code);
+  });
+
+  if (flyTo && appState.map) {
+    appState.map.flyTo([station.latitude, station.longitude], 14, {
+      animate: true,
+      duration: 0.6
+    });
+  }
+
+  // Open Popup
+  setTimeout(() => {
+    const code = station.station_code || (station.latitude + ',' + station.longitude);
+    const marker = appState.markers.get(code);
+    if (marker) marker.openPopup();
+  }, flyTo ? 650 : 50);
+
+  // If on Mobile, show in bottom sheet
+  if (window.innerWidth <= 768) {
+    openMobileStationDetail(station);
+  }
+}
+
+/* ── 9. Mobile Bottom Sheet ── */
+function openMobileStationDetail(s) {
+  const sheet = document.getElementById('mobileSheet');
+  const title = document.getElementById('sheetTitle');
+  const body = document.getElementById('sheetBody');
+  if (!sheet || !body) return;
+
+  const cfg = getSituationStyle(s.situation);
+  const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${s.latitude},${s.longitude}`;
+
+  title.textContent = 'รายละเอียดสถานีวัดระดับน้ำ';
+  body.innerHTML = `
+    <div style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div>
+          <div style="font-size:16px;font-weight:900;color:var(--ink);">${esc(s.station_name)}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${esc(s.location || s.province)} ${s.river ? '· แม่น้ำ' + esc(s.river) : ''}</div>
+        </div>
+        <span class="sit-badge" style="background:${cfg.bg};color:${cfg.text};border:1px solid ${cfg.border};padding:4px 10px;font-size:12px;">
+          ${esc(s.situation)}
+        </span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;">
+        <div style="background:#F8FAFC;padding:12px;border-radius:12px;border:1px solid var(--line);">
+          <div style="font-size:11px;color:var(--muted);">ระดับน้ำปัจจุบัน</div>
+          <div style="font-size:18px;font-weight:900;color:${cfg.color};margin-top:2px;">${esc(s.water_level)} ม.</div>
+        </div>
+        <div style="background:#F8FAFC;padding:12px;border-radius:12px;border:1px solid var(--line);">
+          <div style="font-size:11px;color:var(--muted);">ระดับตลิ่ง</div>
+          <div style="font-size:18px;font-weight:900;color:var(--ink);margin-top:2px;">${s.bank_level && s.bank_level !== '-' ? esc(s.bank_level) + ' ม.' : '—'}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:12px;text-align:center;">
+        อัปเดตล่าสุด: ${esc(s.measure_time || 'เมื่อสักครู่')} (แนวโน้ม: ${esc(s.trend || 'คงที่')})
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <a href="${gmapsUrl}" target="_blank" style="flex:1;background:var(--ink);color:#fff;text-align:center;padding:12px;border-radius:12px;font-weight:700;font-size:13px;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <i class="ph-bold ph-map-pin"></i> Google Maps
+        </a>
+        <a href="/liff/sos" style="flex:1;background:var(--accent);color:#fff;text-align:center;padding:12px;border-radius:12px;font-weight:700;font-size:13px;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <i class="ph-fill ph-siren"></i> แจ้งขอความช่วยเหลือ
+        </a>
+      </div>
+    </div>
+  `;
+
+  sheet.classList.add('open');
+}
+
+function openMobileNearestList(nearestStations) {
+  const sheet = document.getElementById('mobileSheet');
+  const title = document.getElementById('sheetTitle');
+  const body = document.getElementById('sheetBody');
+  if (!sheet || !body) return;
+
+  title.textContent = `สถานีใกล้คุณ (${nearestStations.length})`;
+  body.innerHTML = nearestStations.map(s => {
+    const cfg = getSituationStyle(s.situation);
+    return `
+      <div class="st-card" data-code="${esc(s.station_code)}" style="margin-bottom:8px;">
+        <div class="st-card-top">
+          <div>
+            <div class="st-card-title">${esc(s.station_name)}</div>
+            <div class="st-card-sub">${esc(s.province || '')} · ระยะทาง <b>${(s.distance_km || 0).toFixed(1)} กม.</b></div>
+          </div>
+          <span class="sit-badge" style="background:${cfg.bg};color:${cfg.text};border:1px solid ${cfg.border};">
+            ${esc(s.situation)}
+          </span>
+        </div>
+      </div>
+    `;
+  }).join('') || '<div class="empty-state">ไม่พบสถานีในรัศมีใกล้เคียง</div>';
+
+  body.querySelectorAll('.st-card[data-code]').forEach(card => {
+    card.addEventListener('click', () => {
+      const code = card.dataset.code;
+      const s = appState.allStations.find(x => x.station_code === code);
+      if (s) {
+        sheet.classList.remove('open');
+        selectStation(s, true);
+      }
+    });
+  });
+
+  sheet.classList.add('open');
+}
+
+/* ── 10. Data Fetching Pipeline ── */
+async function fetchWaterStations(isBackground = false) {
+  const refreshBtn = document.getElementById('refreshBtn');
+  const skeleton = document.getElementById('skeletonLoader');
+  const statusText = document.getElementById('statusText');
+
+  if (!isBackground && refreshBtn) refreshBtn.classList.add('loading');
+
+  try {
+    if (appState.abortController) {
+      appState.abortController.abort();
+    }
+    appState.abortController = new AbortController();
+
+    const res = await fetch('/api/water-stations', {
+      signal: appState.abortController.signal
+    });
+    const data = await res.json();
+
+    if (!data.success) throw new Error('API reported failure');
+
+    appState.allStations = data.stations || [];
+    appState.cachedDataTime = Date.now();
+
+    renderFilterChips();
+    applyFilters();
+
+    if (statusText) {
+      statusText.textContent = `ข้อมูลสด · ${appState.allStations.length} สถานี`;
+    }
+
+    if (!isBackground) {
+      showToast(`อัปเดตข้อมูลระดับน้ำแล้ว (${appState.allStations.length} สถานี)`);
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.error('Failed to load water stations:', err);
+      if (statusText) statusText.textContent = 'ไม่สามารถดึงข้อมูลล่าสุดได้';
+      if (!isBackground) showToast('โหลดข้อมูลสถานีไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    }
+  } finally {
+    if (skeleton) skeleton.classList.add('hidden');
+    if (refreshBtn) refreshBtn.classList.remove('loading');
+  }
+}
+
+/* ── 11. Geolocation: Find Nearest Stations ── */
+async function locateUserAndFindNearest() {
+  const btnTop = document.getElementById('btnLocateMeTop');
+  const btnFloat = document.getElementById('locateBtnFloating');
+
+  if (!navigator.geolocation) {
+    showToast('อุปกรณ์ของคุณไม่รองรับการค้นหาพิกัด GPS');
+    return;
+  }
+  if (!window.isSecureContext) {
+    showToast('จำเป็นต้องใช้งานผ่าน HTTPS เพื่อระบุตำแหน่ง GPS');
+    return;
+  }
+
+  const setBtnLoading = (isLoading) => {
+    [btnTop, btnFloat].forEach(btn => {
+      if (btn) {
+        btn.disabled = isLoading;
+        btn.innerHTML = isLoading 
+          ? '<i class="ph-bold ph-spinner" style="animation:spin 0.8s linear infinite;"></i> กำลังหาตำแหน่ง...'
+          : '<i class="ph-bold ph-crosshair"></i> สถานีใกล้ฉัน';
+      }
+    });
+  };
+
+  setBtnLoading(true);
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const { latitude, longitude, accuracy } = pos.coords;
+
+      // Update Map View
+      if (appState.map) {
+        appState.map.setView([latitude, longitude], 12);
+
+        // Draw/Update user location marker
+        if (appState.userLocationMarker) {
+          appState.userLocationMarker.setLatLng([latitude, longitude]);
+        } else {
+          appState.userLocationMarker = L.circleMarker([latitude, longitude], {
+            radius: 8,
+            color: '#F97316',
+            fillColor: '#EA580C',
+            fillOpacity: 0.9,
+            weight: 3
+          }).addTo(appState.map).bindPopup('<b>ตำแหน่งปัจจุบันของคุณ</b>');
+        }
+
+        if (appState.userLocationAccuracyCircle) {
+          appState.userLocationAccuracyCircle.setLatLng([latitude, longitude]);
+          appState.userLocationAccuracyCircle.setRadius(accuracy || 500);
+        } else {
+          appState.userLocationAccuracyCircle = L.circle([latitude, longitude], {
+            radius: accuracy || 500,
+            color: '#F97316',
+            fillColor: '#F97316',
+            fillOpacity: 0.12,
+            weight: 1
+          }).addTo(appState.map);
+        }
+      }
+
+      // Query nearest stations API
+      try {
+        const res = await fetch(`/api/water-stations/nearest?lat=${latitude}&lon=${longitude}&limit=6`);
+        const data = await res.json();
+        const nearestList = data.stations || data.nearest || [];
+
+        if (nearestList.length > 0) {
+          showToast(`พบ ${nearestList.length} สถานีใกล้ตำแหน่งของคุณ`);
+          openMobileNearestList(nearestList);
+        } else {
+          showToast('ไม่พบสถานีวัดน้ำในบริเวณใกล้เคียง');
+        }
+      } catch (e) {
+        showToast('ค้นหาสถานีใกล้เคียงไม่สำเร็จ');
+      } finally {
+        setBtnLoading(false);
+      }
+    },
+    (err) => {
+      setBtnLoading(false);
+      const errors = {
+        1: 'กรุณาอนุญาตการเข้าถึงตำแหน่งพิกัดในเบราว์เซอร์',
+        2: 'ไม่สามารถระบุพิกัดตำแหน่งของคุณได้ในขณะนี้',
+        3: 'ค้นหาพิกัดตำแหน่งนานเกินเวลา (Timeout)'
+      };
+      showToast(errors[err.code] || 'ไม่สามารถดึงตำแหน่งปัจจุบันได้');
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+  );
+}
+
+/* ── 12. Search Input Handling with Debounce ── */
+function setupSearch() {
+  const searchInput = document.getElementById('searchInput');
+  const searchDropdown = document.getElementById('searchDropdown');
+  const clearBtn = document.getElementById('searchClearBtn');
+  let debounceTimer = null;
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value;
+    clearBtn.style.display = q ? 'block' : 'none';
+
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      appState.searchQuery = q;
+      applyFilters();
+
+      // Render Dropdown suggestions
+      if (!q.trim()) {
+        searchDropdown.classList.remove('show');
+        return;
+      }
+
+      const matches = appState.filteredStations.slice(0, 8);
+      if (matches.length === 0) {
+        searchDropdown.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--muted);text-align:center;">ไม่พบสถานีที่ตรงกับ "${esc(q)}"</div>`;
+      } else {
+        searchDropdown.innerHTML = matches.map(s => {
+          const cfg = getSituationStyle(s.situation);
+          return `
+            <div class="search-item" data-code="${esc(s.station_code)}">
+              <div class="search-item-info">
+                <div class="title">${esc(s.station_name)}</div>
+                <div class="desc">${esc(s.province || '')} ${s.river ? '· แม่น้ำ' + esc(s.river) : ''} · ระดับน้ำ ${esc(s.water_level)} ม.</div>
+              </div>
+              <span class="sit-badge" style="background:${cfg.bg};color:${cfg.text};font-size:10.5px;">${esc(s.situation)}</span>
+            </div>
+          `;
+        }).join('');
+      }
+      searchDropdown.classList.add('show');
+
+      searchDropdown.querySelectorAll('.search-item[data-code]').forEach(item => {
+        item.addEventListener('click', () => {
+          const s = appState.allStations.find(x => x.station_code === item.dataset.code);
+          if (s) selectStation(s, true);
+          searchDropdown.classList.remove('show');
         });
       });
-      sheet.classList.add('open');
-    }catch(e){ toast('ค้นหาสถานีใกล้เคียงไม่สำเร็จ'); }
-    btn.classList.remove('loading');
-    btn.innerHTML = '<i class="ph-bold ph-navigation-arrow"></i> สถานีใกล้ฉัน';
-  }, (err)=>{
-    btn.classList.remove('loading');
-    btn.innerHTML = '<i class="ph-bold ph-navigation-arrow"></i> สถานีใกล้ฉัน';
-    const reasons = { 1: 'ไม่ได้รับอนุญาตให้เข้าถึงตำแหน่ง', 2: 'ไม่สามารถระบุตำแหน่งได้ในขณะนี้', 3: 'ค้นหาตำแหน่งนานเกินไป' };
-    toast(reasons[err.code] || 'ไม่สามารถดึงตำแหน่งของคุณได้');
-  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-});
+    }, 150);
+  });
 
-/* ── Boot ── */
-initMap();
-loadStations(false);
-setInterval(()=>loadStations(true), 120000); // refresh every 2 min — never calls ThaiWater directly, only this app's own API
+  clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    clearBtn.style.display = 'none';
+    searchDropdown.classList.remove('show');
+    appState.searchQuery = '';
+    applyFilters();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-container')) {
+      searchDropdown.classList.remove('show');
+    }
+  });
+}
+
+/* ── 13. Map Layer Switcher ── */
+function setupLayerToggle() {
+  const btn = document.getElementById('btnToggleLayer');
+  const label = document.getElementById('layerLabel');
+  if (!btn) return;
+
+  const modes = [
+    { key: 'light', label: 'แผนที่สว่าง' },
+    { key: 'satellite', label: 'ภาพดาวเทียม' },
+    { key: 'osm', label: 'แผนที่ภูมิประเทศ' }
+  ];
+  let currentIdx = 0;
+
+  btn.addEventListener('click', () => {
+    currentIdx = (currentIdx + 1) % modes.length;
+    const mode = modes[currentIdx];
+    appState.currentTile = mode.key;
+    label.textContent = mode.label;
+
+    if (appState.tileLayer && appState.map) {
+      appState.tileLayer.setUrl(TILE_LAYERS[mode.key]);
+    }
+  });
+}
+
+/* ── 14. Event Bindings & Lifecycle Management ── */
+function bindGlobalEvents() {
+  // Refresh button
+  document.getElementById('refreshBtn').addEventListener('click', () => fetchWaterStations(false));
+
+  // Locate Me Buttons
+  document.getElementById('btnLocateMeTop').addEventListener('click', locateUserAndFindNearest);
+  document.getElementById('locateBtnFloating').addEventListener('click', locateUserAndFindNearest);
+
+  // Mobile list open button
+  document.getElementById('listBtnFloating').addEventListener('click', () => {
+    openMobileNearestList(appState.filteredStations);
+  });
+
+  // Mobile Sheet close
+  document.getElementById('sheetCloseBtn').addEventListener('click', () => {
+    document.getElementById('mobileSheet').classList.remove('open');
+  });
+
+  // Clean interval when leaving tab
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (appState.refreshTimer) clearInterval(appState.refreshTimer);
+    } else {
+      // Resume refresh
+      fetchWaterStations(true);
+      appState.refreshTimer = setInterval(() => fetchWaterStations(true), 90000);
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (appState.refreshTimer) clearInterval(appState.refreshTimer);
+  });
+}
+
+/* ── 15. Application Boot ── */
+document.addEventListener('DOMContentLoaded', () => {
+  initWaterMap();
+  setupSearch();
+  setupLayerToggle();
+  bindGlobalEvents();
+  
+  // Initial fetch
+  fetchWaterStations(false);
+
+  // Auto-refresh every 90 seconds
+  appState.refreshTimer = setInterval(() => fetchWaterStations(true), 90000);
+});
 </script>
 </body>
 </html>
