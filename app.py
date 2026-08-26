@@ -32,6 +32,7 @@ from bot_config import (
     Logger, cache, rate_limiter, sessions,
     IntentClassifier, classify_intent_ai, classify_and_maybe_answer,
     compose_water_level_reply, compose_shelter_reply,
+    get_out_of_scope_decline_text,
     # Time helper
     get_bangkok_time,
     # Utilities
@@ -499,6 +500,7 @@ def _handle_text_message_inner(event):
     text_clean_for_menu = user_text.strip().lower().strip("!.,😊🙏👋🆘 ")
     is_menu_trigger = text_clean_for_menu in _ALL_KEYWORD_TRIGGERS
     pre_answer = None  # set below if the combined call already drafted a usable answer
+    in_scope = True    # hard scope gate for AI_QUERY/FAQ, decided at classify time (see handlers below)
 
     if is_menu_trigger:
         intent, confidence = IntentClassifier.classify(user_text)
@@ -521,6 +523,7 @@ def _handle_text_message_inner(event):
             intent = combined.get("intent", "AI_QUERY")
             confidence = combined.get("confidence", 0.5)
             scope = combined.get("scope", "GENERAL")
+            in_scope = combined.get("in_scope", True)
             if combined.get("answer"):
                 pre_answer = combined
         else:
@@ -528,6 +531,7 @@ def _handle_text_message_inner(event):
             intent = ai_result.get("intent", "AI_QUERY")
             confidence = ai_result.get("confidence", 0.5)
             scope = ai_result.get("scope", "GENERAL")
+            in_scope = ai_result.get("in_scope", True)
 
     session.last_intent = intent
 
@@ -580,6 +584,9 @@ def _handle_text_message_inner(event):
 
     # FAQ (Google search with grounding)
     if intent == "FAQ":
+        if not in_scope:
+            _reply_out_of_scope(event, user_id, user_text, timestamp, log_source="FAQ")
+            return
         _handle_faq_query(event, user_id, user_text, timestamp, pre_answer=pre_answer)
         return
     
@@ -648,6 +655,9 @@ def _handle_text_message_inner(event):
     
     # AI QUERY (Default)
     if intent == "AI_QUERY":
+        if not in_scope:
+            _reply_out_of_scope(event, user_id, user_text, timestamp, log_source="AI_QUERY")
+            return
         _handle_ai_query(event, user_id, user_text, timestamp, pre_answer=pre_answer)
         return
     
@@ -942,6 +952,38 @@ def _handle_weather_request(event, user_id):
 # =============================================================================
 # CHAT AI HANDLERS (With Typing Indicators)
 # =============================================================================
+
+def _reply_out_of_scope(event, user_id, user_text, timestamp, log_source="AI_QUERY"):
+    """
+    Deterministic, non-AI decline for questions the classifier has already
+    flagged as in_scope=False — pure general trivia with no connection to
+    flooding/safety/accidents/disaster health (e.g. "ยีราฟคอยาวกี่เมตร",
+    "นักแข่ง F1 มีกี่คน"). Sends the fixed text from
+    get_out_of_scope_decline_text() directly, with no Gemini/Google Search
+    call at all — see that function's docstring for why this needed to be
+    a hard, code-level gate rather than left to the answer-generation
+    prompt to self-refuse.
+    """
+    lang = sessions.get(user_id).language
+    decline_text = get_out_of_scope_decline_text(lang)
+    flex_msg = build_ai_response_flex(decline_text, user_text, lang=lang)
+    try:
+        line_bot_api.reply_message(event.reply_token, flex_msg)
+    except Exception as e:
+        Logger.error(log_source, f"reply_message failed ({e}), falling back to push_message")
+        try:
+            line_bot_api.push_message(user_id, flex_msg)
+        except Exception as push_err:
+            Logger.error(log_source, f"Fallback push_message also failed: {push_err}")
+
+    try:
+        sheets_mgr.batch_append("AI_Logs", [[
+            timestamp, user_id, f"{log_source}_OUT_OF_SCOPE", user_text[:200],
+            decline_text[:1000], "0"
+        ]])
+    except Exception as e:
+        Logger.error(log_source, f"Log error: {e}")
+
 
 def _handle_faq_query(event, user_id, user_text, timestamp, pre_answer=None):
     lang = sessions.get(user_id).language
