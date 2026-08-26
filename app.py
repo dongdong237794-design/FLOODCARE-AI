@@ -42,7 +42,7 @@ from bot_config import (
     # Flex builders
     build_ai_response_flex,
     build_language_selector_flex, build_water_level_flex_message,
-    build_register_form_flex, build_snake_bite_flex, build_help_flex,
+    build_register_form_flex, build_snake_bite_flex, build_help_flex, build_full_guide_flex,
     build_weather_flex, build_faq_response_flex,
     build_shelter_flex_message, build_prep_guide_flex, build_accident_flex_message,
     MORE_SHELTERS_TRIGGERS,
@@ -519,9 +519,17 @@ def handle_text_message(event):
         line_bot_api.reply_message(event.reply_token, greeting_msg)
         return
 
-    # HELP / CAPABILITIES MENU
+    # HELP / CAPABILITIES MENU (cover card — invites the tap that opens the full guide below)
     if intent == "HELP":
-        line_bot_api.reply_message(event.reply_token, build_help_flex())
+        line_bot_api.reply_message(event.reply_token, build_help_flex(lang=session.language))
+        return
+
+    # FULL_GUIDE — the actual detailed manual, opened from the cover card's button.
+    # Previously build_full_guide_flex() was defined but never wired to anything,
+    # so tapping "เปิดคู่มือ"/"open guide" fell through to the AI fallback instead
+    # of showing the guide it promised.
+    if intent == "FULL_GUIDE":
+        line_bot_api.reply_message(event.reply_token, build_full_guide_flex(lang=session.language))
         return
 
     # FAQ (Google search with grounding)
@@ -2187,6 +2195,32 @@ def health_check():
         "service": "FLOODCARE AI",
         "timestamp": get_bangkok_time().isoformat(),
     }), 200
+
+
+@app.route("/debug/water-alert/run-now", methods=["POST"])
+@_require_debug_key()
+def debug_run_water_alert_now():
+    """
+    Forces one full water-refresh + alert cycle immediately instead of
+    waiting for the background loop's next 10-minute tick — for testing the
+    Water Alert Engine on demand. Protected the same way as /debug/status
+    (DEBUG_KEY). See the testing guide for how to use this alongside
+    Water_Alert_State edits to simulate a station crossing into มาก/ล้นตลิ่ง.
+    """
+    stations = get_live_water_levels_from_api()
+    if not stations:
+        return jsonify({"success": False, "error": "ThaiWater fetch returned no stations"}), 502
+
+    written = sheets_mgr.overwrite_water_levels(stations)
+    if not written:
+        return jsonify({"success": False, "error": "Failed to write Water_Levels sheet"}), 500
+
+    result = bot_config.run_water_alert_engine(stations)
+    return jsonify({
+        "success": True,
+        "stations_fetched": len(stations),
+        "alert_result": result,
+    })
 
 
 @app.route("/debug/status")
