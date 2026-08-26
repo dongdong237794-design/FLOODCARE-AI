@@ -488,7 +488,21 @@ class IntentClassifier:
             "ทำอะไรได้บ้าง", "ทำอะไรได้", "มีอะไรบ้าง", "ช่วยอะไรได้บ้าง", "ใช้งานยังไง", 
             "ใช้งานอย่างไร", "วิธีใช้", "วิธีการใช้งาน", "วิธีใช้งาน", "คู่มือการใช้งาน",
             "สอนใช้งาน", "แนะนำการใช้งาน", "เมนู", "menu", "help",
-            "what can you do", "capabilities", "คุณคือใคร", "คุณทำอะไรได้"
+            "what can you do", "capabilities", "คุณคือใคร", "คุณทำอะไรได้",
+            # Self-introduction: this is a fixed fact about the bot itself,
+            # not something that needs (or benefits from) a Google Search —
+            # routing it here instead of AI_QUERY avoids a search-grounded
+            # answer showing up with an irrelevant citation attached.
+            "แนะนำตัว", "แนะนำตัวเอง", "introduce yourself", "who are you", "about you", "tell me about yourself"
+        ],
+        # Distinct from HELP on purpose: this is the exact text the cover
+        # card's button sends back ("เปิดคู่มือ"), AND the text the Rich Menu
+        # button should be configured to send directly ("คู่มือฉบับเต็ม") —
+        # both skip straight to the full carousel. If either shared the HELP
+        # list, tapping would just re-show the cover card instead of opening
+        # the actual detailed guide.
+        "FULL_GUIDE": [
+            "เปิดคู่มือ", "open guide", "คู่มือฉบับเต็ม", "full guide"
         ],
         "FAQ": [
             "คำถามยอดฮิต", "คำถามที่พบบ่อย", "faq", "คำถามทั่วไป", "อยากรู้เรื่อง", "บอกข้อมูล", 
@@ -497,6 +511,17 @@ class IntentClassifier:
         ],
     }
     
+    # Words that would otherwise substring-match into WEATHER via "อากาศ"
+    # (air/atmosphere) but ask something WEATHER's flow can't actually
+    # answer — it only fetches temperature/rain/wind, not air-quality
+    # readings. Left unclassified here, these fall through to the AI
+    # classifier and get a real searched answer (AI_QUERY/FAQ) instead of
+    # a location prompt that leads to weather data that doesn't address
+    # what was actually asked.
+    _AIR_QUALITY_TERMS = [
+        "pm2.5", "pm 2.5", "pm2", "ฝุ่น", "คุณภาพอากาศ", "aqi", "มลพิษทางอากาศ", "หมอกควัน"
+    ]
+
     @classmethod
     def classify(cls, text: str) -> Tuple[str, float]:
         if not text:
@@ -504,6 +529,7 @@ class IntentClassifier:
         
         text_lower = text.strip().lower()
         text_clean = text_lower.strip("!.,😊🙏👋🆘 ")
+        is_air_quality = any(term in text_clean for term in cls._AIR_QUALITY_TERMS)
         
         PRIORITY_INTENTS = ["EMERGENCY", "SOS", "SNAKE_BITE"]
         for intent in PRIORITY_INTENTS:
@@ -521,6 +547,8 @@ class IntentClassifier:
         
         for intent, keywords in cls.PATTERNS.items():
             if intent in PRIORITY_INTENTS:
+                continue
+            if intent == "WEATHER" and is_air_quality:
                 continue
             for keyword in keywords:
                 kw_lower = keyword.lower()
@@ -577,7 +605,10 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "- ACCIDENT: อุบัติเหตุ บาดเจ็บ\n"
     "- PREP_GUIDE: ถามวิธีเตรียมตัวรับมือน้ำท่วมล่วงหน้า\n"
     "- GREETING: ทักทาย\n"
-    "- HELP: ถามว่าบอททำอะไรได้บ้าง/วิธีใช้งาน\n"
+    "- HELP: ถามว่าบอททำอะไรได้บ้าง/วิธีใช้งาน หรือขอให้บอทแนะนำตัวเอง/บอกว่าตัวเองคือใคร "
+    "(เช่น \\\"แนะนำตัวหน่อย\\\" \\\"คุณคือใคร\\\" \\\"introduce yourself\\\") — กรณีเหล่านี้เป็นข้อเท็จจริงคงที่เกี่ยวกับตัวบอทเอง "
+    "ไม่ต้องค้นหาข้อมูลใดๆ จึงต้องจัดเป็น HELP เสมอ ห้ามจัดเป็น AI_QUERY หรือ FAQ เด็ดขาด "
+    "เพราะ intent เหล่านั้นจะถูกบังคับให้ค้นหาและแนบแหล่งอ้างอิงมาด้วย ซึ่งไม่มีอะไรให้ค้นหาจริงๆ และจะได้แหล่งอ้างอิงที่ไม่เกี่ยวข้องมาแทน\n"
     "- CONTACT: ขอเบอร์โทรฉุกเฉิน/หน่วยงาน\n"
     "- SHELTER: ถามเกี่ยวกับศูนย์พักพิง/ที่อพยพ/ที่ควรไปหลบภัย รวมถึงคำถามที่ไม่ได้พูดคำว่า 'ศูนย์พักพิง' ตรงๆ "
     "แต่ความหมายคือต้องการรู้ว่าตนเอง ณ ตอนนี้ควรไปที่ไหน/อพยพไปทางไหน (เช่น \"ตอนนี้ผมควรอพยพไปที่ไหน\", "
@@ -590,7 +621,10 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "สถานที่ที่ระบุชื่อเจาะจง (เช่น \"หาดใหญ่\" \"อำเภอเมืองสงขลา\") แม้จะเป็นจุดเดียวไม่ใช่ภาพรวมทั้งภาค/จังหวัดก็ตาม "
     "— กติกาคือ: มีชื่อสถานที่ระบุมาในคำถามชัดเจน = GENERAL เสมอ (ค้นหาข้อมูลเกี่ยวกับที่นั้นแทนการขอพิกัดผู้ใช้), "
     "ไม่มีชื่อสถานที่และหมายถึงตัวผู้ใช้เอง = NEARBY (ต้องขอพิกัดผู้ใช้จริง)\n"
-    "- WEATHER: ถามสภาพอากาศ/พยากรณ์อากาศ\n"
+    "- WEATHER: ถามสภาพอากาศ/พยากรณ์อากาศ (อุณหภูมิ ฝน ลม) เท่านั้น — ห้ามรวมคำถามเกี่ยวกับฝุ่น PM2.5/PM2/"
+    "คุณภาพอากาศ/AQI/หมอกควัน/มลพิษทางอากาศ เพราะระบบสภาพอากาศของบอทดึงได้แค่อุณหภูมิ/ฝน/ลม ไม่มีข้อมูลฝุ่นเลย "
+    "ถ้าจัดเป็น WEATHER ผู้ใช้จะถูกขอพิกัดแล้วได้รายงานอุณหภูมิ/ฝนกลับมาซึ่งไม่ตรงกับคำถามฝุ่นที่ถามจริง "
+    "ให้จัดคำถามเกี่ยวกับฝุ่น/คุณภาพอากาศเป็น AI_QUERY แทนเสมอ (จะได้ค้นหาคำตอบจริงจากอินเทอร์เน็ตให้)\n"
     "- REGISTRATION: ต้องการลงทะเบียนข้อมูลส่วนตัว\n"
     "- LANGUAGE: ต้องการเปลี่ยนภาษา\n"
     "- CANCEL: ต้องการยกเลิก/หยุดขั้นตอนที่ทำอยู่\n"
@@ -2817,45 +2851,217 @@ def build_my_cases_flex_message(cases: list, base_url: str) -> FlexSendMessage:
 
 def build_help_flex(lang="TH"):
     """
-    Capabilities / help menu.
-    Perfectly aligned to IMG_8355.jpeg specifications.
+    Guide "cover card" — the entry point shown when someone taps the Rich
+    Menu's manual button or types a help keyword. Deliberately a single,
+    graphic-forward bubble (banner + big title + one clear button) rather
+    than a dense list, mirroring the "tap here for the full guide" pattern
+    the product team asked for: this card's only job is to invite the tap
+    that opens build_full_guide_flex() below, which carries the real detail.
     """
-    items = [
-        ("🆘", "แจ้งเหตุฉุกเฉิน", "พิมพ์ 'sos'"),
-        ("📦", "ขอความช่วยเหลือเรื่องสิ่งของ", "พิมพ์ 'ขอของ'"),
-        ("📍", "ติดตามเคสที่แจ้งไปแล้ว", "พิมพ์ 'ติดตามเคส'"),
-        ("🌊", "เช็คระดับน้ำใกล้คุณ", "พิมพ์ 'เช็คระดับน้ำ' แล้วแชร์พิกัด"),
-        ("🌦️", "เช็คสภาพอากาศ", "พิมพ์ 'สภาพอากาศ' แล้วแชร์พิกัด"),
-        ("🏠", "หาศูนย์พักพิงใกล้คุณ", "พิมพ์ 'ศูนย์พักพิง' แล้วแชร์พิกัด"),
-        ("🎒", "วิธีเตรียมตัวก่อนน้ำท่วม", "พิมพ์ 'วิธีเตรียมตัว'"),
-        ("☎️", "เบอร์ติดต่อฉุกเฉิน", "พิมพ์ 'เบอร์โทร'"),
-        ("📝", "ลงทะเบียนข้อมูลของคุณ", "พิมพ์ 'ลงทะเบียน'"),
-        ("🌐", "เปลี่ยนภาษา", "พิมพ์ 'เปลี่ยนภาษา'"),
+    copy = {
+        "TH": {
+            "alt": "📖 คู่มือการใช้งาน FLOODCARE AI",
+            "eyebrow": "คู่มือการใช้งาน",
+            "title": "FLOODCARE AI",
+            "desc": "ทุกฟีเจอร์ที่ช่วยคุณผ่านสถานการณ์น้ำท่วม อธิบายทีละขั้นตอน แจ้งเหตุฉุกเฉิน ขอความช่วยเหลือ หาศูนย์พักพิง และอีกมากมาย",
+            "cta": "👉 กดเพื่อเปิดคู่มือฉบับเต็ม",
+        },
+        "EN": {
+            "alt": "📖 FLOODCARE AI User Guide",
+            "eyebrow": "USER GUIDE",
+            "title": "FLOODCARE AI",
+            "desc": "Every feature that helps you through a flood, explained step by step — emergency reports, requesting help, finding shelters, and more.",
+            "cta": "👉 Tap to open the full guide",
+        },
+    }
+    c = copy.get(lang, copy["TH"])
+
+    hero = None
+    hero_url = hero_image_url("guide_banner.jpg")
+    if hero_url:
+        hero = ImageComponent(url=hero_url, size="full", aspect_ratio="20:13", aspect_mode="cover")
+
+    body_contents = [
+        TextComponent(text=c["eyebrow"], size="xs", color="#F97316", weight="bold"),
+        TextComponent(text=c["title"], weight="bold", size="xxl", color="#14181F", margin="xs"),
+        TextComponent(text=c["desc"], size="sm", color="#6B7280", wrap=True, margin="md"),
     ]
-    contents = [
-        TextComponent(text="🤖 FLOODCARE AI ทำอะไรได้บ้าง", weight="bold", size="lg", color="#1F2937"),
-        SeparatorComponent(margin="md"),
-    ]
-    for icon, title, how in items:
-        contents.append(
-            BoxComponent(
-                layout="horizontal", margin="md", spacing="sm",
+
+    return FlexSendMessage(
+        alt_text=c["alt"],
+        contents=BubbleContainer(
+            hero=hero,
+            body=BoxComponent(layout="vertical", padding_all="20px", spacing="sm", contents=body_contents),
+            footer=BoxComponent(
+                layout="vertical", padding_all="20px", padding_top="0px",
                 contents=[
-                    TextComponent(text=icon, size="md", flex=0),
-                    BoxComponent(
-                        layout="vertical", flex=1,
-                        contents=[
-                            TextComponent(text=title, size="sm", weight="bold", color="#1F2937"),
-                            TextComponent(text=how, size="xs", color="#6B7280"),
-                        ]
+                    ButtonComponent(
+                        action=MessageAction(label=c["cta"], text="เปิดคู่มือ" if lang != "EN" else "open guide"),
+                        style="primary", color="#F97316", height="md",
                     )
                 ]
-            )
+            ),
         )
-    return FlexSendMessage(
-        alt_text="🤖 FLOODCARE AI ทำอะไรได้บ้าง",
-        contents=BubbleContainer(body=BoxComponent(layout="vertical", contents=contents))
     )
+
+
+def build_full_guide_flex(lang="TH"):
+    """
+    The full manual, opened by tapping the cover card above. A Carousel
+    instead of one long bubble — LINE's Flex bubbles don't scroll their own
+    body content, so a topic-per-page carousel is the only layout that lets
+    someone read a thorough guide without everything getting truncated.
+    Each page ends with a real, working button (the exact keyword that
+    already triggers that feature elsewhere in the bot), so "try it" is
+    never a dead end.
+    """
+    TH = lang != "EN"
+
+    def page(icon, title, subtitle, steps, btn_label, btn_text, accent="#F97316"):
+        body = [
+            BoxComponent(
+                layout="horizontal", spacing="md", contents=[
+                    BoxComponent(
+                        layout="vertical", width="44px", height="44px", corner_radius="12px",
+                        background_color=accent, justify_content="center", align_items="center",
+                        contents=[TextComponent(text=icon, size="xl", align="center", gravity="center")],
+                    ),
+                    BoxComponent(
+                        layout="vertical", justify_content="center", contents=[
+                            TextComponent(text=title, weight="bold", size="lg", color="#14181F", wrap=True),
+                            TextComponent(text=subtitle, size="xxs", color="#9CA3AF", wrap=True),
+                        ]
+                    ),
+                ]
+            ),
+            SeparatorComponent(margin="lg"),
+        ]
+        for i, step in enumerate(steps, 1):
+            body.append(
+                BoxComponent(
+                    layout="horizontal", margin="lg", spacing="sm", contents=[
+                        BoxComponent(
+                            layout="vertical", width="22px", height="22px", corner_radius="11px",
+                            background_color="#F1F0EC", justify_content="center", align_items="center",
+                            contents=[TextComponent(text=str(i), size="xs", weight="bold", color="#6B7280", align="center")],
+                        ),
+                        TextComponent(text=step, size="sm", color="#374151", wrap=True, flex=1),
+                    ]
+                )
+            )
+        return BubbleContainer(
+            size="mega",
+            # Fixed height (not auto) is what makes every card in the carousel
+            # come out the same total size regardless of whether a page has
+            # 3 or 4 steps — without this, shorter pages render a shorter
+            # bubble and the button ends up sitting at a different vertical
+            # position on each card instead of lining up across the row.
+            body=BoxComponent(layout="vertical", padding_all="20px", height="440px", contents=body),
+            footer=BoxComponent(
+                layout="vertical", padding_all="20px", padding_top="0px", contents=[
+                    ButtonComponent(action=MessageAction(label=btn_label, text=btn_text), style="primary", color=accent, height="sm")
+                ]
+            ) if btn_text else None,
+        )
+
+    if TH:
+        pages = [
+            page("🤖", "FLOODCARE AI คืออะไร", "ผู้ช่วยรับมือน้ำท่วมของคุณ ทำงานผ่าน LINE ตลอด 24 ชั่วโมง", [
+                "แจ้งเหตุฉุกเฉินและขอความช่วยเหลือได้ทันที ไม่ต้องโทรหาใคร",
+                "เช็คระดับน้ำ สภาพอากาศ และหาศูนย์พักพิงใกล้คุณ",
+                "ถามอะไรก็ได้เกี่ยวกับสถานการณ์น้ำท่วม ระบบตอบด้วย AI พร้อมแหล่งอ้างอิง",
+                "เลื่อนดูหน้าถัดไปเพื่อดูวิธีใช้ทีละฟีเจอร์",
+            ], "เมนูหลัก", "เมนู", "#14181F"),
+            page("🆘", "แจ้งเหตุฉุกเฉิน (SOS)", "ใช้เมื่อคุณหรือคนใกล้ตัวติดอยู่ในพื้นที่น้ำท่วมและต้องการความช่วยเหลือด่วน", [
+                "พิมพ์ 'sos' หรือกดปุ่ม SOS บนเมนูด้านล่าง",
+                "กรอกข้อมูล ชื่อ เบอร์โทร จำนวนคน และแชร์พิกัดที่อยู่ปัจจุบัน",
+                "ระบุว่ามีผู้ป่วยติดเตียงหรือสัตว์เลี้ยงหรือไม่ เพื่อให้ทีมกู้ภัยเตรียมพร้อม",
+                "ระบบจะส่งเคสให้ทีมอาสาสมัครทันที และคุณจะได้รับหมายเลขเคสไว้ติดตามสถานะ",
+            ], "🆘 แจ้งเหตุ SOS", "sos", "#EF4444"),
+            page("📦", "ขอความช่วยเหลือเรื่องสิ่งของ", "สำหรับของจำเป็น เช่น อาหาร น้ำดื่ม ยา ที่ไม่ใช่เหตุฉุกเฉินถึงชีวิต", [
+                "พิมพ์ 'ขอของ' เพื่อเริ่มแจ้งความต้องการ",
+                "เลือกประเภทสิ่งของที่ต้องการ ระบุรายละเอียดเพิ่มเติมได้",
+                "แชร์พิกัดที่อยู่ เพื่อให้อาสาสมัครนำของไปส่งถูกจุด",
+                "ติดตามสถานะคำขอได้ตลอดผ่านเมนู 'ติดตามเคส'",
+            ], "📦 ขอความช่วยเหลือ", "ขอของ", "#F97316"),
+            page("🏠", "ค้นหาศูนย์พักพิง", "หากต้องอพยพออกจากบ้าน ใช้ฟีเจอร์นี้เพื่อหาที่พักที่ใกล้และยังมีที่ว่าง", [
+                "พิมพ์ 'ศูนย์พักพิง' แล้วแชร์พิกัดปัจจุบันของคุณ",
+                "ระบบจะแสดงศูนย์ที่ใกล้ที่สุด พร้อมจำนวนที่ว่างและสิ่งอำนวยความสะดวก เช่น ไฟฟ้า ห้องน้ำ รับสัตว์เลี้ยง",
+                "กดปุ่มนำทางในการ์ดเพื่อเปิด Google Maps ไปยังศูนย์นั้นได้ทันที",
+            ], "🏠 ศูนย์พักพิงใกล้ฉัน", "ศูนย์พักพิง", "#22C55E"),
+            page("📍", "ติดตามเคสของคุณ", "เช็คได้ตลอดเวลาว่าเคส SOS หรือคำขอสิ่งของที่แจ้งไปถึงไหนแล้ว", [
+                "พิมพ์ 'ติดตามเคส' เพื่อดูรายการเคสทั้งหมดที่คุณเคยแจ้ง",
+                "สถานะจะอัปเดตแบบเรียลไทม์ เช่น รอรับเคส / กำลังช่วยเหลือ / เสร็จสิ้น",
+                "หากมีอาสาสมัครรับเคสของคุณแล้ว จะเห็นชื่อผู้รับผิดชอบในการ์ดด้วย",
+            ], "📍 ติดตามเคส", "ติดตามเคส", "#3B82F6"),
+            page("🌊", "แผนที่ระดับน้ำ", "ดูสถานการณ์ระดับน้ำทั่วประเทศแบบสาธารณะ พร้อมระบบแจ้งเตือนอัตโนมัติ", [
+                "พิมพ์ 'เช็คระดับน้ำ' แล้วแชร์พิกัด เพื่อดูสถานีวัดน้ำใกล้คุณ",
+                "หรือเปิดแผนที่สาธารณะแบบเต็มจอได้จากลิงก์ในเมนู",
+                "เมื่อสมัครรับแจ้งเตือน ระบบจะส่งข้อความอัตโนมัติทันทีที่ระดับน้ำใกล้บ้านคุณเปลี่ยนแปลงมาก",
+            ], "🌊 เช็คระดับน้ำ", "เช็คระดับน้ำ", "#0EA5E9"),
+            page("💬", "ถาม-ตอบกับ AI", "ถามอะไรก็ได้ที่เกี่ยวกับสถานการณ์น้ำท่วม สภาพอากาศ หรือข่าวสารล่าสุด", [
+                "พิมพ์คำถามเป็นประโยคปกติ เช่น 'น้ำท่วมหาดใหญ่ตอนนี้เป็นยังไง'",
+                "ระบบค้นหาข้อมูลล่าสุดให้อัตโนมัติ พร้อมแนบแหล่งอ้างอิงทุกครั้ง",
+                "พิมพ์ 'สภาพอากาศ' แล้วแชร์พิกัด เพื่อเช็คพยากรณ์อากาศเฉพาะจุดของคุณ",
+            ], "🌦️ เช็คสภาพอากาศ", "สภาพอากาศ", "#8B5CF6"),
+            page("🎒", "เตรียมตัว เบอร์ฉุกเฉิน และภาษา", "ฟีเจอร์เสริมที่ช่วยให้ใช้งานระบบได้เต็มที่ตามที่คุณต้องการ", [
+                "พิมพ์ 'วิธีเตรียมตัว' เพื่อดูเช็คลิสต์เตรียมพร้อมก่อนน้ำท่วมมา",
+                "พิมพ์ 'เบอร์โทร' เพื่อดูเบอร์ติดต่อหน่วยงานฉุกเฉินทั้งหมด",
+                "พิมพ์ 'เปลี่ยนภาษา' เพื่อสลับใช้งานเป็นไทย / อังกฤษ / มลายู",
+                "พิมพ์ 'ลงทะเบียน' เพื่อบันทึกข้อมูลของคุณไว้ล่วงหน้า ช่วยให้แจ้งเหตุฉุกเฉินได้เร็วขึ้น",
+            ], "🌐 เปลี่ยนภาษา", "เปลี่ยนภาษา", "#EC4899"),
+        ]
+        alt = "📖 คู่มือการใช้งาน FLOODCARE AI ฉบับเต็ม"
+    else:
+        pages = [
+            page("🤖", "What is FLOODCARE AI", "Your 24/7 flood-response assistant, right inside LINE", [
+                "Report emergencies and request help instantly — no phone call needed.",
+                "Check water levels, weather, and find nearby shelters.",
+                "Ask anything about the flood situation — answered by AI with sources.",
+                "Swipe to see how to use each feature.",
+            ], "Main menu", "menu", "#14181F"),
+            page("🆘", "Emergency Report (SOS)", "Use this if you or someone nearby is trapped and needs urgent help", [
+                "Type 'sos' or tap the SOS button on the menu below.",
+                "Fill in your name, phone, number of people, and share your current location.",
+                "Note if anyone is bedridden or if you have pets, so responders can prepare.",
+                "Your case is sent to volunteers immediately, and you'll get a case number to track it.",
+            ], "🆘 Report SOS", "sos", "#EF4444"),
+            page("📦", "Request Supplies", "For essentials like food, water, or medicine — not life-threatening emergencies", [
+                "Type 'need supplies' to start your request.",
+                "Choose the category of item you need, with extra detail if useful.",
+                "Share your location so a volunteer can deliver to the right place.",
+                "Track the status anytime from the 'track' menu.",
+            ], "📦 Request supplies", "need supplies", "#F97316"),
+            page("🏠", "Find a Shelter", "If you need to evacuate, use this to find the nearest shelter with space", [
+                "Type 'shelter' and share your current location.",
+                "You'll see the nearest shelters, with open capacity and facilities like power, toilets, or pet-friendly space.",
+                "Tap the navigate button on any card to open Google Maps directions.",
+            ], "🏠 Nearby shelters", "shelter", "#22C55E"),
+            page("📍", "Track Your Cases", "Check anytime on the status of an SOS report or supply request you've sent", [
+                "Type 'track' to see every case you've reported.",
+                "Status updates in real time: open / in progress / completed.",
+                "Once a volunteer takes your case, their name appears on the card.",
+            ], "📍 Track my cases", "track", "#3B82F6"),
+            page("🌊", "Water Level Map", "See flood conditions nationwide, plus automatic alerts near you", [
+                "Type 'water level' and share your location to see nearby monitoring stations.",
+                "Or open the full public map from the link in the menu.",
+                "Once subscribed, you'll get an automatic message the moment water levels near you change significantly.",
+            ], "🌊 Check water level", "water level", "#0EA5E9"),
+            page("💬", "Ask the AI", "Ask anything about the flood situation, weather, or latest news", [
+                "Type a normal question, e.g. 'what's the flood situation in Hat Yai right now'.",
+                "The system searches for current information automatically, with sources attached.",
+                "Type 'weather' and share your location for a forecast specific to you.",
+            ], "🌦️ Check weather", "weather", "#8B5CF6"),
+            page("🎒", "Prep, Hotlines & Language", "A few extra features to get the most out of the system", [
+                "Type 'how to prepare' for a pre-flood readiness checklist.",
+                "Type 'hotline' for a list of every emergency contact number.",
+                "Type 'change language' to switch between Thai / English / Malay.",
+                "Type 'register' to save your details in advance, so future SOS reports go even faster.",
+            ], "🌐 Change language", "change language", "#EC4899"),
+        ]
+        alt = "📖 FLOODCARE AI — Full User Guide"
+
+    return FlexSendMessage(alt_text=alt, contents=CarouselContainer(contents=pages))
 
 
 def build_faq_response_flex(answer: str, sources: list, question: str, lang="TH"):
