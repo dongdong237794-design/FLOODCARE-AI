@@ -385,6 +385,44 @@ def handle_follow(event):
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
+    """
+    Thin, crash-proof wrapper around _handle_text_message_inner().
+    Without this, any unhandled exception in the real handler (Gemini call,
+    Flex message build, expired reply token, etc.) propagates all the way
+    up through handler.handle() to the /callback route — which only catches
+    InvalidSignatureError — resulting in a bare HTTP 500 and, critically,
+    NO message ever reaching the user in LINE. This wrapper guarantees the
+    user always gets *something* back instead of silence, and logs the
+    real error for debugging.
+    """
+    try:
+        _handle_text_message_inner(event)
+    except Exception as e:
+        user_id = getattr(event.source, "user_id", None)
+        Logger.error(
+            "Message",
+            f"Unhandled exception in handle_text_message: {e}",
+            {"user": bot_config.hash_user_id(user_id) if user_id else "unknown"}
+        )
+        fallback_text = (
+            "ขออภัยครับ ระบบขัดข้องชั่วคราวขณะประมวลผลข้อความนี้ "
+            "รบกวนลองพิมพ์ใหม่อีกครั้งนะครับ หากเป็นเหตุฉุกเฉิน โทร ปภ. 1784 ได้ทันทีครับ"
+        )
+        # The reply_token from this event may already be consumed/expired
+        # (that's often *why* the exception happened), so reply_message can
+        # itself fail here — fall back to push_message, which doesn't need
+        # a reply_token at all, so the user still gets a message either way.
+        try:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=fallback_text))
+        except Exception:
+            try:
+                if user_id:
+                    line_bot_api.push_message(user_id, TextSendMessage(text=fallback_text))
+            except Exception as push_err:
+                Logger.error("Message", f"Fallback push_message also failed: {push_err}")
+
+
+def _handle_text_message_inner(event):
     start_time = time.time()
     user_text = sanitize_text(event.message.text.strip())
     user_id = event.source.user_id
@@ -466,6 +504,14 @@ def handle_text_message(event):
         intent, confidence = IntentClassifier.classify(user_text)
         scope = "MENU"
     else:
+        # Show the LINE typing indicator up front, before the classify+
+        # answer call — not just in the two-step fallback below. The
+        # combined call (classify_and_maybe_answer) is the path almost all
+        # free-text messages take and is itself a multi-second Gemini +
+        # Google Search round-trip, so without this the indicator never
+        # appeared for the common case, only for the rarer fallback.
+        show_loading_animation(user_id, loading_seconds=30)
+
         # Try the single-round-trip combined call first (classify + draft
         # answer together) — cuts typical latency roughly in half for FAQ/
         # AI_QUERY messages. Falls back to the original two-step flow below
@@ -920,7 +966,17 @@ def _handle_faq_query(event, user_id, user_text, timestamp, pre_answer=None):
             answer = "ขออภัยครับ ไม่พบข้อมูลเกี่ยวกับภัยพิบัติหรือความปลอดภัยในคำถามนี้ กรุณาลองสอบถามใหม่อีกครั้งครับ"
 
     flex_msg = build_faq_response_flex(answer, sources, user_text)
-    line_bot_api.reply_message(event.reply_token, flex_msg)
+    try:
+        line_bot_api.reply_message(event.reply_token, flex_msg)
+    except Exception as e:
+        # reply_token can expire while the Gemini/search call above was
+        # running — push_message doesn't need a reply_token, so this is
+        # what keeps the user from getting silence instead of an answer.
+        Logger.error("FAQ", f"reply_message failed ({e}), falling back to push_message")
+        try:
+            line_bot_api.push_message(user_id, flex_msg)
+        except Exception as push_err:
+            Logger.error("FAQ", f"Fallback push_message also failed: {push_err}")
 
     try:
         sheets_mgr.batch_append("AI_Logs", [[
@@ -963,7 +1019,14 @@ def _handle_ai_query(event, user_id, user_text, timestamp, pre_answer=None):
     else:
         flex_msg = build_ai_response_flex(ai_response, user_text)
 
-    line_bot_api.reply_message(event.reply_token, flex_msg)
+    try:
+        line_bot_api.reply_message(event.reply_token, flex_msg)
+    except Exception as e:
+        Logger.error("AI", f"reply_message failed ({e}), falling back to push_message")
+        try:
+            line_bot_api.push_message(user_id, flex_msg)
+        except Exception as push_err:
+            Logger.error("AI", f"Fallback push_message also failed: {push_err}")
 
     try:
         sheets_mgr.batch_append("AI_Logs", [[
@@ -1756,27 +1819,201 @@ _DASHBOARD_LOGIN_HTML = """
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>เข้าสู่ระบบ - FLOODCARE Dashboard</title>
 <style>
-  :root{--bg:#F6F4EF;--surface:#FFFFFF;--ink:#15151A;--muted:#8C8980;--line:#EAE6DF;--primary:#2F6F8F;}
+  :root{
+    --ink:#0F172A; --muted:#64748B; --faint:#94A3B8;
+    --bg-a:#F8FAFC; --bg-b:#F1F0EC; --surface:#FFFFFF;
+    --accent:#F97316; --accent-dark:#EA580C; --accent-light:#FFF7ED;
+    --line:rgba(15,23,42,.08); --crit:#EF4444; --crit-bg:#FEF2F2;
+    --shadow-lg:0 20px 25px -5px rgba(15,23,42,.12), 0 8px 10px -6px rgba(15,23,42,.05);
+  }
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Sukhumvit Set',sans-serif;background:var(--bg);
-       min-height:100vh;display:flex;align-items:center;justify-content:center;color:var(--ink);}
-  .box{background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:40px 32px;width:320px;}
-  h1{font-size:20px;font-weight:700;margin-bottom:6px;}
-  p{font-size:13px;color:var(--muted);margin-bottom:24px;}
-  input{width:100%;height:48px;border:1px solid var(--line);border-radius:12px;padding:0 14px;font-size:16px;margin-bottom:14px;}
-  input:focus{outline:none;border-color:var(--primary);}
-  button{width:100%;height:48px;border:none;border-radius:12px;background:var(--primary);color:#fff;font-size:16px;font-weight:600;cursor:pointer;}
-  .error{color:#C2452F;font-size:13px;margin-bottom:14px;}
+  html,body{height:100%;}
+  body{
+    font-family:'Sarabun',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:linear-gradient(160deg,var(--bg-a) 0%,var(--bg-b) 100%);
+    min-height:100vh;display:flex;align-items:center;justify-content:center;
+    color:var(--ink);position:relative;overflow:hidden;padding:24px;
+  }
+
+  /* ── Signature element: a slow, quiet water-level line along the floor
+     of the viewport. Two offset sine waves drifting at different speeds,
+     rendered once in inline SVG (no image/CDN dependency), tying the
+     login screen to what the product actually does — watching water
+     levels — without being literal or decorative for its own sake. ── */
+  .waves{position:fixed;left:0;right:0;bottom:0;width:100%;height:22vh;min-height:140px;
+    pointer-events:none;z-index:0;}
+  .waves svg{position:absolute;bottom:0;left:0;width:200%;height:100%;}
+  .wave-back{opacity:.5;animation:drift 26s linear infinite;}
+  .wave-front{opacity:.9;animation:drift 17s linear infinite reverse;}
+  @keyframes drift{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+  @media (prefers-reduced-motion:reduce){
+    .wave-back,.wave-front{animation:none;}
+  }
+
+  .frame{position:relative;z-index:1;width:100%;max-width:376px;}
+
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;justify-content:center;}
+  .brand-mark{width:34px;height:34px;border-radius:10px;background:var(--accent-light);
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .brand-name{font-size:14px;font-weight:700;letter-spacing:.02em;color:var(--ink);}
+  .brand-sub{font-size:11px;color:var(--faint);letter-spacing:.01em;}
+
+  .box{
+    background:var(--surface);border:1px solid var(--line);border-radius:20px;
+    padding:36px 32px 32px;box-shadow:var(--shadow-lg);
+  }
+  .box.shake{animation:shake .38s ease;}
+  @keyframes shake{
+    10%,90%{transform:translateX(-1px);} 20%,80%{transform:translateX(2px);}
+    30%,50%,70%{transform:translateX(-4px);} 40%,60%{transform:translateX(4px);}
+  }
+  @media (prefers-reduced-motion:reduce){ .box.shake{animation:none;} }
+
+  .eyebrow{font-size:11px;font-weight:600;color:var(--accent-dark);letter-spacing:.08em;
+    text-transform:uppercase;margin-bottom:8px;}
+  h1{font-size:21px;font-weight:700;margin-bottom:6px;letter-spacing:-.01em;}
+  p.sub{font-size:13px;color:var(--muted);margin-bottom:26px;line-height:1.5;}
+
+  .field{margin-bottom:16px;}
+  .field-label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:7px;}
+  .input-wrap{position:relative;}
+  input{
+    width:100%;height:48px;border:1.5px solid var(--line);border-radius:12px;
+    padding:0 44px 0 14px;font-size:15px;color:var(--ink);background:var(--surface);
+    transition:border-color .15s ease, box-shadow .15s ease;
+  }
+  input::placeholder{color:var(--faint);}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);}
+  input:focus-visible{outline:2px solid var(--accent-dark);outline-offset:2px;}
+
+  .toggle-pw{
+    position:absolute;right:6px;top:50%;transform:translateY(-50%);
+    width:36px;height:36px;border:none;background:transparent;border-radius:8px;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--faint);
+  }
+  .toggle-pw:hover{background:var(--accent-light);color:var(--accent-dark);}
+  .toggle-pw:focus-visible{outline:2px solid var(--accent-dark);outline-offset:1px;}
+  .toggle-pw svg{width:19px;height:19px;}
+
+  .error{
+    display:flex;align-items:flex-start;gap:8px;background:var(--crit-bg);color:#B91C1C;
+    font-size:13px;line-height:1.5;padding:11px 13px;border-radius:10px;margin-bottom:16px;
+  }
+  .error svg{width:16px;height:16px;flex-shrink:0;margin-top:1px;}
+
+  button.submit{
+    width:100%;height:48px;border:none;border-radius:12px;background:var(--accent);
+    color:#fff;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:.01em;
+    display:flex;align-items:center;justify-content:center;gap:9px;
+    transition:background .15s ease, transform .1s ease;margin-top:4px;
+  }
+  button.submit:hover{background:var(--accent-dark);}
+  button.submit:active{transform:scale(.985);}
+  button.submit:focus-visible{outline:2px solid var(--accent-dark);outline-offset:2px;}
+  button.submit:disabled{opacity:.75;cursor:default;}
+
+  .spinner{width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(255,255,255,.4);
+    border-top-color:#fff;display:none;animation:spin .7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  button.submit.loading .spinner{display:inline-block;}
+  button.submit.loading .btn-text{opacity:.85;}
+
+  .foot-note{margin-top:22px;text-align:center;font-size:12px;color:var(--faint);}
 </style>
 </head>
 <body>
-  <form class="box" method="post">
-    <h1>FLOODCARE Dashboard</h1>
-    <p>สำหรับเจ้าหน้าที่เท่านั้น</p>
-    {% if error %}<div class="error">{{ error }}</div>{% endif %}
-    <input type="password" name="password" placeholder="รหัสผ่าน" autofocus required>
-    <button type="submit">เข้าสู่ระบบ</button>
-  </form>
+
+  <div class="waves" aria-hidden="true">
+    <svg class="wave-back" viewBox="0 0 800 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0,55 C100,85 200,25 300,55 C400,85 500,25 600,55 C700,85 800,25 900,55 C1000,85 1100,25 1200,55 C1300,85 1400,25 1500,55 C1600,85 1700,25 1800,55 L1800,100 L0,100 Z" fill="#CBD5E1" fill-opacity="0.45"/>
+    </svg>
+    <svg class="wave-front" viewBox="0 0 800 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0,65 C120,35 240,90 360,60 C480,30 600,85 720,58 C840,32 960,88 1080,62 C1200,35 1320,86 1440,60 C1560,34 1680,84 1800,60 L1800,100 L0,100 Z" fill="#F97316" fill-opacity="0.14"/>
+    </svg>
+  </div>
+
+  <div class="frame">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C12 2 5 10.5 5 15.5C5 19.09 8.13 22 12 22C15.87 22 19 19.09 19 15.5C19 10.5 12 2 12 2Z"
+                stroke="#EA580C" stroke-width="1.8" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">FLOODCARE</div>
+        <div class="brand-sub">ระบบเฝ้าระวังและช่วยเหลือภัยน้ำท่วม</div>
+      </div>
+    </div>
+
+    <form class="box{{ ' shake' if error else '' }}" method="post" id="loginForm" novalidate>
+      <div class="eyebrow">สำหรับเจ้าหน้าที่</div>
+      <h1>เข้าสู่ระบบ Dashboard</h1>
+      <p class="sub">กรอกรหัสผ่านเจ้าหน้าที่เพื่อดูเคส SOS คำขอความช่วยเหลือ และศูนย์พักพิงแบบเรียลไทม์</p>
+
+      {% if error %}
+      <div class="error" role="alert">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 9v4m0 4h.01M10.29 3.86l-8.18 14.18A1.5 1.5 0 003.4 20.5h17.2a1.5 1.5 0 001.29-2.46L13.71 3.86a1.5 1.5 0 00-2.42 0z"
+                stroke="#B91C1C" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>{{ error }}</span>
+      </div>
+      {% endif %}
+
+      <div class="field">
+        <label class="field-label" for="password">รหัสผ่าน</label>
+        <div class="input-wrap">
+          <input type="password" id="password" name="password" placeholder="กรอกรหัสผ่าน"
+                 autofocus required autocomplete="current-password">
+          <button type="button" class="toggle-pw" id="togglePw" aria-label="แสดงรหัสผ่าน" aria-pressed="false">
+            <svg id="eyeIcon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class="submit" id="submitBtn">
+        <span class="spinner"></span>
+        <span class="btn-text">เข้าสู่ระบบ</span>
+      </button>
+    </form>
+
+    <div class="foot-note">เข้าถึงได้เฉพาะเจ้าหน้าที่ที่ได้รับอนุญาตเท่านั้น</div>
+  </div>
+
+<script>
+  var pwInput = document.getElementById('password');
+  var toggleBtn = document.getElementById('togglePw');
+  var eyeIcon = document.getElementById('eyeIcon');
+  toggleBtn.addEventListener('click', function () {
+    var showing = pwInput.type === 'text';
+    pwInput.type = showing ? 'password' : 'text';
+    toggleBtn.setAttribute('aria-pressed', String(!showing));
+    toggleBtn.setAttribute('aria-label', showing ? 'แสดงรหัสผ่าน' : 'ซ่อนรหัสผ่าน');
+    eyeIcon.innerHTML = showing
+      ? '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/>'
+      : '<path d="M3 3l18 18M10.6 10.7a3 3 0 004.1 4.1M6.5 6.6C4 8.3 2 12 2 12s3.5 7 10 7c1.9 0 3.5-.5 4.9-1.3M17.9 17.9C20.4 16.1 22 12 22 12s-1.2-2.4-3.3-4.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>';
+  });
+
+  var form = document.getElementById('loginForm');
+  var submitBtn = document.getElementById('submitBtn');
+  form.addEventListener('submit', function () {
+    // Disabling happens after the browser has already queued the
+    // navigation for this submit event, so it only prevents a second,
+    // accidental double-click — it does not block the real submission.
+    submitBtn.classList.add('loading');
+    submitBtn.querySelector('.btn-text').textContent = 'กำลังตรวจสอบ...';
+    setTimeout(function () { submitBtn.disabled = true; }, 0);
+  });
+
+  {% if error %}
+  // Select the (wrong) password text so a re-attempt can just start typing.
+  pwInput.select();
+  {% endif %}
+</script>
 </body>
 </html>
 """
