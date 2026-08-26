@@ -594,7 +594,8 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "หน้าที่ของคุณคือวิเคราะห์ข้อความของผู้ใช้ แล้วตอบกลับเป็น JSON เท่านั้น "
     "ห้ามมีคำอธิบาย ห้ามมี markdown code fence ห้ามมีข้อความอื่นใดนอกจาก JSON object เดียว\n\n"
     "รูปแบบ JSON ที่ต้องตอบกลับเป๊ะๆ:\n"
-    '{"intent": "<ONE_OF_INTENTS>", "scope": "NEARBY หรือ GENERAL หรือ NONE", "confidence": <0.0-1.0>}\n\n'
+    '{"intent": "<ONE_OF_INTENTS>", "scope": "NEARBY หรือ GENERAL หรือ NONE", '
+    '"in_scope": <true หรือ false>, "confidence": <0.0-1.0>}\n\n'
     f"รายการ intent ที่เลือกได้: {', '.join(INTENT_LIST_AI)}\n\n"
     "คำอธิบาย intent:\n"
     "- EMERGENCY: สถานการณ์คับขันเป็นอันตรายถึงชีวิตตอนนี้ (กำลังจมน้ำ ไฟดูด ฯลฯ)\n"
@@ -632,11 +633,22 @@ INTENT_AI_SYSTEM_INSTRUCTION = (
     "- AI_QUERY: คำถามทั่วไปเกี่ยวกับน้ำท่วม/ความปลอดภัย/สุขภาพกายใจจากภัยพิบัติที่ไม่เข้าเงื่อนไขข้างต้น "
     "รวมถึงคำถามที่ไม่เกี่ยวข้องกับน้ำท่วม/ความปลอดภัยเลย (เช่น ขอเลขหวย แต่งกลอน สูตรอาหาร คำถามทั่วไปอื่นๆ) "
     "ให้จัดเป็น AI_QUERY เสมอเช่นกัน (ระบบปลายทางจะปฏิเสธอย่างสุภาพเองตามขอบเขตที่กำหนดไว้)\n\n"
+    "field \"in_scope\" (สำคัญมาก — ใช้ตัดสินว่าจะปล่อยให้ตอบจริงหรือปฏิเสธทันทีโดยไม่ต้องค้นหา/ตอบเลย):\n"
+    "ให้ in_scope=false ก็ต่อเมื่อ intent เป็น AI_QUERY หรือ FAQ เท่านั้น "
+    "และเนื้อหาคำถามไม่เกี่ยวข้องกับ 1) น้ำท่วม/อุทกภัย 2) ความปลอดภัย/การกู้ภัย 3) อุบัติเหตุ/การบาดเจ็บ/ปฐมพยาบาล "
+    "4) สุขภาพกายหรือใจที่เกี่ยวกับภัยพิบัติ เลยแม้แต่น้อย — นี่คือ 'ความรู้ทั่วไปที่ไม่เกี่ยวกับภารกิจของบอท' "
+    "เช่น ถามความยาวคอยีราฟ, จำนวนนักแข่ง F1, ผลบอล, สูตรอาหาร, ดารา, ประวัติศาสตร์ทั่วไป, คณิตศาสตร์, "
+    "โปรแกรมมิ่ง, ขอเลขหวย, แต่งกลอน ฯลฯ — คำถามความรู้ทั่วไปที่ไม่มีความเกี่ยวข้องกับภัยพิบัติแม้แต่น้อยทุกชนิด "
+    "ให้ in_scope=false เสมอ ไม่ว่าจะดูไม่เป็นอันตรายหรือตอบง่ายแค่ไหนก็ตาม ห้ามยกเว้นให้เพราะคิดว่า 'น่าจะตอบได้ไม่เสียหาย' "
+    "ส่วนกรณีอื่นทั้งหมด (intent อื่นทุกตัว หรือ AI_QUERY/FAQ ที่เกี่ยวกับ 4 หัวข้อข้างต้นจริง) ให้ in_scope=true เสมอ\n\n"
     "สำหรับ intent ที่ไม่ใช่ SHELTER หรือ WATER_LEVEL ให้ใส่ scope เป็น \"NONE\" เสมอ\n"
-    "ตัวอย่าง: \"ภาคเหนือระดับน้ำเป็นอย่างไร\" -> WATER_LEVEL / GENERAL (เพราะถามภาพรวมภูมิภาค ไม่ใช่ใกล้ตัวผู้ใช้)\n"
-    "ตัวอย่าง: \"ระดับน้ำหาดใหญ่เป็นอย่างไร\" -> WATER_LEVEL / GENERAL (ระบุชื่อสถานที่ \"หาดใหญ่\" ชัดเจน แม้เป็นจุดเดียว ก็ไม่ใช่ตำแหน่งผู้ใช้เอง จึงตอบด้วยการค้นหาแทนการขอพิกัด)\n"
-    "ตัวอย่าง: \"น้ำแถวบ้านผมเป็นไงบ้าง\" -> WATER_LEVEL / NEARBY (เพราะถามใกล้ตัวผู้ใช้ ไม่มีชื่อสถานที่)\n"
-    "ตัวอย่าง: \"ตอนนี้ผมควรอพยพไปที่ไหน\" -> SHELTER / NEARBY (แม้ไม่มีคำว่าศูนย์พักพิง แต่ความหมายคือถามหาที่ปลอดภัยใกล้ตัวตอนนี้)"
+    "ตัวอย่าง: \"ภาคเหนือระดับน้ำเป็นอย่างไร\" -> WATER_LEVEL / GENERAL / in_scope=true (เพราะถามภาพรวมภูมิภาค ไม่ใช่ใกล้ตัวผู้ใช้)\n"
+    "ตัวอย่าง: \"ระดับน้ำหาดใหญ่เป็นอย่างไร\" -> WATER_LEVEL / GENERAL / in_scope=true (ระบุชื่อสถานที่ \"หาดใหญ่\" ชัดเจน แม้เป็นจุดเดียว ก็ไม่ใช่ตำแหน่งผู้ใช้เอง จึงตอบด้วยการค้นหาแทนการขอพิกัด)\n"
+    "ตัวอย่าง: \"น้ำแถวบ้านผมเป็นไงบ้าง\" -> WATER_LEVEL / NEARBY / in_scope=true (เพราะถามใกล้ตัวผู้ใช้ ไม่มีชื่อสถานที่)\n"
+    "ตัวอย่าง: \"ตอนนี้ผมควรอพยพไปที่ไหน\" -> SHELTER / NEARBY / in_scope=true (แม้ไม่มีคำว่าศูนย์พักพิง แต่ความหมายคือถามหาที่ปลอดภัยใกล้ตัวตอนนี้)\n"
+    "ตัวอย่าง: \"ยีราฟคอยาวกี่เมตร\" -> AI_QUERY / NONE / in_scope=false (ความรู้ทั่วไปเรื่องสัตว์ ไม่เกี่ยวกับภัยพิบัติเลย)\n"
+    "ตัวอย่าง: \"นักแข่ง F1 มีกี่คน\" -> AI_QUERY / NONE / in_scope=false (ความรู้ทั่วไปเรื่องกีฬา ไม่เกี่ยวกับภัยพิบัติเลย)\n"
+    "ตัวอย่าง: \"ปวดหัวเป็นไข้ควรทำไง\" -> AI_QUERY / NONE / in_scope=true (สุขภาพกาย อาจเกี่ยวกับโรคจากน้ำสกปรกหรือช่วงภัยพิบัติ จึงยังอยู่ในขอบเขต)"
 )
 
 # =============================================================================
@@ -672,21 +684,26 @@ COMBINED_CLASSIFY_ANSWER_SYSTEM_INSTRUCTION = (
     + "\n\n"
     "หลังวิเคราะห์เจตนาแล้ว ให้ตอบกลับตามรูปแบบนี้เป๊ะๆ:\n\n"
     "บรรทัดแรก: JSON บรรทัดเดียวเท่านั้น ห้ามมี markdown code fence "
-    '{"intent": "<ONE_OF_INTENTS>", "scope": "NEARBY หรือ GENERAL หรือ NONE", "confidence": <0.0-1.0>}\n\n'
-    f"ถ้า intent ที่วิเคราะห์ได้คือ FAQ หรือ AI_QUERY เท่านั้น ให้ตามด้วยบรรทัด {_ANSWER_DELIMITER} แล้วตามด้วยคำตอบเต็ม "
-    "โดยค้นหาข้อมูลด้วย Google Search ประกอบคำตอบ และทำตามกฎการตอบต่อไปนี้อย่างเคร่งครัด:\n"
+    '{"intent": "<ONE_OF_INTENTS>", "scope": "NEARBY หรือ GENERAL หรือ NONE", '
+    '"in_scope": <true หรือ false>, "confidence": <0.0-1.0>}\n\n'
+    f"ให้ตามด้วยบรรทัด {_ANSWER_DELIMITER} แล้วตามด้วยคำตอบเต็ม ก็ต่อเมื่อเข้าเงื่อนไข **ทั้งสองข้อ** นี้พร้อมกันเท่านั้น: "
+    "(1) intent ที่วิเคราะห์ได้คือ FAQ หรือ AI_QUERY และ (2) in_scope=true "
+    "ถ้า in_scope=false (คำถามความรู้ทั่วไปที่ไม่เกี่ยวกับภัยพิบัติเลย เช่น ยีราฟ, F1, ผลบอล, สูตรอาหาร) "
+    f"ห้ามใส่ {_ANSWER_DELIMITER} หรือคำตอบใดๆ ต่อท้ายเด็ดขาด แม้ intent จะเป็น FAQ/AI_QUERY ก็ตาม "
+    "ให้จบแค่บรรทัด JSON เท่านั้น — ห้ามค้นหาข้อมูลหรือร่างคำตอบให้คำถามนอกขอบเขตเหล่านี้โดยเด็ดขาด "
+    "ระบบปลายทางจะแสดงข้อความปฏิเสธที่ตายตัวเองแทน ไม่ต้องพยายามตอบหรือปฏิเสธเองในส่วนนี้\n\n"
+    "เมื่อเข้าเงื่อนไขให้ร่างคำตอบ (intent เป็น FAQ/AI_QUERY และ in_scope=true) "
+    "ให้ค้นหาข้อมูลด้วย Google Search ประกอบคำตอบ และทำตามกฎการตอบต่อไปนี้อย่างเคร่งครัด:\n"
     "1. ห้ามใช้เครื่องหมายดอกจันเดี่ยวหรือสองชั้น (*) ในข้อความอย่างเด็ดขาด\n"
     "2. ตอบเป็นข้อๆ เสมอ ขึ้นต้นแต่ละประเด็นด้วยเลขข้อ (1. 2. 3. ...) เว้นบรรทัดระหว่างข้อ ยกเว้นคำตอบสั้นมากที่มีประเด็นเดียวให้ตอบเป็นประโยคปกติได้\n"
     "3. กระชับ ตอบเฉพาะสิ่งที่ถามจริงๆ สูงสุดไม่เกิน 4-5 ข้อ แต่ละข้อไม่เกิน 1-2 บรรทัด รวมไม่เกินประมาณ 60-80 คำ เว้นแต่จำเป็นต้องครบทุกขั้นตอนจริงๆ\n"
     "4. ห้ามระบุแหล่งที่มา/อ้างอิงในเนื้อความคำตอบเด็ดขาด ระบบจะแสดงแหล่งอ้างอิงแยกให้เอง\n"
     "5. จบประโยคให้ครบเสมอ ห้ามตัดจบกลางประโยค\n"
-    "6. ตอบเฉพาะเรื่องน้ำท่วม สภาพอากาศ ความปลอดภัย และสุขภาพกาย/ใจของผู้เจ็บป่วยหรือเครียดจากภัยพิบัติเท่านั้น "
-    "ถ้าคำถามอยู่นอกขอบเขตนี้เลย (เช่น ขอเลขหวย แต่งกลอน สูตรอาหาร) ให้ปฏิเสธอย่างสุภาพและอบอุ่นแทนการตอบคำถามนั้นจริงๆ\n"
-    "7. ก่อนตอบทุกครั้งที่มีคำตอบ (answer_part ไม่ว่าง) ต้องเรียกใช้เครื่องมือ Google Search อย่างน้อยหนึ่งครั้งเสมอ "
+    "6. ก่อนตอบทุกครั้งที่มีคำตอบ ต้องเรียกใช้เครื่องมือ Google Search อย่างน้อยหนึ่งครั้งเสมอ "
     "แม้จะคิดว่ารู้คำตอบอยู่แล้วก็ตาม ห้ามตอบจากความรู้เดิมเพียงอย่างเดียวโดยไม่ค้นหาก่อนเด็ดขาด "
     "เพราะระบบต้องมีแหล่งอ้างอิงแนบให้ผู้ใช้ตรวจสอบข้อมูลด้านความปลอดภัยได้เสมอ\n\n"
-    f"ถ้า intent ไม่ใช่ FAQ หรือ AI_QUERY ให้จบคำตอบแค่บรรทัด JSON บรรทัดเดียวเท่านั้น "
-    f"ห้ามใส่ {_ANSWER_DELIMITER} หรือคำตอบใดๆ ต่อท้ายเด็ดขาด เพราะ intent เหล่านั้นระบบอื่นจะจัดการเอง"
+    f"ถ้า intent ไม่ใช่ FAQ หรือ AI_QUERY หรือ in_scope=false ให้จบคำตอบแค่บรรทัด JSON บรรทัดเดียวเท่านั้น "
+    f"ห้ามใส่ {_ANSWER_DELIMITER} หรือคำตอบใดๆ ต่อท้ายเด็ดขาด เพราะกรณีเหล่านั้นระบบอื่นจะจัดการเอง"
 )
 
 
@@ -743,12 +760,15 @@ def classify_and_maybe_answer(text: str, lang: str = "TH"):
 
         intent = str(parsed.get("intent", "")).strip().upper()
         scope = str(parsed.get("scope", "GENERAL")).strip().upper()
+        in_scope = bool(parsed.get("in_scope", True))
         confidence = float(parsed.get("confidence", 0.7))
 
         if intent not in set(INTENT_LIST_AI):
             return None
         if scope not in ("NEARBY", "GENERAL", "NONE"):
             scope = "GENERAL"
+        if intent not in ("AI_QUERY", "FAQ"):
+            in_scope = True
 
         answer_text = clean_text_for_line(answer_part.strip()) if answer_part.strip() else None
 
@@ -768,13 +788,13 @@ def classify_and_maybe_answer(text: str, lang: str = "TH"):
                 pass
 
         result = {
-            "intent": intent, "scope": scope, "confidence": confidence,
+            "intent": intent, "scope": scope, "in_scope": in_scope, "confidence": confidence,
             "answer": answer_text, "sources": sources,
         }
         cache.general.set(cache_key, result, ttl=120)
 
         elapsed = (time.time() - start_time) * 1000
-        Logger.perf("ClassifyAnswer", "combined_call", elapsed, {"intent": intent, "had_answer": bool(answer_text)})
+        Logger.perf("ClassifyAnswer", "combined_call", elapsed, {"intent": intent, "in_scope": in_scope, "had_answer": bool(answer_text)})
         return result
     except Exception as e:
         Logger.info("ClassifyAnswer", f"Combined call failed, falling back to two-step flow: {e}")
@@ -785,15 +805,32 @@ def classify_intent_ai(text: str) -> dict:
     """
     AI-based intent + scope classifier — this is what free-text (non-menu)
     messages are routed through now, replacing keyword guessing. Returns
-    {"intent": str, "scope": "NEARBY"|"GENERAL"|"NONE", "confidence": float}.
+    {"intent": str, "scope": "NEARBY"|"GENERAL"|"NONE", "in_scope": bool, "confidence": float}.
+
+    "in_scope" is the hard scope gate for AI_QUERY/FAQ: it's decided right
+    here, at classification time, instead of being left to the later
+    answer-generation call to notice and self-refuse. That matters because
+    the generation call is also told to always use Google Search, and in
+    practice that "always search" instinct can win out over a softer
+    "refuse if off-topic" instruction — a model asked to both judge scope
+    AND draft a helpful answer in the same breath will sometimes just
+    answer harmless-seeming trivia (e.g. "ยีราฟคอยาวกี่เมตร") instead of
+    declining. Deciding in_scope here, before any answer is drafted, means
+    the caller can skip generation (and Google Search) entirely for a
+    genuinely off-topic question and show a fixed decline message instead
+    — no reliance on the generation step remembering to refuse itself.
 
     Always falls back to the old rule-based IntentClassifier.classify() if
     Gemini is unavailable, errors out, or returns something that can't be
     parsed as valid JSON/intent — so the bot never gets stuck without an
-    intent just because the AI call had a hiccup.
+    intent just because the AI call had a hiccup. The fallback defaults to
+    in_scope=True (fail-open) since the rule-based classifier has no way to
+    judge topic relevance — this only matters on the rare occasion Gemini
+    itself is fully unavailable, and erring toward "answer it" there is
+    better for availability than silently blocking legitimate questions.
     """
     fallback_intent, fallback_conf = IntentClassifier.classify(text)
-    fallback = {"intent": fallback_intent, "scope": "GENERAL", "confidence": fallback_conf}
+    fallback = {"intent": fallback_intent, "scope": "GENERAL", "in_scope": True, "confidence": fallback_conf}
 
     if not text or not text.strip():
         return fallback
@@ -825,6 +862,7 @@ def classify_intent_ai(text: str) -> dict:
 
         intent = str(parsed.get("intent", "")).strip().upper()
         scope = str(parsed.get("scope", "GENERAL")).strip().upper()
+        in_scope = bool(parsed.get("in_scope", True))
         confidence = float(parsed.get("confidence", 0.7))
 
         if intent not in set(INTENT_LIST_AI):
@@ -832,12 +870,17 @@ def classify_intent_ai(text: str) -> dict:
             return fallback
         if scope not in ("NEARBY", "GENERAL", "NONE"):
             scope = "GENERAL"
+        # in_scope only ever matters for AI_QUERY/FAQ — force True for every
+        # other intent so a model slip on this field can't block a real
+        # SOS/SHELTER/etc. flow.
+        if intent not in ("AI_QUERY", "FAQ"):
+            in_scope = True
 
-        result = {"intent": intent, "scope": scope, "confidence": confidence}
+        result = {"intent": intent, "scope": scope, "in_scope": in_scope, "confidence": confidence}
         cache.general.set(cache_key, result, ttl=120)
 
         elapsed = (time.time() - start_time) * 1000
-        Logger.perf("IntentAI", "classify", elapsed, {"intent": intent, "scope": scope})
+        Logger.perf("IntentAI", "classify", elapsed, {"intent": intent, "scope": scope, "in_scope": in_scope})
         return result
     except Exception as e:
         Logger.error("IntentAI", f"Classification failed, using keyword fallback: {e}")
@@ -1039,6 +1082,41 @@ def update_legacy_state(user_id: str, state: str, data: dict = None):
 
 gemini_model = None
 _gemini_initialized = False
+
+
+def get_out_of_scope_decline_text(lang: str = "TH") -> str:
+    """
+    Fixed, deterministic decline message for AI_QUERY/FAQ questions the
+    classifier has flagged as in_scope=False (general trivia with no
+    connection at all to flooding/safety/accidents/disaster health — e.g.
+    "ยีราฟคอยาวกี่เมตร", "นักแข่ง F1 มีกี่คน").
+
+    This is plain Python string selection, not model output — intentionally
+    bypassing Gemini entirely for these cases. Relying on the model to
+    notice a question is off-topic *and* choose to refuse in the same
+    generation step it could otherwise just answer has proven unreliable in
+    practice (the "always search before answering" instruction tends to
+    win out over a softer "refuse if off-topic" one for harmless-seeming
+    trivia). Deciding in_scope at classification time and short-circuiting
+    to this fixed text guarantees the refusal actually happens, and as a
+    bonus skips a wasted Gemini + Google Search call entirely.
+    """
+    if lang == "MY":
+        return (
+            "Maaf, saya direka khas untuk membantu isu banjir, keselamatan, kemalangan, "
+            "dan kesihatan yang berkaitan bencana sahaja. Taip 'ทำอะไรได้บ้าง' untuk lihat "
+            "apa yang boleh saya bantu."
+        )
+    if lang == "EN":
+        return (
+            "Sorry, I'm built to help specifically with flooding, safety, accidents, and "
+            "disaster-related health questions. Type \"what can you do\" to see what I can help with."
+        )
+    return (
+        "ขออภัยครับ ผมถูกออกแบบมาเพื่อช่วยเหลือเฉพาะเรื่องน้ำท่วม ความปลอดภัย อุบัติเหตุ "
+        "และสุขภาพที่เกี่ยวข้องกับภัยพิบัติเท่านั้นครับ พิมพ์ 'ทำอะไรได้บ้าง' เพื่อดูสิ่งที่ผมช่วยได้ครับ"
+    )
+
 
 FLOODCARE_SYSTEM_INSTRUCTION = (
     "คุณคือ FLOODCARE AI ผู้ช่วยอัจฉริยะด้านภัยน้ำท่วมและเหตุฉุกเฉินในประเทศไทย\n"
