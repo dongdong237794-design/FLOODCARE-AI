@@ -924,25 +924,38 @@ function getSituationStyle(situation) {
 function initWaterMap() {
   if (appState.map) return; // Prevent duplicate initialization
 
-  appState.map = L.map('map', {
-    zoomControl: false,
-    attributionControl: false,
-    maxZoom: 18,
-    minZoom: 5
-  }).setView([6.65, 101.30], 9); // Center Southern Thailand flood monitoring region
+  if (typeof L === 'undefined' || typeof L.map !== 'function') {
+    const el = document.getElementById('map');
+    if (el) {
+      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:24px;text-align:center;color:#64748B;font-size:13px;">ไม่สามารถโหลดแผนที่ได้ (การเชื่อมต่ออินเทอร์เน็ตหรือ CDN ขัดข้อง)<br>รายการสถานีด้านล่างยังใช้งานได้ตามปกติ</div>';
+    }
+    return;
+  }
 
-  appState.tileLayer = L.tileLayer(TILE_LAYERS[appState.currentTile], {
-    maxZoom: 18,
-    subdomains: 'abcd'
-  }).addTo(appState.map);
+  try {
+    appState.map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false,
+      maxZoom: 18,
+      minZoom: 5
+    }).setView([6.65, 101.30], 9); // Center Southern Thailand flood monitoring region
 
-  // Clean Zoom Control on Top-Right
-  L.control.zoom({ position: 'topright' }).addTo(appState.map);
+    appState.tileLayer = L.tileLayer(TILE_LAYERS[appState.currentTile], {
+      maxZoom: 18,
+      subdomains: 'abcd'
+    }).addTo(appState.map);
 
-  // Resize handling
-  setTimeout(() => {
-    if (appState.map) appState.map.invalidateSize();
-  }, 200);
+    // Clean Zoom Control on Top-Right
+    L.control.zoom({ position: 'topright' }).addTo(appState.map);
+
+    // Resize handling
+    setTimeout(() => {
+      if (appState.map) appState.map.invalidateSize();
+    }, 200);
+  } catch (e) {
+    console.error('initWaterMap failed:', e);
+    appState.map = null;
+  }
 }
 
 /* ── 2. Marker Custom Icon Factory ── */
@@ -1293,10 +1306,18 @@ async function fetchWaterStations(isBackground = false) {
       appState.abortController.abort();
     }
     appState.abortController = new AbortController();
+    // Hard timeout on top of the "abort the previous request" controller
+    // above — without this, a truly stalled connection (server hung, not
+    // just slow) would never reject on its own and the 90s auto-refresh
+    // tick would just keep stacking silently-pending requests.
+    const timeoutId = setTimeout(() => appState.abortController.abort(), 15000);
 
     const res = await fetch('/api/water-stations', {
       signal: appState.abortController.signal
     });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
 
     if (!data.success) throw new Error('API reported failure');
@@ -1390,7 +1411,13 @@ async function locateUserAndFindNearest() {
 
       // Query nearest stations API
       try {
-        const res = await fetch(`/api/water-stations/nearest?lat=${latitude}&lon=${longitude}&limit=6`);
+        const nearController = new AbortController();
+        const nearTimeoutId = setTimeout(() => nearController.abort(), 15000);
+        const res = await fetch(`/api/water-stations/nearest?lat=${latitude}&lon=${longitude}&limit=6`, {
+          signal: nearController.signal
+        });
+        clearTimeout(nearTimeoutId);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         const nearestList = data.stations || data.nearest || [];
 
@@ -1547,16 +1574,33 @@ function bindGlobalEvents() {
 
 /* ── 15. Application Boot ── */
 document.addEventListener('DOMContentLoaded', () => {
-  initWaterMap();
-  setupSearch();
-  setupLayerToggle();
-  bindGlobalEvents();
-  
+  // Each boot step wrapped independently so one failure (e.g. map/CDN)
+  // can't stop the rest (search, filters, data fetch, auto-refresh) from
+  // initializing — a page that's half-broken is much better than one
+  // that's entirely inert because of a single early exception.
+  try { initWaterMap(); } catch (e) { console.error('initWaterMap boot failed:', e); }
+  try { setupSearch(); } catch (e) { console.error('setupSearch failed:', e); }
+  try { setupLayerToggle(); } catch (e) { console.error('setupLayerToggle failed:', e); }
+  try { bindGlobalEvents(); } catch (e) { console.error('bindGlobalEvents failed:', e); }
+
   // Initial fetch
   fetchWaterStations(false);
 
   // Auto-refresh every 90 seconds
   appState.refreshTimer = setInterval(() => fetchWaterStations(true), 90000);
+
+  // Pause polling while the tab is hidden, resume with an immediate
+  // refresh when it becomes visible again — avoids piling up background
+  // requests in inactive tabs and keeps data fresh the moment someone
+  // comes back to check it.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (appState.refreshTimer) { clearInterval(appState.refreshTimer); appState.refreshTimer = null; }
+    } else {
+      fetchWaterStations(true);
+      if (!appState.refreshTimer) appState.refreshTimer = setInterval(() => fetchWaterStations(true), 90000);
+    }
+  });
 });
 </script>
 </body>
