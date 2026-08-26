@@ -3129,7 +3129,7 @@ const FACILITIES = ['ไฟฟ้า','น้ำสะอาด','อินเ�
 
 let state = {
   data: { stats:{}, sos_cases:[], shelters:[], needs:[] },
-  ok: false, selectedId: null,
+  ok: false, hasLoadedOnce: false, selectedId: null,
   sosSearch: '', sosPrio: 'ALL', sosStat: 'ALL',
   needsSearch: '', needsUrg: 'ALL', needsStat: 'ALL',
   shelterStep: parseInt(localStorage.getItem('floodcare_shelter_step')) || 10,
@@ -3163,6 +3163,19 @@ const addressData = {
 };
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+/* Shared fetch-with-timeout: every mutating API call (SOS/needs status,
+   shelter create/occupancy, broadcast) goes through this so a stalled
+   connection can never leave a button stuck in its "pending" spinner
+   state forever — without a timeout, a hung fetch() promise never
+   resolves/rejects, so the calling function's finally{} block (which
+   clears the pending flag) would never run either. */
+function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timeoutId));
+}
 
 function dist(lat1, lon1, lat2, lon2) {
   const R = 6371; // km radius
@@ -3309,28 +3322,59 @@ const clusterOptions = {
   }
 };
 
+function _mapLibReady() {
+  return typeof L !== 'undefined' && typeof L.map === 'function';
+}
+
+function _showMapLoadError(el) {
+  if (!el) return;
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:24px;text-align:center;color:var(--muted, #8C8980);font-size:13px;">' +
+    'ไม่สามารถโหลดแผนที่ได้ (การเชื่อมต่ออินเทอร์เน็ตหรือ CDN ขัดข้อง)<br>ข้อมูลเคส/สถิติส่วนอื่นยังใช้งานได้ตามปกติ' +
+    '</div>';
+}
+
 function initDashMap() {
   if (dashMap) return;
   const el = document.getElementById('dashMap');
   if (!el) return;
-  dashMap = L.map('dashMap', { zoomControl: false, attributionControl: false }).setView([13.8, 100.6], 11);
-  dashTileLayer = L.tileLayer(state.settings.darkMode ? darkTile : lightTile, { maxZoom: 19 }).addTo(dashMap);
-  dashClusterGroup = L.markerClusterGroup(clusterOptions).addTo(dashMap);
+  if (!_mapLibReady()) { _showMapLoadError(el); return; }
+  try {
+    dashMap = L.map('dashMap', { zoomControl: false, attributionControl: false }).setView([13.8, 100.6], 11);
+    dashTileLayer = L.tileLayer(state.settings.darkMode ? darkTile : lightTile, { maxZoom: 19 }).addTo(dashMap);
+    dashClusterGroup = L.markerClusterGroup(clusterOptions).addTo(dashMap);
+  } catch (e) {
+    console.error('initDashMap failed:', e);
+    dashMap = null;
+    _showMapLoadError(el);
+  }
 }
 
 function initFullMap() {
   if (fullMap) return;
   const el = document.getElementById('fullMap');
   if (!el) return;
-  fullMap = L.map('fullMap', { attributionControl: false }).setView([13.8, 100.6], 11);
-  fullTileLayer = L.tileLayer(state.settings.darkMode ? darkTile : lightTile, { maxZoom: 19 }).addTo(fullMap);
-  fullClusterGroup = L.markerClusterGroup(clusterOptions).addTo(fullMap);
-  initMapShelterSearch();
+  if (!_mapLibReady()) { _showMapLoadError(el); return; }
+  try {
+    fullMap = L.map('fullMap', { attributionControl: false }).setView([13.8, 100.6], 11);
+    fullTileLayer = L.tileLayer(state.settings.darkMode ? darkTile : lightTile, { maxZoom: 19 }).addTo(fullMap);
+    fullClusterGroup = L.markerClusterGroup(clusterOptions).addTo(fullMap);
+    initMapShelterSearch();
+  } catch (e) {
+    console.error('initFullMap failed:', e);
+    fullMap = null;
+    _showMapLoadError(el);
+  }
 }
 
 function initMaps() {
-  // Lazy init: only initialize the map for the active tab (dashMap by default)
-  initDashMap();
+  // Lazy init: only initialize the map for the active tab (dashMap by default).
+  // Wrapped so a map/CDN failure never stops the rest of boot (data loading,
+  // polling, nav) from running — see call site below.
+  try {
+    initDashMap();
+  } catch (e) {
+    console.error('initMaps failed:', e);
+  }
 }
 
 function toggleDarkMode(isDark){
@@ -3833,6 +3877,12 @@ async function reverseGeocodeAndFill(lat, lon){
 
 let modalMap, modalMarker;
 function initModalMap(){
+  if (!_mapLibReady()) {
+    const el = document.getElementById('modalMap');
+    if (el) _showMapLoadError(el);
+    return;
+  }
+  try {
   if(!modalMap){
     modalMap = L.map('modalMap',{attributionControl:false}).setView([13.75,100.5],6);
     L.tileLayer(lightTile,{maxZoom:19}).addTo(modalMap);
@@ -3862,6 +3912,11 @@ function initModalMap(){
     modalMap.setView([13.75,100.5], 6);
   }
   setTimeout(()=>modalMap.invalidateSize(),250);
+  } catch (e) {
+    console.error('initModalMap failed:', e);
+    const el = document.getElementById('modalMap');
+    if (el) _showMapLoadError(el);
+  }
 }
 
 function initDropdowns(){
@@ -4137,7 +4192,7 @@ document.getElementById('alertSendBtn').addEventListener('click', async ()=>{
 
   btn.disabled=true; btn.innerHTML='<i class="ph ph-spinner"></i> กำลังส่ง...';
   try{
-    const res=await fetch('/api/dashboard/alerts/broadcast',{
+    const res=await fetchWithTimeout('/api/dashboard/alerts/broadcast',{
       method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({message})
     });
@@ -4337,7 +4392,7 @@ function renderDashboardSosList(){
   document.getElementById('sosCountBadge').textContent=(state.data.sos_cases||[]).length;
   document.getElementById('shCountBadge').textContent=(state.data.shelters||[]).length;
   const el=document.getElementById('sosListDash');
-  if(!state.ok && !cases.length){ el.innerHTML=`<div class="empty-msg">กำลังโหลดข้อมูล...</div>`; return; }
+  if(!state.ok && !cases.length){ el.innerHTML=`<div class="empty-msg">${state.hasLoadedOnce ? 'ขาดการเชื่อมต่อกับเซิร์ฟเวอร์ กำลังลองใหม่อัตโนมัติ...' : 'กำลังโหลดข้อมูล...'}</div>`; return; }
   if(!cases.length){ el.innerHTML=`<div class="empty-msg"><i class="ph ph-check-circle"></i>ไม่มีเคส SOS ในขณะนี้</div>`; return; }
   el.innerHTML=cases.map((c,i)=>sosCardHtml(c,i)).join('');
 }
@@ -4431,7 +4486,7 @@ function renderSosPage(){
   document.getElementById('sosSubhead').textContent=`แสดง ${filtered.length} จาก ${all.length} เคส`;
   const grid=document.getElementById('sosCardGrid');
   if(!filtered.length){
-    grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-siren"></i>${state.ok?'ไม่พบเคสที่ค้นหา':'กำลังโหลดข้อมูล...'}</div>`;
+    grid.innerHTML=`<div class="empty-msg" style="grid-column:1/-1;"><i class="ph ph-siren"></i>${state.ok?'ไม่พบเคสที่ค้นหา':(state.hasLoadedOnce?'ขาดการเชื่อมต่อกับเซิร์ฟเวอร์':'กำลังโหลดข้อมูล...')}</div>`;
     return;
   }
   grid.innerHTML=filtered.map(c=>sosFullCardHtml(c)).join('');
@@ -4771,9 +4826,21 @@ function renderAnalytics(){
 ============================================================ */
 
 /* ── 1. ดึงข้อมูลทั้งหมดจากเซิร์ฟเวอร์ (อัปเดตออโต้) ── */
+let _loadDataInFlight = false;
 async function loadData(){
+  // Overlap guard: if a slow/hung request from the previous 30s tick is
+  // still pending, skip this tick instead of piling up parallel requests.
+  if (_loadDataInFlight) return;
+  _loadDataInFlight = true;
+
+  // Hard timeout so a stalled connection can't hang forever — after 15s
+  // we abort and treat it as a failure (the status pill flips to
+  // "ขาดการเชื่อมต่อ" and the next 30s tick tries again).
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
   try{
-    const res=await fetch('/api/dashboard/data',{credentials:'same-origin'});
+    const res=await fetch('/api/dashboard/data',{credentials:'same-origin', signal: controller.signal});
     if(res.status===401){ window.location.href='/dashboard/login'; return; }
     if(!res.ok) throw new Error('HTTP '+res.status);
     const json=await res.json();
@@ -4781,6 +4848,11 @@ async function loadData(){
     state.ok=true;
     notifCheckForNewCases(state.data.sos_cases, state.data.needs);
   }catch(e){ state.ok=false; }
+  finally {
+    clearTimeout(timeoutId);
+    _loadDataInFlight = false;
+    state.hasLoadedOnce = true;
+  }
   renderAll();
 }
 
@@ -4790,7 +4862,7 @@ async function updateSosStatus(id,status){
   const isClaim = status === 'IN_PROGRESS';
   const responder_name = isClaim ? getVolunteerName() : undefined;
   try{
-    const res=await fetch(`/api/dashboard/sos/${encodeURIComponent(id)}/status`,{
+    const res=await fetchWithTimeout(`/api/dashboard/sos/${encodeURIComponent(id)}/status`,{
       method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(isClaim ? {status, responder_name} : {status})
     });
@@ -4822,7 +4894,7 @@ document.getElementById('f_submit').addEventListener('click',async()=>{
   }
   btn.innerHTML='<i class="ph ph-spinner"></i> กำลังบันทึก...'; btn.disabled=true;
   try{
-    const res=await fetch('/api/dashboard/shelters',{
+    const res=await fetchWithTimeout('/api/dashboard/shelters',{
       method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         id,name,
@@ -4858,7 +4930,7 @@ async function updateNeedStatus(id, status) {
   const isClaim = status === 'IN_PROGRESS';
   const volunteer_name = isClaim ? getVolunteerName() : undefined;
   try{
-    const res=await fetch(`/api/dashboard/needs/${encodeURIComponent(id)}/status`,{
+    const res=await fetchWithTimeout(`/api/dashboard/needs/${encodeURIComponent(id)}/status`,{
       method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(isClaim ? {status, volunteer_name} : {status})
     });
@@ -4900,7 +4972,7 @@ function handleOccupancyInput(shelterId, inputElement) {
 
 async function syncOccupancyToServer(shelterId, newOccupancy) {
   try {
-    await fetch(`/api/dashboard/shelters/${encodeURIComponent(shelterId)}/occupancy`, {
+    await fetchWithTimeout(`/api/dashboard/shelters/${encodeURIComponent(shelterId)}/occupancy`, {
       method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ occupancy: newOccupancy })
     });
