@@ -1452,12 +1452,108 @@ class SheetsManager:
             
             try:
                 json_str = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
-                if json_str.startswith("'") and json_str.endswith("'"):
+                # Strip ONE matching layer of wrapping quotes at a time, repeatedly —
+                # not just once — because some hosting platforms' env var UIs add
+                # their own outer quoting on top of whatever the user pasted, so a
+                # value can end up wrapped twice (e.g. '"{...}"'). The old single-pass
+                # version only handled one layer, and — critically — never checked
+                # whether stripping had left nothing behind, so a value that was
+                # accidentally set to just `""` or `''` silently became an empty
+                # string and only failed later, inside json.loads(), with the
+                # opaque "Expecting value: line 1 column 1 (char 0)" message that
+                # gives no hint the actual problem is an empty/misconfigured env var.
+                while len(json_str) >= 2 and (
+                    (json_str[0] == "'" and json_str[-1] == "'") or
+                    (json_str[0] == '"' and json_str[-1] == '"')
+                ):
                     json_str = json_str[1:-1].strip()
-                if json_str.startswith('"') and json_str.endswith('"'):
-                    json_str = json_str[1:-1].strip()
-                
-                creds_dict = json.loads(json_str)
+
+                # SAFE Render diagnostics: never print the actual credential/private_key.
+                # These logs reveal only shape/metadata so we can diagnose malformed env vars.
+                Logger.info(
+                    "Sheets",
+                    "GOOGLE_SERVICE_ACCOUNT_JSON diagnostic: "
+                    f"present={bool(GOOGLE_SERVICE_ACCOUNT_JSON)}, "
+                    f"length={len(json_str)}, "
+                    f"starts_with_brace={json_str.startswith('{')}, "
+                    f"ends_with_brace={json_str.endswith('}')}, "
+                    f"has_newline={chr(10) in json_str}, "
+                    f"has_literal_backslash_n={'\\n' in json_str}, "
+                    f"has_private_key_field={'\"private_key\"' in json_str}, "
+                    f"has_client_email_field={'\"client_email\"' in json_str}"
+                )
+
+                Logger.info(
+                    "Sheets",
+                    "GOOGLE_SHEET_ID diagnostic: "
+                    f"present={bool(GOOGLE_SHEET_ID)}, "
+                    f"length={len(GOOGLE_SHEET_ID.strip())}"
+                )
+
+                if not json_str:
+                    self._last_error = (
+                        "GOOGLE_SERVICE_ACCOUNT_JSON is set but resolves to an empty "
+                        "string once wrapping quotes are stripped — check the value on "
+                        "your hosting platform: it's currently just quote characters "
+                        "with no JSON content (e.g. set to \"\" instead of the actual "
+                        "service account JSON)."
+                    )
+                    self._initialized = True
+                    Logger.error("Sheets", f"Init failed: {self._last_error}")
+                    return None
+
+                if not json_str.startswith("{"):
+                    # Catches the other common failure: only part of the value made
+                    # it through (e.g. a literal newline inside private_key caused
+                    # the platform's env var field to cut the paste short), so what
+                    # we have isn't JSON at all — surface a preview instead of the
+                    # generic JSONDecodeError so it's obvious at a glance.
+                    preview = json_str[:40].replace("\n", "\\n")
+                    self._last_error = (
+                        f"GOOGLE_SERVICE_ACCOUNT_JSON doesn't look like JSON (should start "
+                        f"with '{{') — got: '{preview}...'. This usually means the paste got "
+                        f"truncated, often by a literal newline inside the private_key field."
+                    )
+                    self._initialized = True
+                    Logger.error("Sheets", f"Init failed: {self._last_error}")
+                    return None
+
+                try:
+                    creds_dict = json.loads(json_str)
+                except json.JSONDecodeError as je:
+                    self._last_error = (
+                        f"GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON ({je}) — "
+                        f"length={len(json_str)} chars, starts with "
+                        f"'{json_str[:30].replace(chr(10), chr(92)+'n')}...'. "
+                        "Re-copy the full service account key file exactly as downloaded "
+                        "from Google Cloud Console, with no manual edits."
+                    )
+                    self._initialized = True
+                    Logger.error("Sheets", f"Init failed: {self._last_error}")
+                    return None
+
+                required_keys = ("type", "private_key", "client_email", "token_uri")
+                missing = [k for k in required_keys if not creds_dict.get(k)]
+
+                Logger.info(
+                    "Sheets",
+                    "GOOGLE_SERVICE_ACCOUNT_JSON parsed successfully: "
+                    f"type={creds_dict.get('type')!r}, "
+                    f"has_private_key={bool(creds_dict.get('private_key'))}, "
+                    f"has_client_email={bool(creds_dict.get('client_email'))}, "
+                    f"has_token_uri={bool(creds_dict.get('token_uri'))}, "
+                    f"missing={missing}"
+                )
+                if missing:
+                    self._last_error = (
+                        f"GOOGLE_SERVICE_ACCOUNT_JSON parsed as JSON but is missing "
+                        f"required service-account field(s): {', '.join(missing)}. "
+                        "Make sure the full key file was pasted, not a partial copy."
+                    )
+                    self._initialized = True
+                    Logger.error("Sheets", f"Init failed: {self._last_error}")
+                    return None
+
                 self._client = gspread.service_account_from_dict(creds_dict)
                 self._initialized = True
                 
@@ -1641,11 +1737,44 @@ class SheetsManager:
             # numeric fields we actually need as numbers (Capacity, lat/lon,
             # etc.) are already cast explicitly with int()/float() by the
             # calling code, so this is safe to apply everywhere.
-            records = ws.get_all_records(numericise_ignore=['all'])
+            # Read raw values instead of relying solely on gspread.get_all_records().
+            # This is robust to blank/duplicate headers and gspread version differences.
+            values = ws.get_all_values()
+            if not values:
+                cache.sheets.set(cache_key, [], ttl=300)
+                return []
+
+            headers = [str(h).strip() for h in values[0]]
+
+            # Make headers safe for dictionary access.
+            normalized_headers = []
+            seen = {}
+            for idx, header in enumerate(headers, start=1):
+                base = header or f"_column_{idx}"
+                count = seen.get(base, 0) + 1
+                seen[base] = count
+                normalized_headers.append(
+                    base if count == 1 else f"{base}_{count}"
+                )
+
+            records = [
+                {
+                    normalized_headers[col_idx]:
+                        (row[col_idx] if col_idx < len(row) else "")
+                    for col_idx in range(len(normalized_headers))
+                }
+                for row in values[1:]
+                if any(str(cell).strip() for cell in row)
+            ]
+
             cache.sheets.set(cache_key, records, ttl=300)
             return records
         except Exception as e:
-            Logger.error("Sheets", f"Get records error: {e}")
+            Logger.error(
+                "Sheets",
+                f"Get records error | worksheet={worksheet_name!r} | "
+                f"error_type={type(e).__name__} | error_repr={e!r}"
+            )
             return []
     
     def update_row_by_id(self, worksheet_name: str, id_column: str, id_value: str, update_dict: dict) -> bool:
