@@ -1452,12 +1452,76 @@ class SheetsManager:
             
             try:
                 json_str = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
-                if json_str.startswith("'") and json_str.endswith("'"):
+                # Strip ONE matching layer of wrapping quotes at a time, repeatedly —
+                # not just once — because some hosting platforms' env var UIs add
+                # their own outer quoting on top of whatever the user pasted, so a
+                # value can end up wrapped twice (e.g. '"{...}"'). The old single-pass
+                # version only handled one layer, and — critically — never checked
+                # whether stripping had left nothing behind, so a value that was
+                # accidentally set to just `""` or `''` silently became an empty
+                # string and only failed later, inside json.loads(), with the
+                # opaque "Expecting value: line 1 column 1 (char 0)" message that
+                # gives no hint the actual problem is an empty/misconfigured env var.
+                while len(json_str) >= 2 and (
+                    (json_str[0] == "'" and json_str[-1] == "'") or
+                    (json_str[0] == '"' and json_str[-1] == '"')
+                ):
                     json_str = json_str[1:-1].strip()
-                if json_str.startswith('"') and json_str.endswith('"'):
-                    json_str = json_str[1:-1].strip()
-                
-                creds_dict = json.loads(json_str)
+
+                if not json_str:
+                    self._last_error = (
+                        "GOOGLE_SERVICE_ACCOUNT_JSON is set but resolves to an empty "
+                        "string once wrapping quotes are stripped — check the value on "
+                        "your hosting platform: it's currently just quote characters "
+                        "with no JSON content (e.g. set to \"\" instead of the actual "
+                        "service account JSON)."
+                    )
+                    self._initialized = True
+                    Logger.error("Sheets", f"Init failed: {self._last_error}")
+                    return None
+
+                if not json_str.startswith("{"):
+                    # Catches the other common failure: only part of the value made
+                    # it through (e.g. a literal newline inside private_key caused
+                    # the platform's env var field to cut the paste short), so what
+                    # we have isn't JSON at all — surface a preview instead of the
+                    # generic JSONDecodeError so it's obvious at a glance.
+                    preview = json_str[:40].replace("\n", "\\n")
+                    self._last_error = (
+                        f"GOOGLE_SERVICE_ACCOUNT_JSON doesn't look like JSON (should start "
+                        f"with '{{') — got: '{preview}...'. This usually means the paste got "
+                        f"truncated, often by a literal newline inside the private_key field."
+                    )
+                    self._initialized = True
+                    Logger.error("Sheets", f"Init failed: {self._last_error}")
+                    return None
+
+                try:
+                    creds_dict = json.loads(json_str)
+                except json.JSONDecodeError as je:
+                    self._last_error = (
+                        f"GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON ({je}) — "
+                        f"length={len(json_str)} chars, starts with "
+                        f"'{json_str[:30].replace(chr(10), chr(92)+'n')}...'. "
+                        "Re-copy the full service account key file exactly as downloaded "
+                        "from Google Cloud Console, with no manual edits."
+                    )
+                    self._initialized = True
+                    Logger.error("Sheets", f"Init failed: {self._last_error}")
+                    return None
+
+                required_keys = ("type", "private_key", "client_email", "token_uri")
+                missing = [k for k in required_keys if not creds_dict.get(k)]
+                if missing:
+                    self._last_error = (
+                        f"GOOGLE_SERVICE_ACCOUNT_JSON parsed as JSON but is missing "
+                        f"required service-account field(s): {', '.join(missing)}. "
+                        "Make sure the full key file was pasted, not a partial copy."
+                    )
+                    self._initialized = True
+                    Logger.error("Sheets", f"Init failed: {self._last_error}")
+                    return None
+
                 self._client = gspread.service_account_from_dict(creds_dict)
                 self._initialized = True
                 
